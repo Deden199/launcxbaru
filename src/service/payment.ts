@@ -173,7 +173,7 @@ if (mName === 'oy') {
 
   // 2) Panggil API OY
   const oyClient = new OyClient({
-    baseURL:  config.api.oy.baseUrl,
+    baseUrl:  config.api.oy.baseUrl,
     username: config.api.oy.username,
     apiKey:   config.api.oy.apiKey,
   })

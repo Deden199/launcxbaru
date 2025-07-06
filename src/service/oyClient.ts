@@ -7,7 +7,7 @@ import axios, {
 import logger from '../logger';
 
 interface OyConfig {
-  baseURL: string;     // base URL tanpa path, misal https://partner.oyindonesia.com
+  baseUrl: string;    // ← ganti baseURL jadi baseUrl
   username: string;
   apiKey: string;
 }
@@ -81,10 +81,9 @@ interface PaymentRoutingResponse {
 
 export default class OyClient {
   private client: AxiosInstance;
-
   constructor(config: OyConfig) {
     this.client = axios.create({
-      baseURL: config.baseURL,
+      baseURL: config.baseUrl,
       headers: {
         'Content-Type':  'application/json',
         'Accept':        'application/json',

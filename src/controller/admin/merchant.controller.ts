@@ -6,14 +6,15 @@ import axios from 'axios'
 import HilogateClient from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
 import OyClient          from '../../service/oyClient'    // sesuaikan path
+import { config } from '../../config';
 
 
 const prisma = new PrismaClient();
-const oyClient = new OyClient({
-  baseURL:   process.env.OY_BASE_URL!,
-  username:  process.env.OY_USERNAME!,
-  apiKey:    process.env.OY_API_KEY!
-})
+  const oyClient = new OyClient({
+    baseUrl:  config.api.oy.baseUrl,
+    username: config.api.oy.username,
+    apiKey:   config.api.oy.apiKey,
+  })
 // 1. Create merchant (mdr wajib)
 export const createMerchant = async (req: Request, res: Response) => {
   const { name, phoneNumber, email, telegram, mdr } = req.body;

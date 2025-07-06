@@ -25,8 +25,8 @@ export function scheduleSettlementChecker() {
 
       // (1) Grab semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
-        where: { status: 'PENDING_SETTLEMENT', merchantId: { not: null } },
-        select: { id: true, merchantId: true, pendingAmount: true, channel: true }
+        where: { status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
+        select: { id: true,    partnerClientId: true,   pendingAmount: true, channel: true }
       })
 
       // (2) Hilogate flow
@@ -55,7 +55,8 @@ export function scheduleSettlementChecker() {
           if (['ACTIVE', 'SETTLED', 'COMPLETED'].includes(settleSt)) {
             const netAmt = o.pendingAmount ?? tx.net_amount
             const updateResult = await prisma.order.updateMany({
-              where: { id: o.id, status: 'PENDING_SETTLEMENT' },
+              where: { id: o.id, status: 'PENDING_SETTLEMENT',    partnerClientId: { not: null }      // ← pakai partnerClientId, bukan merchantId
+ },
               data: {
                 status:           'SETTLED',
                 settlementAmount: netAmt,
@@ -66,7 +67,7 @@ export function scheduleSettlementChecker() {
             })
             if (updateResult.count > 0) {
               await prisma.partnerClient.update({
-                where: { id: o.merchantId! },
+                where: { id: o.partnerClientId! },
                 data: { balance: { increment: netAmt } }
               })
               logger.info(`[SettlementCron][HILOGATE] ${o.id} settled +${netAmt}`)
@@ -146,7 +147,8 @@ export function scheduleSettlementChecker() {
 
           // 3c) Update DB idempoten & kredit
           const updateResult = await prisma.order.updateMany({
-            where: { id: o.id, status: 'PENDING_SETTLEMENT' },
+            where: { id: o.id, status: 'PENDING_SETTLEMENT',    partnerClientId: { not: null }      // ← pakai partnerClientId, bukan merchantId
+ },
             data: {
               status:           'SETTLED',
               settlementAmount: netAmt,
@@ -158,7 +160,7 @@ export function scheduleSettlementChecker() {
           })
           if (updateResult.count > 0) {
             await prisma.partnerClient.update({
-              where: { id: o.merchantId! },
+              where: { id: o.partnerClientId! },
               data: { balance: { increment: netAmt } }
             })
             logger.info(`[SettlementCron][OY] ${o.id} settled +${netAmt} (fee=${fee})`)
