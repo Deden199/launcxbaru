@@ -1,0 +1,257 @@
+generator client {
+  provider      = "prisma-client-js"
+  engineType    = "binary"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+/// Status untuk disbursement
+enum DisbursementStatus {
+  CREATED
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+/// Status transaksi
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  WAIT_FOR_SETTLEMENT
+  READY_TO_DISBURSEMENT
+  DISBURSEMENT_SUCCESS
+  FAILED
+}
+
+/// Merchant utama
+model merchant {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  phoneNumber String
+  name        String
+  email       String?
+  telegram    String?
+  mdr         Float    @default(0.0)
+  createdAt   DateTime @default(now())
+
+  subMerchants          sub_merchant[]         @relation("MerchantSubMerchants")
+  transactionRequests   transaction_request[]  @relation("MerchantTransactionRequests")
+  disbursements         disbursement[]         @relation("MerchantDisbursements")
+  disbursement_accounts disbursement_account[] @relation("MerchantDisbursementAccount")
+}
+
+/// Koneksi PG per merchant, dengan fee
+model sub_merchant {
+  id             String @id @default(auto()) @map("_id") @db.ObjectId
+  merchantId     String @db.ObjectId
+  netzMerchantId String
+  netzPartnerId  String
+  fee            Float  @default(0.0)
+
+  merchant merchant @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
+}
+
+/// Transaksi
+model transaction_request {
+  id               String            @id @default(auto()) @map("_id") @db.ObjectId
+  merchantId       String?           @db.ObjectId
+  subMerchantId    String
+  buyerId          String
+  playerId         String?
+  amount           Int
+  status           TransactionStatus
+  createdAt        DateTime          @default(now())
+  paymentProvider  String?
+  gatewayCustom    String?
+  trxId            String?
+  ewalletUrl       String?
+  expiration       Int?
+  settlementAmount Int?
+  settlementAt     DateTime?
+  merchant         merchant?         @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
+}
+
+/// Simpan response mentah dari gateway
+model transaction_response {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  referenceId  String   @db.ObjectId
+  playerId     String?
+  responseBody Json
+  createdAt    DateTime @default(now())
+}
+
+/// Callback masuk dari gateway
+model transaction_callback {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  referenceId String?  @db.ObjectId
+  requestBody Json
+  createdAt   DateTime @default(now())
+}
+
+/// Callback disbursement
+model disbursement_callback {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  referenceId String?  @db.ObjectId
+  requestBody Json
+  createdAt   DateTime @default(now())
+}
+
+/// Beneficiary untuk disbursement
+type Beneficiary {
+  accountName   String
+  accountNumber String
+  bankCode      String
+}
+
+/// Disbursement
+model disbursement {
+  id          String             @id @default(auto()) @map("_id") @db.ObjectId
+  merchantId  String             @db.ObjectId
+  amount      BigInt
+  transferFee BigInt
+  totalAmount BigInt
+  beneficiary Beneficiary
+  status      DisbursementStatus
+  createdAt   DateTime           @default(now())
+
+  merchant merchant @relation("MerchantDisbursements", fields: [merchantId], references: [id])
+
+  @@map("disbursement")
+}
+
+/// Settlement record
+model settlement {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  transactionId  String   @db.ObjectId
+  settlementTime DateTime
+  settlementObj  Json
+
+  @@map("settlement")
+}
+
+/// Rekening untuk disburse
+model disbursement_account {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  merchantId  String @db.ObjectId
+  accountNo   String
+  bankCode    String
+  accountName String
+
+  merchant merchant @relation("MerchantDisbursementAccount", fields: [merchantId], references: [id])
+
+  @@map("disbursement_account")
+}
+
+model PartnerClient {
+  // treat _id in MongoDB as a string UUID
+  id               String           @id @default(uuid()) @map("_id")
+  name             String
+  apiKey           String           @unique
+  apiSecret        String
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  feePercent       Float            @default(0.5)
+  feeFlat          Float            @default(0)
+  balance          Float            @default(0.0)
+  callbackUrl      String?
+  callbackSecret   String?
+  allowedDomains   String[]
+
+  orders           Order[]          @relation("PartnerClientOrders")
+  defaultProvider  String?          @default("hilogate")
+  parentClientId   String?          @map("parentClientId")
+  parentClient     PartnerClient?   @relation("ParentChildren", fields: [parentClientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children         PartnerClient[]  @relation("ParentChildren")
+  users            ClientUser[]
+  withdraws        WithdrawRequest[]
+}
+
+model Order {
+  id               String           @id @default(uuid()) @map("_id")
+
+  // UUID string foreign key, nullable for existing orders
+  partnerClientId  String?          @map("partnerClientId")
+  partnerClient    PartnerClient?   @relation("PartnerClientOrders", fields: [partnerClientId], references: [id])
+
+  userId           String
+  playerId         String?
+  merchantId       String?
+  amount           Float
+  channel          String
+  settlementStatus String?
+  status           String           @default("PENDING")
+  pendingAmount    Float?
+  rrn              String?
+  settlementAmount Float?
+  fee3rdParty      Float?
+  feeLauncx        Float?
+  qrPayload        String?
+  checkoutUrl      String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+/// PartnerUser untuk login human
+model PartnerUser {
+  id        String   @id @default(uuid()) @map("_id")
+  name      String
+  email     String   @unique
+  password  String
+  role      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Key‐value settings
+model Setting {
+  id        String   @id @default(uuid()) @map("_id")
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Payment Gateway providers
+model PGProvider {
+  id          String     @id @default(uuid()) @map("_id")
+  name        String     @unique
+  credentials Json
+}
+
+model ClientUser {
+  id              String        @id @default(uuid()) @map("_id")
+  partnerClientId String        @map("partnerClientId")
+  email           String        @unique
+  password        String
+  role            String        @default("PARTNER_CLIENT")
+  isActive        Boolean       @default(true)
+  partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
+}
+
+model WithdrawRequest {
+  id                String             @id @default(uuid()) @map("_id")
+  refId             String             @unique
+  partnerClientId   String             @map("partnerClientId")
+  accountName       String
+  accountNameAlias  String
+  accountNumber     String
+  bankCode          String
+  bankName          String
+  branchName        String?
+  amount            Float
+  netAmount         Float?
+  paymentGatewayId  String?
+  isTransferProcess Boolean?           @default(false)
+  status            DisbursementStatus @default(PENDING)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  completedAt       DateTime?
+
+  partnerClient PartnerClient @relation(fields: [partnerClientId], references: [id])
+}
+
+

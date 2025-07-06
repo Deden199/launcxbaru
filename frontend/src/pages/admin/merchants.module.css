@@ -1,0 +1,180 @@
+/* src/pages/admin/merchants.module.css - Modern & Responsive Light Theme */
+
+/* Define theme variables per container for CSS Modules purity */
+.container {
+  /* Theme Variables */
+  --bg: #ffffff;
+  --surface: #f3f4f6;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --accent: #3b82f6;
+  --border: #e5e7eb;
+  --shadow: rgba(0, 0, 0, 0.05);
+
+  background-color: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 2rem;
+  font-family: 'Inter', sans-serif;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+  color: var(--text-primary);
+}
+
+/* Card Panel */
+.card {
+  background-color: var(--surface);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 8px 16px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px var(--shadow);
+}
+
+/* Card Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.meta {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+/* Form Row */
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)) auto;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.select,
+.input {
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  transition: border-color 0.2s;
+}
+
+.select:focus,
+.input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.button {
+  background-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.button:hover:enabled {
+  background-color: #1e40af; /* darker accent */
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Connection List */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  box-shadow: 0 2px 4px var(--shadow);
+  transition: background-color 0.2s;
+}
+
+.listItem:hover {
+  background-color: var(--bg);
+}
+
+.iconBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+}
+
+.iconBtn:hover {
+  color: var(--accent);
+  background-color: var(--surface);
+}
+
+.empty {
+  text-align: center;
+  color: #9ca3af;
+  padding: 2rem 0;
+  font-style: italic;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 640px) {
+  .formRow {
+    grid-template-columns: 1fr;
+  }
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .listItem {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}

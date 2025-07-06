@@ -1,0 +1,114 @@
+.wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: start;
+  padding: 4rem 1rem;
+  background: #f3f4f6;
+}
+.card {
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+}
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+.icon {
+  color: #4f46e5;
+  margin-right: 0.75rem;
+}
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+.field {
+  margin-bottom: 1.25rem;
+}
+.label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #475569;
+  margin-bottom: 0.5rem;
+}
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  transition: border-color 0.2s;
+}
+.input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+}
+.secretWrapper {
+  display: flex;
+  align-items: center;
+}
+.secretInput {
+  flex: 1;
+  margin-right: 0.5rem;
+}
+.copyButton {
+  background: #4f46e5;
+  border: none;
+  padding: 0.5rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.copyButton:hover {
+  background: #4338ca;
+}
+.button {
+  width: 100%;
+  background: #4f46e5;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+.button:not(:disabled):hover {
+  background: #4338ca;
+}
+.messageWrapper {
+  display: flex;
+  align-items: center;
+  margin-top: 1rem;
+}
+.message {
+  margin-left: 0.5rem;
+  font-size: 0.875rem;
+}
+.success {
+  color: #059669;
+}
+.error {
+  color: #dc2626;
+}
+.successIcon {
+  color: #059669;
+}
+.errorIcon {
+  color: #dc2626;
+}

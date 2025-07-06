@@ -1,0 +1,162 @@
+/* File: frontend/src/styles/ClientLayout.module.css */
+
+.container {
+  display: flex;
+  height: 100vh;
+  font-family: 'Inter', sans-serif;
+  background: #f3f4f6;
+}
+
+/* Sidebar */
+.sidebar {
+  background: #4f46e5;
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  width: 240px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  padding: 1.5rem;
+}
+
+.logoIcon {
+  font-size: 1.75rem;
+}
+
+.logoText {
+  margin-left: 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  color: #f1f5f9;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.navText {
+  white-space: nowrap;
+  font-size: 1rem;
+}
+
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem;
+  padding: 0.75rem;
+  background: rgba(255, 77, 79, 0.15);
+  border: none;
+  color: #ff4d4f;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.logoutBtn:hover {
+  background: rgba(255, 77, 79, 0.25);
+}
+
+
+
+.header {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  padding: 0 1.5rem;
+  height: 64px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  z-index: 10;
+}
+
+.toggleBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-right: 1rem;
+  color: #475569;
+  font-size: 1.25rem;
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.headerRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.iconBtn {
+  cursor: pointer;
+  color: #475569;
+  font-size: 1.25rem;
+}
+
+.avatar img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+/* Main */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #f3f4f6;
+  overflow-x: hidden;    /* <<< ini yang harus dipasang */
+}
+
+/* Content */
+.content {
+  flex: 1;
+  padding: 2rem;
+  overflow-y: auto;
+  /* jangan ubah overflow-x di sini */
+}
+
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar {
+    position: absolute;
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+}

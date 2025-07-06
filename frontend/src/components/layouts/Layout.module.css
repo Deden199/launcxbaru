@@ -1,0 +1,150 @@
+/* File: frontend/src/components/Layout.module.css */
+
+.container {
+  display: flex;
+  height: 100vh;
+  font-family: 'Inter', sans-serif;
+  background: #f3f4f6;
+}
+
+/* Sidebar */
+.sidebar {
+  background: #4f46e5;
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  z-index: 20;
+  transition: width 0.3s ease, opacity 0.3s ease;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  padding: 1.5rem;
+  cursor: pointer;
+}
+.logoIcon {
+  font-size: 1.75rem;
+}
+.logoText {
+  margin-left: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 1rem;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  color: #f1f5f9;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+.active {
+  background: rgba(255, 255, 255, 0.25);
+}
+.navText {
+  white-space: nowrap;
+  font-size: 1rem;
+}
+
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem;
+  padding: 0.75rem;
+  background: rgba(255, 77, 79, 0.15);
+  border: none;
+  color: #ff4d4f;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.logoutBtn:hover {
+  background: rgba(255, 77, 79, 0.25);
+}
+
+/* Backdrop */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10;
+}
+
+/* Main */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.header {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  padding: 0 1.5rem;
+  height: 64px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  z-index: 10;
+}
+
+.toggleBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-right: 1rem;
+  color: #475569;
+  font-size: 1.25rem;
+}
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+.headerRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.iconBtn {
+  cursor: pointer;
+  color: #475569;
+  font-size: 1.25rem;
+}
+
+.content {
+  flex: 1;
+  padding: 2rem;
+  background: #f3f4f6;
+  overflow-y: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    height: 100%;
+    width: 240px;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+}

@@ -1,0 +1,336 @@
+/* ==== GLOBAL ========================================================== */
+.container {
+  padding: 2rem;
+  background: #f3f4f6;
+  min-height: 100vh;
+  font-family: Inter, sans-serif;
+}
+.loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: #4b5563;
+  font-size: 1.25rem;
+}
+
+/* ==== FILTER BAR ====================================================== */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+.rangeControls {
+  display: flex;
+  gap: .75rem;
+  align-items: center;
+}
+.filters select,
+.filters input {
+  padding: .5rem .75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: .5rem;
+  font-size: .875rem;
+  background: #fff;
+}
+.filters button {
+  padding: .5rem .75rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: .5rem;
+  cursor: pointer;
+  transition: background .2s, transform .1s;
+}
+.filters button:hover {
+  background: #4f46e5;
+  transform: translateY(-1px);
+}
+.searchInput {
+  flex: 1;
+  padding: .5rem .75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: .5rem;
+  font-size: .875rem;
+  background: #fff;
+}
+.copyBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-left: .25rem;
+  vertical-align: middle;
+
+  opacity: .6;
+  transition: opacity .2s;
+  flex-shrink: 0;
+}
+.copyBtn:hover {
+  opacity: 1;
+}
+
+/* ==== STAT CARDS ===================================================== */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+.card {
+  background: #ffffff;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  transition: transform .2s, box-shadow .2s;
+  text-align: center;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+.cardIcon {
+  font-size: 2rem;
+  margin-bottom: .5rem;
+}
+.card h2 {
+  font-size: .875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #475569;
+  margin-bottom: .25rem;
+}
+.card p {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+.activeBalance {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+}
+.activeBalance h2,
+.activeBalance p {
+  color: #ffffff;
+}
+.pendingBalance {
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  color: #ffffff;
+}
+.pendingBalance .cardIcon {
+  color: #ffffff;
+}
+.pendingBalance h2,
+.pendingBalance p {
+  color: #ffffff;
+}
+
+/* ==== TABLE SECTION ================================================== */
+.tableSection {
+  background: #ffffff;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.tableSection h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 1rem;
+}
+
+.tableWrapper {
+  display: block;
+  overflow-x: auto;      /* scroll hanya di sini */
+  max-width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.table {
+  width: max-content;    /* lebar sesuai isi */
+  min-width:100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  white-space: nowrap;
+}
+
+.table thead tr {
+  background: #e0e7ff;
+}
+.table th,
+.table td {
+  padding: 1rem 1.25rem;
+  vertical-align: middle;
+  border-bottom: 1px solid #c7d2fe;
+  color: #475569;
+}
+.table th {
+  font-weight: 600;
+}
+/* opsional: buat header RRN sejajar */
+.rrnHeader {
+  display: inline-block;
+  width: 150px;
+  white-space: nowrap;
+}
+.table tbody tr:nth-child(even) {
+  background: #eef2ff;
+}
+.table tbody tr:hover {
+  background: #dbeafe;
+}
+.netSettle {
+  color: #059669;
+  font-weight: 600;
+}
+/* Net profit styling */
+.netProfit {
+  color: #059669;
+  font-weight: 600;
+}
+
+.rrnCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;       /* spasi antara teks & ikon */
+  max-width: 150px;  /* lebar maksimal kolom RRN */
+}
+
+/* Buat ikon copy tak mengubah flow baris */
+.copyBtn {
+  vertical-align: middle;
+  margin-left: .5rem;
+}
+.ellipsis {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.childSelector {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-family: var(--font-sans);
+}
+
+/* label teks */
+.childSelector label {
+  margin-right: 0.5rem;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+/* elemen select */
+.childSelector select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 0.375rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  color: #333;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+/* panah kustom di kanan */
+.childSelector select {
+  background-image: url("data:image/svg+xml,%3Csvg fill='none' stroke='%23666' stroke-width='2' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+}
+
+/* hover & focus */
+.childSelector select:hover {
+  border-color: #888;
+}
+.childSelector select:focus {
+  outline: none;
+  border-color: #555;
+  box-shadow: 0 0 0 3px rgba(100, 100, 255, 0.2);
+}
+
+/* jika disabled */
+.childSelector select:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* ==== MEDIA QUERIES ================================================== */
+@media (max-width: 640px) {
+  .statsGrid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .filters input,
+  .filters select,
+  .filters button {
+    flex: 1;
+  }
+  .card {
+    padding: 1rem;
+  }
+  .card p {
+    font-size: 1.5rem;
+  }
+  .tableSection {
+    padding: 1rem;
+  }
+  .table th,
+  .table td {
+    padding: .75rem 1rem;
+  }
+  .balanceSelector {
+  margin: 1rem 0;
+  display: flex;
+  align-items: center;
+}
+
+.balanceSelector label {
+  margin-right: 0.75rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.balanceSelector select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 160px;
+  padding: 0.5rem 1.5rem 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23666'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 10px 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.balanceSelector select:hover {
+  border-color: #999;
+}
+
+.balanceSelector select:focus {
+  outline: none;
+  border-color: #666;
+  box-shadow: 0 0 0 3px rgba(100, 100, 255, 0.2);
+}
+
+}
