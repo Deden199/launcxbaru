@@ -1,163 +1,150 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
-import { useRequireAuth } from '@/hooks/useAuth';
-import { Check, X, Edit } from 'lucide-react';
-import styles from './merchants.module.css';
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import api from '@/lib/api'
+import { useRequireAuth } from '@/hooks/useAuth'
 
-type Merchant    = { id: string; name: string; phoneNumber: string; mdr: number };
-type SubMerchant = { id: string; netzMerchantId: string; netzPartnerId: string; fee: number };
-type PGProvider  = { id: string; name: string; credentials: { partnerId: string } };
+type Merchant = {
+  id: string
+  name: string
+  phoneNumber: string
+}
 
-export default function AdminMerchantsPage() {
-  useRequireAuth();
-
-  const [merchants, setMerchants]       = useState<Merchant[]>([]);
-  const [subs, setSubs]                 = useState<Record<string, SubMerchant[]>>({});
-  const [providers, setProviders]       = useState<PGProvider[]>([]);
-  const [selectedProv, setSelectedProv] = useState<string>('');
-  const [merchantPgId, setMerchantPgId] = useState<string>('');
-  const [fee, setFee]                   = useState<string>('');
-  const [loading, setLoading]           = useState<string|false>(false);
-  const [error, setError]               = useState<string>('');
+export default function MerchantsListPage() {
+  useRequireAuth()
+  const router = useRouter()
+  const [merchants, setMerchants] = useState<Merchant[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get<Merchant[]>('/admin/merchants').then(r => {
-      setMerchants(r.data);
-      r.data.forEach(m =>
-        api.get<SubMerchant[]>(`/admin/merchants/${m.id}/pg`)
-           .then(r2 => setSubs(s => ({ ...s, [m.id]: r2.data })))
-      );
-    });
-    api.get<PGProvider[]>('/admin/pg-providers').then(r => {
-      setProviders(r.data);
-      if (r.data.length) setSelectedProv(r.data[0].id);
-    });
-  }, []);
+    api
+      .get<Merchant[]>('/admin/merchants')
+      .then(r => setMerchants(r.data))
+      .catch(() => setMerchants([]))
+      .finally(() => setLoading(false))
+  }, [])
 
-  const connectPG = async (mid: string) => {
-    if (!selectedProv)        { setError('Pilih Payment Gateway'); return; }
-    if (!merchantPgId.trim()) { setError('Isi Merchant PG ID'); return; }
-    if (!fee.trim())          { setError('Isi Fee (%) untuk koneksi'); return; }
-    setError(''); setLoading(mid);
-
-    const prov = providers.find(p => p.id === selectedProv)!;
-    try {
-      await api.post(`/admin/merchants/${mid}/pg`, {
-        netzMerchantId: merchantPgId,
-        netzPartnerId: prov.credentials.partnerId,
-        fee: Number(fee),
-      });
-      const { data } = await api.get<SubMerchant[]>(`/admin/merchants/${mid}/pg`);
-      setSubs(s => ({ ...s, [mid]: data }));
-      setMerchantPgId(''); setFee('');
-    } catch (e: any) {
-      alert(e.response?.data?.error || 'Gagal connect PG');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const editFee = async (mid: string, s: SubMerchant) => {
-    const val = prompt('Masukkan fee baru (%)', s.fee.toString());
-    if (val == null) return;
-    const newFee = Number(val);
-    if (isNaN(newFee)) { alert('Fee harus berupa angka'); return; }
-    await api.patch(`/admin/merchants/${mid}/pg/${s.id}`, { fee: newFee });
-    const { data } = await api.get<SubMerchant[]>(`/admin/merchants/${mid}/pg`);
-    setSubs(s => ({ ...s, [mid]: data }));
-  };
-
-  const disconnectPG = async (mid: string, sid: string) => {
-    if (!confirm('Yakin disconnect?')) return;
-    await api.delete(`/admin/merchants/${mid}/pg/${sid}`);
-    setSubs(s => ({ ...s, [mid]: s[mid].filter(x => x.id !== sid) }));
-  };
+  if (loading) {
+    return (
+      <div className="container">
+        <p className="loading">Loading…</p>
+        <style jsx>{`
+          .loading {
+            text-align: center;
+            color: #6b7280;
+            font-size: 1.125rem;
+            padding: 2rem 0;
+          }
+        `}</style>
+      </div>
+    )
+  }
 
   return (
-    <div className={styles.container}>
-      <h1 className={styles.title}>Merchant Settings</h1>
-      {error && <div className={styles.error}>{error}</div>}
-
-      <div className={styles.grid}>
-        {merchants.map(m => (
-          <div key={m.id} className={styles.card}>
-            <div className={styles.header}>
-              <div className={styles.name}>
-                <Check /> <span>{m.name}</span>
-              </div>
-              <div className={styles.meta}>
-                {m.phoneNumber || '–'} | MDR {m.mdr}%
-              </div>
-            </div>
-
-            <div className={styles.formRow}>
-              <select
-                className={styles.select}
-                value={selectedProv}
-                onChange={e => setSelectedProv(e.target.value)}>
-                {providers.map(p =>
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                )}
-              </select>
-
-              <input
-                className={styles.input}
-                readOnly
-                value={providers.find(p => p.id===selectedProv)?.credentials.partnerId || ''}
-              />
-
-              <input
-                className={styles.input}
-                placeholder="Merchant PG ID"
-                value={merchantPgId}
-                onChange={e => setMerchantPgId(e.target.value)}
-              />
-
-              <input
-                className={styles.input}
-                placeholder="Fee (%)"
-                type="number"
-                step="0.01"
-                min="0"
-                value={fee}
-                onChange={e => setFee(e.target.value)}
-              />
-
-              <button
-                className={styles.button}
-                disabled={loading===m.id}
-                onClick={() => connectPG(m.id)}>
-                {loading===m.id ? '…' : 'Connect'}
-              </button>
-            </div>
-
-            <ul className={styles.list}>
-              {(subs[m.id]||[]).map(s => (
-                <li key={s.id} className={styles.listItem}>
-                  <span>
-                    {s.netzMerchantId} | {s.netzPartnerId} | {s.fee}%
-                  </span>
-                  <div>
-                    <button className={styles.iconBtn}
-                      onClick={() => editFee(m.id, s)}>
-                      <Edit />
-                    </button>
-                    <button className={styles.iconBtn}
-                      onClick={() => disconnectPG(m.id, s.id)}>
-                      <X />
-                    </button>
-                  </div>
-                </li>
-              ))}
-              {!(subs[m.id]||[]).length &&
-                <li className={styles.empty}>Belum ada koneksi PG</li>
-              }
-            </ul>
-          </div>
-        ))}
+    <div className="container">
+      <h1 className="title">Daftar Merchant</h1>
+      <div className="tableWrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Nama</th>
+              <th>Telepon</th>
+              <th>Aksi</th> {/* <-- Tambahkan judul kolom */}
+            </tr>
+          </thead>
+          <tbody>
+            {merchants.map(m => (
+              <tr key={m.id}>
+                <td>{m.name}</td>
+                <td>{m.phoneNumber || '–'}</td>
+                <td>
+                  <button onClick={() => router.push(`/admin/merchants/${m.id}`)}>
+                    Manage
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {merchants.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ textAlign: 'center', padding: '1rem' }}>
+                  Belum ada data merchant
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
+
+      <style jsx>{`
+        .container {
+          max-width: 900px;
+          margin: 3rem auto;
+          padding: 2rem;
+          background: #fff;
+          border-radius: 1rem;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+        .title {
+          font-size: 2.25rem;
+          font-weight: 700;
+          margin-bottom: 1.5rem;
+          color: #111827;
+          text-align: center;
+        }
+        .tableWrapper {
+          overflow-x: auto;
+          border-radius: 0.75rem;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        table {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+        }
+        thead {
+          background: #f3f4f6;
+        }
+        th,
+        td {
+          padding: 1rem 1.25rem;
+          text-align: left;
+          vertical-align: middle;
+        }
+        thead th {
+          font-size: 0.95rem;
+          font-weight: 600;
+          color: #374151;
+        }
+        tbody tr {
+          background: #fff;
+          transition: background 0.2s;
+        }
+        tbody tr:nth-child(even) {
+          background: #fafafa;
+        }
+        tbody tr:hover {
+          background: #f0fdf4;
+        }
+        button {
+          padding: 0.5rem 1rem;
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: #fff;
+          background: #10b981;
+          border: none;
+          border-radius: 0.5rem;
+          cursor: pointer;
+          transition: background 0.2s, transform 0.1s;
+        }
+        button:hover {
+          background: #059669;
+          transform: translateY(-1px);
+        }
+        button:active {
+          transform: translateY(0);
+        }
+      `}</style>
     </div>
-  );
+  )
 }

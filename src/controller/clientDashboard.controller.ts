@@ -3,7 +3,6 @@
 import { Response } from 'express'
 import { prisma } from '../core/prisma'
 import { DisbursementStatus } from '@prisma/client'
-import hilogateClient from '../service/hilogateClient'
 import { ClientAuthRequest } from '../middleware/clientAuth'
 import ExcelJS from 'exceljs'
 import crypto from 'crypto';

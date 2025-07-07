@@ -1,12 +1,21 @@
-// src/service/hilogate.service.ts
+import { prisma } from '../core/prisma';
+import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
+import { getActiveProviders } from './provider';  // fungsi fetch sub_merchant
 
-import { prisma } from '../core/prisma'
-import hilogateClient from '../service/hilogateClient'
+export async function syncWithHilogate(refId: string, merchantId: string) {
+  // 1) Ambil kredensial aktif untuk merchant ini
+  const providers = await getActiveProviders(merchantId, 'hilogate');
+  if (!providers.length) throw new Error('No active Hilogate credentials');
 
-export async function syncWithHilogate(refId: string) {
-  const response = await hilogateClient.getTransaction(refId)
-  const { ref_id, status, settlement_amount, settlement_at } = response
+  // 2) Inisiasi client dinamis dari `config`
+  const cfg = providers[0].config as HilogateConfig;
+  const client = new HilogateClient(cfg);
 
+  // 3) Panggil API
+  const response = await client.getTransaction(refId);
+  const { ref_id, status, settlement_amount, settlement_at } = response.data ?? response;
+
+  // 4) Update DB
   return prisma.transaction_request.update({
     where: { id: ref_id },
     data: {
@@ -14,24 +23,41 @@ export async function syncWithHilogate(refId: string) {
       settlementAmount: settlement_amount ?? undefined,
       settlementAt: settlement_at ? new Date(settlement_at) : undefined,
     },
-  })
+  });
 }
 
-export async function fetchBankCodes() {
-  return await hilogateClient.getBankCodes()
+export async function fetchBankCodes(merchantId: string) {
+  const providers = await getActiveProviders(merchantId, 'hilogate');
+  if (!providers.length) throw new Error('No active Hilogate credentials');
+
+  const cfg = providers[0].config as HilogateConfig;
+  const client = new HilogateClient(cfg);
+  return client.getBankCodes();
 }
 
-export async function inquiryAccount(accountNumber: string, bankCode: string, requestId?: string) {
-  return await hilogateClient.validateAccount(accountNumber, bankCode)
+export async function inquiryAccount(
+  merchantId: string,
+  accountNumber: string,
+  bankCode: string
+) {
+  const providers = await getActiveProviders(merchantId, 'hilogate');
+  if (!providers.length) throw new Error('No active Hilogate credentials');
+
+  const cfg = providers[0].config as HilogateConfig;
+  const client = new HilogateClient(cfg);
+  return client.validateAccount(accountNumber, bankCode);
 }
 
+export async function retryDisbursement(refId: string, merchantId: string) {
+  const wr = await prisma.withdrawRequest.findUnique({ where: { refId } });
+  if (!wr) throw new Error('WithdrawRequest not found');
 
-export async function retryDisbursement(refId: string) {
-  // 1) Ambil ulang dari tabel WithdrawRequest
-  const wr = await prisma.withdrawRequest.findUnique({ where: { refId } })
-  if (!wr) throw new Error('WithdrawRequest not found')
+  const providers = await getActiveProviders(merchantId, 'hilogate');
+  if (!providers.length) throw new Error('No active Hilogate credentials');
 
-  // 2) Bangun flat payload sesuai spec Hilogate (snake_case)
+  const cfg = providers[0].config as HilogateConfig;
+  const client = new HilogateClient(cfg);
+
   const payload = {
     ref_id:             wr.refId,
     amount:             wr.amount,
@@ -43,12 +69,10 @@ export async function retryDisbursement(refId: string) {
     bank_name:          wr.bankName,
     branch_name:        wr.branchName ?? '',
     description:        `Retry withdrawal ${wr.refId}`,
-  }
+  };
 
-  // 3) Panggil Hilogate Create Withdrawal
-  const result = await hilogateClient.createWithdrawal(payload)
+  const result = await client.createWithdrawal(payload);
 
-  // 4) Update kembali status di WithdrawRequest
   return prisma.withdrawRequest.update({
     where: { refId },
     data: {
@@ -56,5 +80,5 @@ export async function retryDisbursement(refId: string) {
       isTransferProcess: result.is_transfer_process,
       status:            result.status,
     },
-  })
+  });
 }

@@ -1,62 +1,213 @@
 /* ───────────────────────── src/service/provider.ts ───────────────────────── */
 import axios from 'axios';
-import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { config } from '../config';
-import HilogateClient from '../service/hilogateClient';
+import { prisma } from '../core/prisma';  // tambahkan ini
+import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
+import { OyClient, OyConfig } from '../service/oyClient';
+import { sub_merchant as SubMerchant } from '@prisma/client';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
+interface RawSub {
+  id: string
+  provider: 'hilogate' | 'oy'
+  fee: number
+  credentials: unknown    // nanti kita cast
+  schedule: unknown       // nanti kita cast
+}
 
-/** Jika respons 2C2P berisi `payload`, decode JWT; kalau tidak, kembalikan apa adanya. */
+export interface ResultSub<C> {
+  id: string
+  provider: string
+  fee: number
+  config: C
+}
+
 const decode2c2p = (raw: any, secret: string): any =>
   raw?.payload ? jwt.verify(raw.payload, secret) : raw;
 
-/** Pilih kategori+grup pertama yang `code`-nya mengandung “QR”. */
 const firstQRGroup = (opt: any) => {
   for (const cat of opt.channelCategories ?? [])
     for (const grp of cat.groups ?? [])
-      if (typeof grp.code === 'string' && grp.code.toUpperCase().includes('QR'))
+      if (
+        typeof grp.code === 'string' &&
+        grp.code.toUpperCase().includes('QR')
+      )
         return { category: cat, group: grp };
   return null;
 };
 
-/** Ekstrak QR (string / url) dari berbagai format DoPayment response. */
 const extractQR = (p: any): string | null =>
-  (typeof p.data        === 'string' ? p.data :
-   typeof p.qrString    === 'string' ? p.qrString :
-   typeof p.qrImageUrl  === 'string' ? p.qrImageUrl :
-   typeof p.data?.qrString   === 'string' ? p.data.qrString :
-   typeof p.data?.qrImageUrl === 'string' ? p.data.qrImageUrl :
-   null);
+  typeof p.data === 'string'
+    ? p.data
+    : typeof p.qrString === 'string'
+    ? p.qrString
+    : typeof p.qrImageUrl === 'string'
+    ? p.qrImageUrl
+    : typeof p.data?.qrString === 'string'
+    ? p.data.qrString
+    : typeof p.data?.qrImageUrl === 'string'
+    ? p.data.qrImageUrl
+    : null;
+
+function getJakartaDay(): number {
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'short'
+  }).formatToParts(now)
+  const weekday = parts.find(p => p.type === 'weekday')!.value  // ex: "Mon", "Tue", …
+  const map: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6
+  }
+  return map[weekday]
+}
+// overload untuk Hilogate
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'hilogate'
+): Promise<ResultSub<HilogateConfig>[]>
+
+// overload untuk OY
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'oy'
+): Promise<ResultSub<OyConfig>[]>
+
+// implementasi
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'hilogate' | 'oy'
+): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
+  const day = getJakartaDay()               // WIB day
+  const isWeekend = [0, 6].includes(day)
+
+  // full match kedua flag
+  const scheduleFilter = isWeekend
+    ? { weekday: false, weekend: true }
+    : { weekday: true,  weekend: false }
+
+  // 1) ambil dari DB
+  const subs = await prisma.sub_merchant.findMany({
+    where: {
+      merchantId,
+      provider,
+      schedule: { equals: scheduleFilter }
+    },
+    select: {
+      id:          true,
+      provider:    true,
+      fee:         true,
+      credentials: true,
+      schedule:    true
+    }
+  })
+
+  // 2) map & cast
+  return subs.map(s => {
+    const raw = s.credentials as unknown as {
+      merchantId: string
+      env?:        'sandbox' | 'live' | 'production'
+      secretKey:  string
+    }
+
+    if (provider === 'hilogate') {
+      const cfg: HilogateConfig = {
+        merchantId: raw.merchantId,
+        env:        raw.env ?? 'sandbox',
+        secretKey:  raw.secretKey
+      }
+      return {
+        id:       s.id,
+        provider: s.provider,
+        fee:      s.fee,
+        config:   cfg
+      } as ResultSub<HilogateConfig>
+    } else {
+      const cfg: OyConfig = {
+        baseUrl:  process.env.OY_BASE_URL!,
+        username: raw.merchantId,
+        apiKey:   raw.secretKey,
+
+      }
+      return {
+        id:       s.id,
+        provider: s.provider,
+        fee:      s.fee,
+        config:   cfg
+      } as ResultSub<OyConfig>
+    }
+  })
+}
+
 
 /* ═════════════ Interface Provider ═════════════ */
 
 export interface Provider {
   name: string;
   supportsQR: boolean;
-  generateQR?:         (p: { amount: number; orderId: string }) => Promise<string>;
+  generateQR?: (p: { amount: number; orderId: string }) => Promise<string>;
   generateCheckoutUrl: (p: { amount: number; orderId: string }) => Promise<string>;
 }
 
-/* ═══════════ List provider aktif (mock) ═══════════ */
+/* ═══════════ List provider aktif ═══════════ */
 
-export async function getActiveProvidersForClient(_: string): Promise<Provider[]> {
+export async function getActiveProvidersForClient(
+  merchantId: string
+): Promise<Provider[]> {
+  const hilogateSubs = await getActiveProviders(merchantId, 'hilogate');
+  const oySubs = await getActiveProviders(merchantId, 'oy');
+
   return [
+    /* ──── Hilogate ──── */
+    {
+      name: 'hilogate',
+      supportsQR: true,
+      async generateQR({ orderId, amount }) {
+        if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
+const raw = hilogateSubs[0].config as {
+  merchantId: string;
+  env:        'sandbox' | 'live';
+  secretKey:  string;
+};
 
-        /* ──── Hilogate (Aggregator) ──── */
-        {
-            name: 'hilogate',
-            supportsQR: true,
-            async generateQR({ orderId, amount }) {
-              const res = await HilogateClient.createTransaction({ ref_id: orderId, amount });
-              return res.data.qr_code;             // base64 QR
-            },
-            async generateCheckoutUrl({ orderId, amount }) {
-              const res = await HilogateClient.createTransaction({ ref_id: orderId, amount });
-              return res.data.checkout_url;        // redirect URL
-            },
-          },
-    /* ───────── Netzme (stub) ───────── */
+const cfg: HilogateConfig = {
+  merchantId: raw.merchantId,
+  secretKey:  raw.secretKey,
+  env:        raw.env,
+};
+const client = new HilogateClient(cfg);
+        const res = await client.createTransaction({ ref_id: orderId, amount });
+        return res.qr_code;
+      },
+      async generateCheckoutUrl({ orderId, amount }) {
+        if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
+        const cfg = hilogateSubs[0].config as unknown as HilogateConfig;
+        const client = new HilogateClient(cfg);
+        const res = await client.createTransaction({ ref_id: orderId, amount });
+        return res.checkout_url;
+      },
+    },
+
+    /* ──── OY E-Wallet ──── */
+    {
+      name: 'oy',
+      supportsQR: false,
+      async generateCheckoutUrl({ orderId, amount }) {
+        if (!oySubs.length) throw new Error('No active OY credentials');
+        const cfg = oySubs[0].config as unknown as OyConfig;
+        const client = new OyClient(cfg);
+        const resp = await client.createEwallet({
+          customer_id: orderId,
+          partner_trx_id: orderId,
+          amount,
+          ewallet_code: 'DANA',
+        });
+        return resp.checkout_url;
+      },
+    },
+
+    /* ──── Netzme (stub) ──── */
     {
       name: 'netzme',
       supportsQR: true,
@@ -66,101 +217,95 @@ export async function getActiveProvidersForClient(_: string): Promise<Provider[]
       },
     },
 
-    /* ───────── 2C2P Direct-QR (Sandbox) ───────── */
+    /* ──── 2C2P Direct-QR ──── */
     ((): Provider => {
-      /* Ambil ENV sekali di IIFE */
-      const env = (k: string) => {
+      const envVar = (k: string) => {
         const v = process.env[k];
         if (!v) throw new Error(`${k} not set in .env`);
         return v;
       };
-      const merchantID  = env('TCPP_MERCHANT_ID');
-      const secretKey   = env('TCPP_SECRET_KEY');
-      const clientID    = env('TCPP_CLIENT_ID');
-      const currency    = env('TCPP_CURRENCY');
-
-      const URL_TOKEN   = env('TCPP_PAYMENT_TOKEN_URL');
-      const URL_OPTION  = env('TCPP_PAYMENT_OPTION_URL');
-      const URL_DETAILS = env('TCPP_PAYMENT_OPTION_DETAILS_URL');
-      const URL_DOPAY   = env('TCPP_DO_PAYMENT_URL');
-
-      const backendReturnUrl =
-        `${config.api.baseUrl}:${config.api.port}/api/v1/transaction/callback`;
+      const mID = envVar('TCPP_MERCHANT_ID');
+      const sk = envVar('TCPP_SECRET_KEY');
+      const cID = envVar('TCPP_CLIENT_ID');
+      const curr = envVar('TCPP_CURRENCY');
+      const URLs = {
+        token: envVar('TCPP_PAYMENT_TOKEN_URL'),
+        option: envVar('TCPP_PAYMENT_OPTION_URL'),
+        detail: envVar('TCPP_PAYMENT_OPTION_DETAILS_URL'),
+        dopay: envVar('TCPP_DO_PAYMENT_URL'),
+      };
+      const returnUrl = `${config.api.baseUrl}:${config.api.port}/api/v1/transaction/callback`;
 
       return {
         name: '2c2p',
         supportsQR: true,
-
-        /* ===== generateQR ===== */
         async generateQR({ amount, orderId }) {
-          /* 1. PAYMENT TOKEN */
-          const invoiceNo = orderId.replace(/[^0-9]/g, '').slice(0, 20) || `${Date.now()}`;
-          const tokenJWT = jwt.sign({
-            merchantID,
-            invoiceNo,
-            description: `Pembayaran ${orderId}`,
-            amount: Number(amount.toFixed(2)),
-            currencyCode: currency,
-            paymentChannel: ['QR'],
-            backendReturnUrl,
-          }, secretKey, { algorithm: 'HS256' });
-
-          const tokenData: any = decode2c2p(
-            (await axios.post(URL_TOKEN, { payload: tokenJWT })).data, secretKey,
-          );
-          if (tokenData.respCode !== '0000')
-            throw new Error(`PaymentToken ${tokenData.respCode}: ${tokenData.respDesc}`);
-
-          const paymentToken = tokenData.paymentToken;
-
-          /* 2. PAYMENT OPTION */
-          const optionData: any = decode2c2p(
-            (await axios.post(URL_OPTION, { paymentToken, clientID, locale: 'en' })).data,
-            secretKey,
-          );
-          const sel = firstQRGroup(optionData);
-          if (!sel) throw new Error('QR channel tidak tersedia untuk merchant ini');
-
-          /* 3. PAYMENT OPTION DETAILS */
-          const detailData: any = decode2c2p(
-            (await axios.post(URL_DETAILS, {
-              paymentToken,
-              clientID,
-              locale: 'en',
-              categoryCode: sel.category.code,
-              groupCode:    sel.group.code,
-            })).data,
-            secretKey,
+          const invoiceNo = orderId.replace(/\D/g, '').slice(0, 20) || `${Date.now()}`;
+          const token = jwt.sign(
+            {
+              merchantID: mID,
+              invoiceNo,
+              description: `Pembayaran ${orderId}`,
+              amount,
+              currencyCode: curr,
+              paymentChannel: ['QR'],
+              backendReturnUrl: returnUrl,
+            },
+            sk,
+            { algorithm: 'HS256' }
           );
 
-          const channelCode =
-            detailData.channels?.[0]?.payment?.code?.channelCode || sel.group.code;
-          if (!channelCode) throw new Error('channelCode tidak ditemukan');
+          const tokenData = decode2c2p((await axios.post(URLs.token, { payload: token })).data, sk);
+          if (tokenData.respCode !== '0000') throw new Error(tokenData.respDesc);
 
-          /* 4. DO PAYMENT (JSON polos) */
-          const doResp: any = decode2c2p(
-            (await axios.post(URL_DOPAY, {
-              paymentToken,
-              clientID,
-              locale: 'en',
-              responseReturnUrl: backendReturnUrl,
-              clientIP: '127.0.0.1',
-              payment: { code: { channelCode }, data: {} },
-            })).data,
-            secretKey,
+          const optData = decode2c2p(
+            (
+              await axios.post(URLs.option, {
+                paymentToken: tokenData.paymentToken,
+                clientID: cID,
+                locale: 'en',
+              })
+            ).data,
+            sk
+          );
+          const sel = firstQRGroup(optData);
+          if (!sel) throw new Error('QR channel tidak tersedia');
+
+          const det = decode2c2p(
+            (
+              await axios.post(URLs.detail, {
+                paymentToken: tokenData.paymentToken,
+                clientID: cID,
+                locale: 'en',
+                categoryCode: sel.category.code,
+                groupCode: sel.group.code,
+              })
+            ).data,
+            sk
           );
 
-          if (!['0000', '1005'].includes(doResp.respCode))
-            throw new Error(`DoPayment ${doResp.respCode}: ${doResp.respDesc}`);
+          const code = det.channels?.[0]?.payment?.code?.channelCode || sel.group.code;
+          const doResp = decode2c2p(
+            (
+              await axios.post(URLs.dopay, {
+                paymentToken: tokenData.paymentToken,
+                clientID: cID,
+                locale: 'en',
+                responseReturnUrl: returnUrl,
+                clientIP: '127.0.0.1',
+                payment: { code: { channelCode: code }, data: {} },
+              })
+            ).data,
+            sk
+          );
 
+          if (!['0000', '1005'].includes(doResp.respCode)) throw new Error(doResp.respDesc);
           const qr = extractQR(doResp);
-          if (!qr) throw new Error('QR tidak ditemukan pada DoPayment response');
+          if (!qr) throw new Error('QR tidak ditemukan');
           return qr;
         },
-
-        /* ===== legacy /Charge (tak dipakai QR flow) ===== */
         async generateCheckoutUrl() {
-          throw new Error('generateCheckoutUrl via /Charge tidak diimplementasi di sandbox');
+          throw new Error('Not implemented');
         },
       };
     })(),

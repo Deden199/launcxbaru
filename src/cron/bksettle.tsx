@@ -17,19 +17,19 @@ export function scheduleSettlementChecker() {
   if (cronStarted) return
   cronStarted = true
 
-  // run setiap menit
+  // Testing: run every minute
   cron.schedule(
     '* * * * *',
     async () => {
       logger.info('[SettlementCron] Mulai cek settlement…')
 
-      // (1) Ambil semua order PENDING_SETTLEMENT
+      // (1) Grab semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
         where: { status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
-        select: { id: true, partnerClientId: true, pendingAmount: true, channel: true }
+        select: { id: true,    partnerClientId: true,   pendingAmount: true, channel: true }
       })
 
-      // (2) Hilogate
+      // (2) Hilogate flow
       const hilogateOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'hilogate')
       await Promise.all(hilogateOrders.map(async o => {
         try {
@@ -52,19 +52,20 @@ export function scheduleSettlementChecker() {
           const rrn      = tx.rrn ?? 'N/A'
           logger.info(`[SettlementCron][HILOGATE] ${o.id} status=${settleSt}, rrn=${rrn}`)
 
-          if (['ACTIVE','SETTLED','COMPLETED'].includes(settleSt)) {
+          if (['ACTIVE', 'SETTLED', 'COMPLETED'].includes(settleSt)) {
             const netAmt = o.pendingAmount ?? tx.net_amount
-            const upd    = await prisma.order.updateMany({
-              where: { id: o.id, status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
+            const updateResult = await prisma.order.updateMany({
+              where: { id: o.id, status: 'PENDING_SETTLEMENT',    partnerClientId: { not: null }      // ← pakai partnerClientId, bukan merchantId
+ },
               data: {
-                status: 'SETTLED',
+                status:           'SETTLED',
                 settlementAmount: netAmt,
-                pendingAmount: null,
+                pendingAmount:    null,
                 rrn,
-                updatedAt: new Date()
+                updatedAt:        new Date()
               }
             })
-            if (upd.count > 0) {
+            if (updateResult.count > 0) {
               await prisma.partnerClient.update({
                 where: { id: o.partnerClientId! },
                 data: { balance: { increment: netAmt } }
@@ -80,7 +81,7 @@ export function scheduleSettlementChecker() {
         }
       }))
 
-      // (3) OY QRIS flow (URL hard-coded)
+      // (3) OY QRIS flow
       const oyOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'oy')
       await Promise.all(oyOrders.map(async o => {
         try {
@@ -98,21 +99,22 @@ export function scheduleSettlementChecker() {
             `headers=${JSON.stringify(statusHeaders)} ` +
             `body=${JSON.stringify(statusBody)}`
           )
+
           const statusResp = await axios.post(statusUrl, statusBody, { headers: statusHeaders, timeout: 5_000 })
           const s          = statusResp.data
           const code       = s.status?.code
           const settleSt   = (s.settlement_status ?? '').toUpperCase()
 
           if (code !== '000') {
-            logger.warn(`[SettlementCron][OY] ${o.id} not ready: ${code} ${s.status?.message}`)
+            logger.warn(`[SettlementCron][OY] ${o.id} not ready: ${code} ${s.status.message}`)
             return
           }
           if (settleSt === 'WAITING') {
-            logger.info(`[SettlementCron][OY] ${o.id} masih PENDING, skip.`)
+            logger.info(`[SettlementCron][OY] ${o.id} still pending (WAITING), skip.`)
             return
           }
 
-          // 3b) Detail-transaksi
+          // 3b) Detail-transaksi untuk fee
           const detailUrl    = 'https://partner.oyindonesia.com/api/v1/transaction'
           const detailParams = { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }
 
@@ -121,6 +123,7 @@ export function scheduleSettlementChecker() {
             `headers=${JSON.stringify(statusHeaders)} ` +
             `params=${JSON.stringify(detailParams)}`
           )
+
           const detailResp = await axios.get(detailUrl, {
             params: detailParams,
             headers: statusHeaders,
@@ -129,12 +132,12 @@ export function scheduleSettlementChecker() {
 
           const ds = detailResp.data.status
           if (ds?.code !== '000') {
-            logger.warn(`[SettlementCron][OY] error detail ${o.id}: ${ds.code} ${ds.message}`)
+            logger.warn(`[SettlementCron][OY] Detail API error for ${o.id}: ${ds.code} ${ds.message}`)
             return
           }
           const d = detailResp.data.data
           if (!d) {
-            logger.warn(`[SettlementCron][OY] data detail null ${o.id}, skip.`)
+            logger.warn(`[SettlementCron][OY] Detail data null for ${o.id}, skip.`)
             return
           }
 
@@ -142,9 +145,10 @@ export function scheduleSettlementChecker() {
           const fee    = d.admin_fee.total_fee
           const rrn    = s.trx_id
 
-          // 3c) Update DB
-          const upd = await prisma.order.updateMany({
-            where: { id: o.id, status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
+          // 3c) Update DB idempoten & kredit
+          const updateResult = await prisma.order.updateMany({
+            where: { id: o.id, status: 'PENDING_SETTLEMENT',    partnerClientId: { not: null }      // ← pakai partnerClientId, bukan merchantId
+ },
             data: {
               status:           'SETTLED',
               settlementAmount: netAmt,
@@ -154,7 +158,7 @@ export function scheduleSettlementChecker() {
               updatedAt:        new Date()
             }
           })
-          if (upd.count > 0) {
+          if (updateResult.count > 0) {
             await prisma.partnerClient.update({
               where: { id: o.partnerClientId! },
               data: { balance: { increment: netAmt } }

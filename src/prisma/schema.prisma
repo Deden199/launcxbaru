@@ -45,12 +45,14 @@ model merchant {
 
 /// Koneksi PG per merchant, dengan fee
 model sub_merchant {
-  id             String @id @default(auto()) @map("_id") @db.ObjectId
-  merchantId     String @db.ObjectId
-  netzMerchantId String
-  netzPartnerId  String
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  merchantId     String
+  provider       String?
   fee            Float  @default(0.0)
-
+  credentials   Json?     // merchantId, env, secretKey
+  schedule      Json?     // { weekday: boolean, weekend: boolean }
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   merchant merchant @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
 }
 
@@ -153,7 +155,7 @@ model PartnerClient {
   apiSecret        String
   isActive         Boolean          @default(true)
   createdAt        DateTime         @default(now())
-  feePercent       Float            @default(0.5)
+  feePercent       Float            @default(1.05)
   feeFlat          Float            @default(0)
   balance          Float            @default(0.0)
   callbackUrl      String?

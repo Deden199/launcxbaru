@@ -37,14 +37,30 @@ export async function listTransactions (req: AuthRequest, res: Response) {
 }
 
 /* ─────────── 2. Paksa-sync Hilogate ─────────── */
-export async function syncTransaction (req: AuthRequest, res: Response) {
+export async function syncTransaction(req: AuthRequest, res: Response) {
   try {
-    const updated = await syncWithHilogate(req.params.ref_id)
-    res.json({ success: true, updated })
+    // 1) Cari transaksi untuk dapatkan merchantId
+    const tx = await prisma.transaction_request.findUnique({
+      where: { id: req.params.ref_id },
+      select: { merchantId: true },
+    });
+    if (!tx) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+
+    // 2) Panggil service dengan refId + merchantId
+    const updated = await syncWithHilogate(
+      req.params.ref_id,
+      tx.merchantId
+    );
+
+    return res.json({ success: true, updated });
   } catch (err: any) {
-    res.status(500).json({ message: err.message })
+    console.error('[syncTransaction] error:', err);
+    return res.status(500).json({ message: err.message });
   }
 }
+
 
 /* ─────────── 3. Buat transaksi dummy ─────────── */
 export async function createTransaction (req: AuthRequest, res: Response) {

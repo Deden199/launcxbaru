@@ -19,8 +19,9 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { config } from '../config';
 import { getActiveProvidersForClient, Provider } from './provider';
-import HilogateClient from './hilogateClient';
-import OyClient from './oyClient';
+import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
+import {OyClient, OyConfig} from './oyClient';
+import { getActiveProviders } from './provider';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -99,14 +100,33 @@ export const createTransaction = async (
     });
     const refId = trx.id;
 
-    // 3) Panggil API Hilogate
-    const apiResp = await HilogateClient.createTransaction({
-      ref_id: refId,
-      method: 'qris',
-      amount,
-    });
-    const outer = apiResp.data;
-    const qrString = outer.data.qr_string;
+    // 3) Ambil kredensial aktif & instansiasi client
+const hilSubs = await getActiveProviders(merchantRec.id, 'hilogate');
+if (!hilSubs.length) throw new Error('No active Hilogate credentials');
+
+// ambil HilogateConfig dari properti `config`
+const hilCfg = hilSubs[0].config as HilogateConfig;
+const hilClient = new HilogateClient(hilCfg);
+
+// panggil transaksi
+const apiResp = await hilClient.createTransaction({
+  ref_id: refId,
+  method: 'qris',
+  amount,
+});
+
+// bentuk respons createTransaction (sesuai implementasi `requestFull`) biasanya:
+// {
+//   code: number,
+//   status: string,
+//   data: {
+//     qr_string: string,
+//     checkout_url: string,
+//     ...
+//   }
+// }
+const qrString = apiResp.data?.qr_string ?? apiResp.qr_string;
+
 
     // 4) Simpan audit log
     await prisma.transaction_response.create({
@@ -172,19 +192,19 @@ if (mName === 'oy') {
   const refId = trx.id
 
   // 2) Panggil API OY
-  const oyClient = new OyClient({
-    baseUrl:  config.api.oy.baseUrl,
-    username: config.api.oy.username,
-    apiKey:   config.api.oy.apiKey,
-  })
- const qrResp = await oyClient.createQRISTransaction({
-    partner_trx_id: refId,
-    receive_amount: amount,
-    need_frontend:  false,
-    partner_user_id: pid,
-  })
-  const qrUrl = qrResp.payment_info?.qris_url
-  if (!qrUrl) throw new Error('OY QRIS belum mengembalikan qr_url')
+const oySubs = await getActiveProviders(merchantRec.id, 'oy');
+if (!oySubs.length) throw new Error('No active OY credentials');
+
+// ambil config dari properti `config`, bukan `credentials`
+const oyCfg = oySubs[0].config as OyConfig;
+const oyClient = new OyClient(oyCfg);
+
+const qrResp = await oyClient.createQRISTransaction({
+  partner_trx_id: refId,
+  receive_amount: amount,
+  need_frontend:  false,
+  partner_user_id: pid,
+});
 
   // **pakai proxy internal** daripada decode di server
   const proxyUrl = `${config.api.baseUrl}/api/v1/qris/${refId}`

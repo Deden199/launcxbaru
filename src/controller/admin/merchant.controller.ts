@@ -3,18 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto'
 import axios from 'axios'
-import HilogateClient from '../../service/hilogateClient'
+import {HilogateClient ,HilogateConfig} from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
-import OyClient          from '../../service/oyClient'    // sesuaikan path
+import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
 import { config } from '../../config';
 
 
 const prisma = new PrismaClient();
-  const oyClient = new OyClient({
-    baseUrl:  config.api.oy.baseUrl,
-    username: config.api.oy.username,
-    apiKey:   config.api.oy.apiKey,
-  })
+
 // 1. Create merchant (mdr wajib)
 export const createMerchant = async (req: Request, res: Response) => {
   const { name, phoneNumber, email, telegram, mdr } = req.body;
@@ -35,11 +31,19 @@ export const createMerchant = async (req: Request, res: Response) => {
 
 export const getAllMerchants = async (_req: Request, res: Response) => {
  // sekarang ambil list partnerClient (id & name saja)
+ const list = await prisma.merchant.findMany({
+    select: { id: true, name: true }
+  });
+  res.json(list);
+};
+export const getAllClient = async (_req: Request, res: Response) => {
+ // sekarang ambil list partnerClient (id & name saja)
  const list = await prisma.partnerClient.findMany({
     select: { id: true, name: true }
   });
   res.json(list);
 };
+
 
 // 3. Get merchant by ID
 export const getMerchantById = async (req: Request, res: Response) => {
@@ -84,26 +88,64 @@ export const setFeeRate = async (req: Request, res: Response) => {
   res.json(merchant);
 };
 
-// 7. Connect PG (sub_merchant dengan fee)
 export const connectPG = async (req: Request, res: Response) => {
-  const merchantId = req.params.id;
-  const { netzMerchantId, netzPartnerId, fee } = req.body;
-  if (!netzMerchantId || !netzPartnerId) {
-    return res
-      .status(400)
-      .json({ error: 'netzMerchantId & netzPartnerId required' });
-  }
-  const relation = await prisma.sub_merchant.create({
-    data: {
-      merchantId,
-      netzMerchantId,
-      netzPartnerId,
-      fee: fee != null ? Number(fee) : 0.0,
-    },
-  });
-  res.status(201).json(relation);
-};
+  try {
+    const merchantId = req.params.id;
+    const { provider, credentials, fee } = req.body;
 
+    // 1) Обязательные поля
+    if (!provider || !credentials?.merchantId || !credentials?.secretKey) {
+      return res
+        .status(400)
+        .json({ error: 'provider, merchantId & secretKey required' });
+    }
+
+    // 2) Дефолт для schedule
+    const rawSched = req.body.schedule;
+    const schedule =
+      rawSched &&
+      typeof rawSched.weekday === 'boolean' &&
+      typeof rawSched.weekend === 'boolean'
+        ? rawSched
+        : { weekday: true, weekend: false }; // default = weekday
+
+    // 3) Выбираем флаг для clash-check
+    const flagKey: 'weekday' | 'weekend' = schedule.weekend ? 'weekend' : 'weekday';
+
+    // 4) Смотрим, нет ли уже такой записи
+    const existing = await prisma.sub_merchant.findMany({
+      where: { merchantId, provider },
+      select: { schedule: true },
+    });
+
+    const clash = existing.some(
+      s => (s.schedule as any)[flagKey] === true
+    );
+    if (clash) {
+      return res.status(400).json({
+        error: `Sudah ada ${provider} credential untuk ${flagKey}`,
+      });
+    }
+
+    // 5) Сохраняем
+    const created = await prisma.sub_merchant.create({
+      data: {
+        merchant:   { connect: { id: merchantId } },
+        provider,
+        credentials,           // Prisma: Json
+        schedule,              // Prisma: Json
+        fee: fee != null ? Number(fee) : 0,
+      },
+    });
+
+    return res.status(201).json(created);
+  } catch (err: any) {
+    console.error('[connectPG]', err);
+    return res
+      .status(500)
+      .json({ error: 'Gagal connect PG, silakan coba lagi nanti.' });
+  }
+};
 // 8. List koneksi PG untuk satu merchant
 export const listPGs = async (req: Request, res: Response) => {
   const merchantId = req.params.id;
@@ -306,67 +348,105 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
 }
 
 // src/controller/admin/merchant.controller.ts
-
-export const getDashboardSummary = async (req, res) => {
+export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
-    // Ambil filter partnerClientId dari query (sesuaikan nama param-mu)
-    const { partnerClientId } = req.query as any;
+    const { partnerClientId, merchantId } = req.query as any;
 
-    // ─── 1) Hilogate ────────────────────────────────────
-    const hgResp = await HilogateClient.getBalance();
-    const hgData = hgResp.data;
-    console.log('[HILOGATE PARSED]', hgData);
+    // 1) Hitung hari ini: weekend vs weekday
+    const day = new Date().getDay(); // 0=Minggu,6=Sabtu
+    const isWeekend = day === 0 || day === 6;
+    const scheduleFilter = isWeekend
+      ? { weekday: false, weekend: true }
+      : { weekday: true, weekend: false };
 
-    const hilogateBalance = hgData.active_balance ?? 0;
-    const total_withdrawal   = hgData.total_withdrawal   ?? 0;
-    const pending_withdrawal = hgData.pending_withdrawal ?? 0;
-
-    // ─── 2) OY ──────────────────────────────────────────
-    let oyBalance = 0;
+    // ─── 2) HILOGATE ────────────────────────────────────
+    let hilogateBalance = 0, total_withdrawal = 0, pending_withdrawal = 0;
     try {
-      const oyResp = await oyClient.getBalance();
-      const oyData = (oyResp as any).data ?? oyResp;
-      console.log('[OY PARSED]', oyData);
-      oyBalance = oyData.availableBalance ?? oyData.balance ?? 0;
-    } catch (err) {
-      console.error('[OY] getBalance error', err);
+      const hgSubs = await prisma.sub_merchant.findMany({
+        where: {
+          merchantId,
+          provider: 'hilogate',
+          schedule: { equals: scheduleFilter },
+        }
+      });
+      if (hgSubs.length) {
+        const raw = hgSubs[0].credentials as any;
+        const cfg: HilogateConfig = {
+          merchantId: raw.merchantId,
+          env:        raw.env,
+          secretKey:  raw.secretKey,
+        };
+        const client = new HilogateClient(cfg);
+        const resp = await client.getBalance();
+        const data = resp.data;
+        hilogateBalance   = data.active_balance   ?? 0;
+        total_withdrawal   = data.total_withdrawal ?? 0;
+        pending_withdrawal = data.pending_withdrawal ?? 0;
+      }
+    } catch (e) {
+      console.error('[HILOGATE] getBalance error', e);
     }
 
-    // ─── 3) Total Client Balance ───────────────────────
+    // ─── 3) OY ───────────────────────────────────────
+   let oyBalance = 0;
+try {
+  const oySubs = await prisma.sub_merchant.findMany({
+    where: {
+      merchantId,
+      provider: 'oy',
+      schedule: { equals: scheduleFilter },
+    },
+  });
+  if (oySubs.length) {
+    const raw = oySubs[0].credentials as any;
+
+    // Ambil baseUrl dari config, bukan dari raw.env
+    const cfg: OyConfig = {
+      baseUrl:  config.api.oy.baseUrl,  
+      username: raw.merchantId,
+      apiKey:   raw.secretKey,
+    };
+
+    const client = new OyClient(cfg);
+    const resp   = await client.getBalance();
+    const data   = (resp as any).data ?? resp;
+    oyBalance    = data.availableBalance ?? data.balance ?? 0;
+  }
+} catch (e) {
+  console.error('[OY] getBalance error', e);
+}
+    // ─── 4) Total Client Balance ────────────────────────
     let totalClientBalance = 0;
     if (partnerClientId && partnerClientId !== 'all') {
-      // ambil satu client
       const pc = await prisma.partnerClient.findUnique({
         where: { id: partnerClientId },
-        select: { balance: true }
+        select: { balance: true },
       });
       totalClientBalance = pc?.balance ?? 0;
     } else {
-      // jumlahkan semua client balances
       const agg = await prisma.partnerClient.aggregate({
         _sum: { balance: true },
-        where: { isActive: true }   // misal hanya client aktif
+        where: { isActive: true }
       });
       totalClientBalance = agg._sum.balance ?? 0;
     }
 
-    // ─── 4) Response ────────────────────────────────────
+    // ─── 5) Kirim response ───────────────────────────────
     return res.json({
       hilogateBalance,
-      oyBalance,
-      totalClientBalance,
       total_withdrawal,
       pending_withdrawal,
+      oyBalance,
+      totalClientBalance,
     });
-  } catch (err) {
+
+  } catch (err: any) {
     console.error('[getDashboardSummary]', err);
     return res
       .status(500)
-      .json({ error: 'Failed to fetch dashboard summary' });
+      .json({ error: err.message || 'Failed to fetch dashboard summary' });
   }
-}
-
-
+};
 
 export async function exportDashboardAll(req: Request, res: Response) {
   try {

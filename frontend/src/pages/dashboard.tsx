@@ -111,7 +111,7 @@ const fetchSummary = async () => {
 
     // (1) ambil list merchants sekali saja
     if (!merchants.length) {
-      const resp = await api.get<Merchant[]>('/admin/merchants')
+      const resp = await api.get<Merchant[]>('/admin/merchants/allclient')
       setMerchants(resp.data)
     }
 
