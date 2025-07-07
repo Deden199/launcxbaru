@@ -109,9 +109,41 @@ export const transactionCallback = async (req: Request, res: Response) => {
     if (gotSig !== expectedSig) {
       throw new Error('Invalid Hilogate signature')
     }
-
+   const paymentReceivedTime = new Date();
+  // settlementTime ← full.updated_at (gateway’s completion timestamp)
+    const settlementTime = full.updated_at
+      ? new Date(full.updated_at * 1000)
+      : null;
+    const trxExpirationTime = full.expires_at
+      ? new Date(full.expires_at * 1000)
+      : null;
     // 3) Persist raw callback untuk idempotensi
-    await paymentService.transactionCallback(req)
+   const cb = await prisma.transaction_callback.findFirst({
+      where: { referenceId: full.ref_id }
+    });
+
+    if (cb) {
+      await prisma.transaction_callback.update({
+        where: { id: cb.id },
+        data: {
+          updatedAt:             new Date(),
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime,
+        }
+      });
+    } else {
+      await prisma.transaction_callback.create({
+        data: {
+          referenceId:           full.ref_id,
+          requestBody:           full,
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime,
+        }
+      });
+    }
+
 
     // 4) Extract fields
     const {
@@ -164,21 +196,18 @@ await prisma.order.update({
     settlementStatus: newSetSt,
     qrPayload:        qr_string ?? null,
     updatedAt:        new Date(),
-
-    // fee pihak ketiga (PG)
     fee3rdParty:      pgFee,
-
-    // fee internal Launcx dengan presisi 3 digit
     feeLauncx:        isSuccess ? feeLauncxCalc.toNumber() : null,
-
-    // pendingAmount = grossAmount – PG fee – Launcx fee
     pendingAmount:    isSuccess
       ? grossDec
           .minus(feeLauncxCalc)
           .toNumber()
       : null,
 
-    settlementAmount: null
+    settlementAmount: null,
+        paymentReceivedTime,
+        settlementTime,
+        trxExpirationTime,
   }
 })
 
@@ -247,6 +276,8 @@ await prisma.order.update({
       .json(createErrorResponse(err.message || 'Unknown error'))
   }
 }
+
+
 export const oyTransactionCallback = async (req: Request, res: Response) => {
   let rawBody = ''
   try {
@@ -264,24 +295,48 @@ const receivedAmt = full.receive_amount
     if (!orderId) throw new Error('Missing partner_trx_id')
     if (receivedAmt == null) throw new Error('Missing received_amount')
 
-const existsCb = await prisma.transaction_callback.findFirst({
+      const paymentReceivedTime = full.payment_received_time
+  ? new Date(full.payment_received_time)  // e.g. "2025-07-03 22:47:28"
+  : null;
+const settlementTime = full.settlement_time
+  ? new Date(full.settlement_time)        // e.g. "2025-07-04 15:00:00"
+  : null;
+const trxExpirationTime = full.trx_expiration_time
+  ? new Date(full.trx_expiration_time)    // e.g. "2025-07-03 23:16:12"
+  : null;
+
+const cb = await prisma.transaction_callback.findFirst({
   where: { referenceId: orderId }
-})
-if (!existsCb) {
+});
+if (cb) {
+  // update existing via id
+  await prisma.transaction_callback.update({
+    where: { id: cb.id },
+    data: {
+      updatedAt:         new Date(),
+      settlementTime,
+      trxExpirationTime,
+    }
+  });
+} else {
+  // buat baru
   await prisma.transaction_callback.create({
     data: {
-      referenceId: orderId,
-      requestBody: full,
+      referenceId:         orderId,
+      requestBody:         full,
+      paymentReceivedTime,
+      settlementTime,
+      trxExpirationTime,
     }
-  })
+  });
 }
+
     // 4) Hitung status internal
     const isSuccess  = pgStatusRaw === 'COMPLETE'
     const newStatus  = isSuccess ? 'PENDING_SETTLEMENT' : pgStatusRaw
     const newSetSt   = settlementSt ?? (isSuccess ? 'PENDING' : pgStatusRaw)
 
     // 5) Ambil partner fee config
-// (setelah parse full dan sebelum hitung fee)
 const orderRecord = await prisma.order.findUnique({
   where: { id: orderId },
   select: { userId: true }  // userId = partnerClient.id
@@ -316,6 +371,9 @@ if (!pc) throw new Error('PartnerClient not found for callback')
         pendingAmount:    pendingAmt,
         settlementAmount: isSuccess ? null : receivedAmt,
         updatedAt:        new Date(),
+        paymentReceivedTime,
+    settlementTime,
+    trxExpirationTime,
       },
     })
 

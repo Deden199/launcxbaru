@@ -21,15 +21,28 @@ type RawTx = {
   settlementStatus: string
   netSettle:        number   // <— baru
   channel?:     string   // ← baru
+  paymentReceivedTime?: string
+  settlementTime?: string
+  trxExpirationTime?: string
 
 
 }
 interface Withdrawal {
- id: string
+  id: string
   refId: string
+  accountName: string
+  accountNameAlias: string
+  accountNumber: string
+  bankCode: string
+  bankName: string
+  branchName?: string
   amount: number
+  netAmount?: number
+  paymentGatewayId?: string
+  isTransferProcess: boolean
   status: string
   createdAt: string
+  completedAt?: string
 }
 
 type Tx = {
@@ -44,6 +57,9 @@ type Tx = {
   status: '' | 'SUCCESS' | 'DONE'
   settlementStatus: string
   channel:          string  // ← baru
+    paymentReceivedTime?: string
+  settlementTime?: string
+  trxExpirationTime?: string
 
 }
 
@@ -198,7 +214,11 @@ async function fetchWithdrawals() {
         netSettle:        o.netSettle,                // ← langsung pakai
         status:           o.netSettle > 0 ? 'SUCCESS' : 'DONE',
         settlementStatus: o.settlementStatus.replace(/_/g,' '),
+          paymentReceivedTime: o.paymentReceivedTime ?? '',
+  settlementTime:      o.settlementTime      ?? '',
+  trxExpirationTime:   o.trxExpirationTime   ?? '',
         channel:          o.channel ?? '-'      // ← baru
+        
 
       }))
 
@@ -357,6 +377,8 @@ async function fetchWithdrawals() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                    <th>Paid At</th>           {/* baru */}
+                    <th>Settled At</th>        {/* baru */}
                     <th>TRX ID</th>
                     <th>RRN</th>
                     <th>Player ID</th>
@@ -367,12 +389,25 @@ async function fetchWithdrawals() {
                     <th>Net Amount</th>
                     <th>Status</th>
                     <th>Settlement Status</th>
+
                   </tr>
                 </thead>
                 <tbody>
                   {txs.map(t => (
                     <tr key={t.id}>
                       <td>{new Date(t.date).toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })}</td>
+                         <td>
+                            {t.paymentReceivedTime
+                                      ? new Date(t.paymentReceivedTime)
+                                              .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
+                                           : '-'}
+                                             </td>
+                        <td>
+                       {t.settlementTime
+                         ? new Date(t.settlementTime)
+                        .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
+                        : '-'}
+                     </td>
                       <td>
                         <code className="font-mono">{t.id}</code>
                         <button className={styles.copyBtn} onClick={() => navigator.clipboard.writeText(t.id)}>
@@ -402,54 +437,88 @@ async function fetchWithdrawals() {
             </div>
           )}
         </section>
-{/* === WITHDRAWAL HISTORY ===================================================== */}
-<section className={styles.tableSection} style={{ marginTop: 32 }}>
-  <h2>Withdrawal History</h2>
-  {loadingWd ? (
-    <div className={styles.loader}>Loading withdrawals…</div>
-  ) : (
-    <div className={styles.tableWrapper}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Ref ID</th>
-            <th>Amount</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {withdrawals.length ? (
-            withdrawals.map(w => (
-              <tr key={w.id}>
-                <td>
-                  {new Date(w.createdAt).toLocaleString('id-ID', {
-                    dateStyle: 'short',
-                    timeStyle: 'short'
-                  })}
-                </td>
-                <td>{w.refId}</td>
-                <td>
-                  {w.amount.toLocaleString('id-ID', {
-                    style: 'currency',
-                    currency: 'IDR'
-                  })}
-                </td>
-                <td>{w.status}</td>
-              </tr>
-            ))
-          ) : (
-            <tr key="no-wd">
-              <td colSpan={4} className={styles.noData}>
-                No withdrawals
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  )}
-</section>
+   {/* === WITHDRAWAL HISTORY ===================================================== */}
+      <section className={styles.tableSection} style={{ marginTop: 32 }}>
+        <h2>Withdrawal History</h2>
+        {loadingWd ? (
+          <div className={styles.loader}>Loading withdrawals…</div>
+        ) : (
+          <div className={styles.tableWrapper}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Ref ID</th>
+                  <th>Account Name</th>
+                  <th>Alias</th>
+                  <th>Account No.</th>
+                  <th>Bank Code</th>
+                  <th>Bank Name</th>
+                  <th>Branch</th>
+                  <th>Amount</th>
+                  <th>Net Amount</th>
+                  <th>PG Trx ID</th>
+                  <th>In Process</th>
+                  <th>Status</th>
+                  <th>Completed At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {withdrawals.length ? (
+                  withdrawals.map(w => (
+                    <tr key={w.id}>
+                      <td>
+                        {new Date(w.createdAt).toLocaleString('id-ID', {
+                          dateStyle: 'short',
+                          timeStyle: 'short'
+                        })}
+                      </td>
+                      <td>{w.refId}</td>
+                      <td>{w.accountName}</td>
+                      <td>{w.accountNameAlias}</td>
+                      <td>{w.accountNumber}</td>
+                      <td>{w.bankCode}</td>
+                      <td>{w.bankName}</td>
+                      <td>{w.branchName ?? '-'}</td>
+                      <td>
+                        {w.amount.toLocaleString('id-ID', {
+                          style: 'currency',
+                          currency: 'IDR'
+                        })}
+                      </td>
+                      <td>
+                        {w.netAmount != null
+                          ? w.netAmount.toLocaleString('id-ID', {
+                              style: 'currency',
+                              currency: 'IDR'
+                            })
+                          : '-'}
+                      </td>
+                      <td>{w.paymentGatewayId ?? '-'}</td>
+                      <td>{w.isTransferProcess ? 'Yes' : 'No'}</td>
+                      <td>{w.status}</td>
+                      <td>
+                        {w.completedAt
+                          ? new Date(w.completedAt).toLocaleString('id-ID', {
+                              dateStyle: 'short',
+                              timeStyle: 'short'
+                            })
+                          : '-'}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={14} className={styles.noData}>
+                      No withdrawals
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
       </main>
     </div>
   )

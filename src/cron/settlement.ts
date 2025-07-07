@@ -2,7 +2,6 @@ import cron from 'node-cron'
 import axios from 'axios'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
-import logger from '../logger'
 import crypto from 'crypto'
 
 function generateSignature(path: string, secretKey: string): string {
@@ -17,19 +16,17 @@ export function scheduleSettlementChecker() {
   if (cronStarted) return
   cronStarted = true
 
-  // run setiap menit
+  // Jadwal setiap hari jam 17:00 Asia/Jakarta
   cron.schedule(
-    '* * * * *',
+    '0 17 * * *',
     async () => {
-      logger.info('[SettlementCron] Mulai cek settlement…')
-
       // (1) Ambil semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
         where: { status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
         select: { id: true, partnerClientId: true, pendingAmount: true, channel: true }
       })
 
-      // (2) Hilogate
+      // (2) Proses Hilogate
       const hilogateOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'hilogate')
       await Promise.all(hilogateOrders.map(async o => {
         try {
@@ -49,42 +46,37 @@ export function scheduleSettlementChecker() {
 
           const tx       = resp.data.data
           const settleSt = (tx.settlement_status ?? '').toUpperCase()
-          const rrn      = tx.rrn ?? 'N/A'
-          logger.info(`[SettlementCron][HILOGATE] ${o.id} status=${settleSt}, rrn=${rrn}`)
-
           if (['ACTIVE','SETTLED','COMPLETED'].includes(settleSt)) {
             const netAmt = o.pendingAmount ?? tx.net_amount
-            const upd    = await prisma.order.updateMany({
+            const settlementTime = tx.updated_at
+              ? new Date(tx.updated_at)
+              : undefined
+            const upd = await prisma.order.update({
               where: { id: o.id, status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
               data: {
                 status: 'SETTLED',
                 settlementAmount: netAmt,
                 pendingAmount: null,
-                rrn,
+                rrn: tx.rrn ?? 'N/A',
+                settlementTime,
                 updatedAt: new Date()
               }
             })
-            if (upd.count > 0) {
-              await prisma.partnerClient.update({
-                where: { id: o.partnerClientId! },
-                data: { balance: { increment: netAmt } }
-              })
-              logger.info(`[SettlementCron][HILOGATE] ${o.id} settled +${netAmt}`)
-            }
+            await prisma.partnerClient.update({
+              where: { id: o.partnerClientId! },
+              data: { balance: { increment: netAmt } }
+            })
           }
-        } catch (err: any) {
-          const errData = err.response?.data
-            ? JSON.stringify(err.response.data)
-            : err.message
-          logger.error(`[SettlementCron][HILOGATE] Gagal cek ${o.id}: ${errData}`)
+        } catch {
+          // silenced
         }
       }))
 
-      // (3) OY QRIS flow (URL hard-coded)
+      // (3) Proses OY QRIS
       const oyOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'oy')
       await Promise.all(oyOrders.map(async o => {
         try {
-          // 3a) Check-status
+          // Check-status
           const statusUrl     = 'https://partner.oyindonesia.com/api/payment-routing/check-status'
           const statusBody    = { partner_trx_id: o.id, send_callback: false }
           const statusHeaders = {
@@ -93,34 +85,15 @@ export function scheduleSettlementChecker() {
             'x-api-key':     config.api.oy.apiKey
           }
 
-          logger.info(
-            `[SettlementCron][OY][REQUEST] POST ${statusUrl} ` +
-            `headers=${JSON.stringify(statusHeaders)} ` +
-            `body=${JSON.stringify(statusBody)}`
-          )
           const statusResp = await axios.post(statusUrl, statusBody, { headers: statusHeaders, timeout: 5_000 })
           const s          = statusResp.data
           const code       = s.status?.code
           const settleSt   = (s.settlement_status ?? '').toUpperCase()
+          if (code !== '000' || settleSt === 'WAITING') return
 
-          if (code !== '000') {
-            logger.warn(`[SettlementCron][OY] ${o.id} not ready: ${code} ${s.status?.message}`)
-            return
-          }
-          if (settleSt === 'WAITING') {
-            logger.info(`[SettlementCron][OY] ${o.id} masih PENDING, skip.`)
-            return
-          }
-
-          // 3b) Detail-transaksi
+          // Detail-transaksi
           const detailUrl    = 'https://partner.oyindonesia.com/api/v1/transaction'
           const detailParams = { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }
-
-          logger.info(
-            `[SettlementCron][OY][REQUEST] GET ${detailUrl} ` +
-            `headers=${JSON.stringify(statusHeaders)} ` +
-            `params=${JSON.stringify(detailParams)}`
-          )
           const detailResp = await axios.get(detailUrl, {
             params: detailParams,
             headers: statusHeaders,
@@ -128,30 +101,27 @@ export function scheduleSettlementChecker() {
           })
 
           const ds = detailResp.data.status
-          if (ds?.code !== '000') {
-            logger.warn(`[SettlementCron][OY] error detail ${o.id}: ${ds.code} ${ds.message}`)
-            return
-          }
+          if (ds?.code !== '000') return
           const d = detailResp.data.data
-          if (!d) {
-            logger.warn(`[SettlementCron][OY] data detail null ${o.id}, skip.`)
-            return
-          }
+          if (!d) return
 
           const netAmt = d.settlement_amount
           const fee    = d.admin_fee.total_fee
-          const rrn    = s.trx_id
 
-          // 3c) Update DB
+          const settlementTime = d.settlement_time
+            ? new Date(d.settlement_time)
+            : undefined
+
           const upd = await prisma.order.updateMany({
             where: { id: o.id, status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
             data: {
-              status:           'SETTLED',
+              status: 'SETTLED',
               settlementAmount: netAmt,
-              pendingAmount:    null,
-              fee3rdParty:      fee,
-              rrn,
-              updatedAt:        new Date()
+              pendingAmount: null,
+              fee3rdParty: fee,
+              rrn: s.trx_id,
+              updatedAt: new Date(),
+              settlementTime
             }
           })
           if (upd.count > 0) {
@@ -159,17 +129,11 @@ export function scheduleSettlementChecker() {
               where: { id: o.partnerClientId! },
               data: { balance: { increment: netAmt } }
             })
-            logger.info(`[SettlementCron][OY] ${o.id} settled +${netAmt} (fee=${fee})`)
           }
-        } catch (err: any) {
-          const errData = err.response?.data
-            ? JSON.stringify(err.response.data)
-            : err.message
-          logger.error(`[SettlementCron][OY] Gagal cek ${o.id}: ${errData}`)
+        } catch {
+          // silenced
         }
       }))
-
-      logger.info('[SettlementCron] Selesai.')
     },
     { timezone: 'Asia/Jakarta' }
   )

@@ -38,7 +38,9 @@ async function fetchOrders(opts: {
     select: {
       id: true, merchantId: true, userId: true, qrPayload: true,
       amount: true, status: true, pendingAmount: true, settlementAmount: true,
-      feeLauncx: true, createdAt: true,
+      feeLauncx: true, createdAt: true,     paymentReceivedTime:  true,
+      settlementTime:       true,
+      trxExpirationTime:    true,
     }
   })
 }
@@ -88,8 +90,11 @@ export const getTransactions = async (req: AuthRequest, res: Response) => {
     pendingAmount:    o.pendingAmount    ?? 0,
     settlementAmount: o.settlementAmount ?? 0,
     feeLauncx:        o.feeLauncx        ?? 0,
-    createdAt: o.createdAt,
-  }))
+   createdAt:         o.createdAt,  // tetap kirim sebagai Date
+  // tiga timestamp baru:
+  paymentReceivedTime: o.paymentReceivedTime ?? null,
+  settlementTime:      o.settlementTime      ?? null,
+  trxExpirationTime:   o.trxExpirationTime   ?? null,  }))
 
   res.json(txs)
 }
@@ -120,6 +125,15 @@ export const exportTransactions = async (req: AuthRequest, res: Response) => {
   visible.forEach(o=>{
     ws.addRow({
       createdAt:        o.createdAt.toISOString(),
+     paidAt:           o.paymentReceivedTime
+                        ? new Date(o.paymentReceivedTime).toISOString()
+                        : '',
+     settledAt:        o.settlementTime
+                        ? new Date(o.settlementTime).toISOString()
+                        : '',
+     expiresAt:        o.trxExpirationTime
+                        ? new Date(o.trxExpirationTime).toISOString()
+                        : '',
       merchantId:       o.merchantId,
       buyerId:          o.userId,
       reference:        o.qrPayload ?? '',

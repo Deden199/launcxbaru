@@ -193,7 +193,6 @@ export const regenerateApiKey = async (_req: Request, res: Response) => {
 export async function getDashboardTransactions(req: Request, res: Response) {
   try {
     // (1) parse tanggal & merchant filter
-    
     const { date_from, date_to, partnerClientId } = req.query as any
     const dateFrom = date_from ? new Date(String(date_from)) : undefined
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined
@@ -210,75 +209,84 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       whereOrders.partnerClientId = partnerClientId
     }
 
-    // (3) total pending (net sudah di pendingAmount)
+    // (3) total pending
     const pendingAgg = await prisma.order.aggregate({
       _sum: { pendingAmount: true },
       where: { ...whereOrders, status: 'PENDING_SETTLEMENT' }
     })
     const totalPending = pendingAgg._sum.pendingAmount ?? 0
 
-    // (4) active balance via settlementAmount saja (net sudah di settlementAmount)
+    // (4) active balance via settled
     const settleAgg = await prisma.order.aggregate({
       _sum: { settlementAmount: true },
       where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } }
     })
     const ordersActiveBalance = settleAgg._sum.settlementAmount ?? 0
 
-// (5) total balance dari partnerClient.balance
-const pcWhere: any = {}
-if (partnerClientId && partnerClientId !== 'all') {
-  pcWhere.id = partnerClientId
-}
-const partnerClients = await prisma.partnerClient.findMany({
-  where: pcWhere,
-  select: { balance: true }
-})
-const totalMerchantBalance = partnerClients
-  .reduce((sum, pc) => sum + pc.balance, 0)
+    // (5) merchant total balance
+    const pcWhere: any = {}
+    if (partnerClientId && partnerClientId !== 'all') {
+      pcWhere.id = partnerClientId
+    }
+    const partnerClients = await prisma.partnerClient.findMany({
+      where: pcWhere,
+      select: { balance: true }
+    })
+    const totalMerchantBalance = partnerClients
+      .reduce((sum, pc) => sum + pc.balance, 0)
 
-    // (6) ambil detail orders
+    // (6) ambil detail orders, termasuk ketiga timestamp
     const orders = await prisma.order.findMany({
       where: whereOrders,
       orderBy: { createdAt: 'desc' },
       select: {
-        id:               true,
-        createdAt:        true,
-        playerId:         true,
-        qrPayload:        true,
-        rrn:              true,
-        amount:           true,
-        feeLauncx:        true,
-        fee3rdParty:      true,
-        pendingAmount:    true,  // net untuk PENDING_SETTLEMENT
-        settlementAmount: true,  // net untuk settled
-        status:           true,  // PENDING_SETTLEMENT | SETTLED | etc.
-        channel: true,    // ← pastikan ini ada
-
+        id:                   true,
+        createdAt:            true,
+        playerId:             true,
+        qrPayload:            true,
+        rrn:                  true,
+        amount:               true,
+        feeLauncx:            true,
+        fee3rdParty:          true,
+        pendingAmount:        true,
+        settlementAmount:     true,
+        status:               true,
+        channel:              true,
+        paymentReceivedTime:  true,  // ← baru
+        settlementTime:       true,  // ← baru
+        trxExpirationTime:    true,  // ← baru
       }
     })
 
-    // (7) map ke format FE, include netSettle
+    // (7) map ke format FE, include netSettle + timestamp ISO
     const transactions = orders.map(o => {
-      const pend = o.pendingAmount ?? 0
+      const pend = o.pendingAmount    ?? 0
       const sett = o.settlementAmount ?? 0
-      const netSettle = o.status === 'PENDING_SETTLEMENT'
-        ? pend
-        : sett
+      const netSettle = o.status === 'PENDING_SETTLEMENT' ? pend : sett
 
       return {
-        id:               o.id,
-        date:             o.createdAt.toISOString(),
-        reference:        o.qrPayload   ?? '',
-        rrn:              o.rrn         ?? '',
-        playerId:         o.playerId,
-        amount:           o.amount,          // gross
-        feeLauncx:        o.feeLauncx   ?? 0,
-        feePg:            o.fee3rdParty ?? 0,
-        netSettle,                            // langsung net
-        status:           o.status === 'DONE' ? 'DONE' : 'SUCCESS',
-        settlementStatus: o.status ,             // raw DB flag
-        channel:          o.channel ?? ''     // ← tambahkan ini
-
+        id:                   o.id,
+        date:                 o.createdAt.toISOString(),
+        reference:            o.qrPayload   ?? '',
+        rrn:                  o.rrn         ?? '',
+        playerId:             o.playerId,
+        amount:               o.amount,
+        feeLauncx:            o.feeLauncx   ?? 0,
+        feePg:                o.fee3rdParty ?? 0,
+        netSettle,
+        status:               o.status === 'DONE' ? 'DONE' : 'SUCCESS',
+        settlementStatus:     o.status,
+        channel:              o.channel     ?? '',
+        // tiga timestamp baru:
+        paymentReceivedTime:  o.paymentReceivedTime
+                               ? o.paymentReceivedTime.toISOString()
+                               : '',
+        settlementTime:       o.settlementTime
+                               ? o.settlementTime.toISOString()
+                               : '',
+        trxExpirationTime:    o.trxExpirationTime
+                               ? o.trxExpirationTime.toISOString()
+                               : '',
       }
     })
 
@@ -315,37 +323,55 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
       where.createdAt = createdAtFilter;
     }
  
-    // (3) Ambil data dari DB
+    // (3) Ambil data dari DB, select semua kolom yang diperlukan
     const rows = await prisma.withdrawRequest.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true,
-        refId: true,
-        bankName: true,
-        accountNumber: true,
-        amount: true,
-        status: true,
-        createdAt: true
+        id:                true,
+        refId:             true,
+        accountName:       true,
+        accountNameAlias:  true,
+        accountNumber:     true,
+        bankCode:          true,
+        bankName:          true,
+        branchName:        true,
+        amount:            true,
+        netAmount:         true,
+        paymentGatewayId:  true,
+        isTransferProcess: true,
+        status:            true,
+        createdAt:         true,
+        completedAt:       true,
       },
     });
 
     // (4) Format & kirim
     const data = rows.map(w => ({
-      id:            w.id,
-      refId:         w.refId,
-      bankName:      w.bankName,
-      accountNumber: w.accountNumber,
-      amount:        w.amount,
-      status:        w.status,
-      createdAt:     w.createdAt.toISOString(),
+      id:                w.id,
+      refId:             w.refId,
+      accountName:       w.accountName,
+      accountNameAlias:  w.accountNameAlias,
+      accountNumber:     w.accountNumber,
+      bankCode:          w.bankCode,
+      bankName:          w.bankName,
+      branchName:        w.branchName ?? null,
+      amount:            w.amount,
+      netAmount:         w.netAmount ?? null,
+      paymentGatewayId:  w.paymentGatewayId ?? null,
+      isTransferProcess: w.isTransferProcess,
+      status:            w.status,
+      createdAt:         w.createdAt.toISOString(),
+      completedAt:       w.completedAt?.toISOString() ?? null,
     }));
+
     return res.json({ data });
   } catch (err: any) {
     console.error('[getDashboardWithdrawals]', err);
     return res.status(500).json({ error: 'Failed to fetch withdrawals' });
   }
 }
+
 
 // src/controller/admin/merchant.controller.ts
 export const getDashboardSummary = async (req: Request, res: Response) => {

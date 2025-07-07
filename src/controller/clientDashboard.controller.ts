@@ -169,7 +169,10 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
       select: {
         id: true, qrPayload: true, rrn: true, playerId: true,
         amount: true, feeLauncx: true, settlementAmount: true,
-        pendingAmount: true, status: true, createdAt: true
+        pendingAmount: true, status: true, createdAt: true,       
+        paymentReceivedTime: true,
+        settlementTime:      true,
+        trxExpirationTime:   true,
       }
     });
     console.log(`ditemukan ${orders.length} order(s)`);
@@ -195,8 +198,11 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
         feeLauncx: o.feeLauncx ?? 0,
         netSettle,
         settlementStatus: o.status,
-        status: o.status === 'DONE' ? 'DONE' : 'SUCCESS'
-      };
+        status: o.status === 'DONE' ? 'DONE' : 'SUCCESS',
+       // tambahkan ISO-string dari tiga timestamp:
+        paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
+        settlementTime:      o.settlementTime?.toISOString()      ?? '',
+        trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',      };
     });
 
     console.log('--- getClientDashboard END ---');
@@ -262,6 +268,9 @@ console.log('export clientIds:', clientIds)
       feeLauncx:        true,
       status:           true,
       createdAt:        true,
+      paymentReceivedTime: true,
+      settlementTime:      true,
+      trxExpirationTime:   true,
     }
   })
 
@@ -292,6 +301,9 @@ console.log('export clientIds:', clientIds)
     { header: 'Fee',         key: 'fee',    width: 15 },
     { header: 'Status',      key: 'stat',   width: 16 },
     { header: 'Date',        key: 'date',   width: 20 },
+    { header: 'Paid At',     key: 'paidAt',    width: 20 },
+  { header: 'Settled At',  key: 'settledAt', width: 20 },
+  { header: 'Expires At',  key: 'expiresAt', width: 20 },
   ]
 
   orders.forEach(o => {
@@ -305,14 +317,21 @@ console.log('export clientIds:', clientIds)
       sett:   o.settlementAmount ?? 0,
       fee:    o.feeLauncx ?? 0,
       stat:   o.status,
-      date:   o.createdAt.toISOString(),
-    })
+    date:   o.createdAt.toISOString(),
+    // isi kolom timestamp
+    paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
+    settledAt: o.settlementTime?.toISOString()      ?? '',
+    expiresAt: o.trxExpirationTime?.toISOString()   ?? '',    })
   })
 
   // (8) buat sheet per child
   for (const child of pc.children) {
     const sheet = wb.addWorksheet(child.name)
-    sheet.columns = all.columns.slice(1) // kecuali kolom “Child Name”
+    sheet.columns = all.columns.slice(1).concat([
+      { header: 'Paid At',     key: 'paidAt',    width: 20 },
+      { header: 'Settled At',  key: 'settledAt', width: 20 },
+      { header: 'Expires At',  key: 'expiresAt', width: 20 },
+    ])    
     const list = byClient[child.id] || []
     list.forEach(o => {
       sheet.addRow({
@@ -325,6 +344,9 @@ console.log('export clientIds:', clientIds)
         fee:    o.feeLauncx ?? 0,
         stat:   o.status,
         date:   o.createdAt.toISOString(),
+        paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
+        settledAt: o.settlementTime?.toISOString()      ?? '',
+        expiresAt: o.trxExpirationTime?.toISOString()   ?? '',
       })
     })
   }

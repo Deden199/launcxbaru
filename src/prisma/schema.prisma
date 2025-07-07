@@ -91,6 +91,11 @@ model transaction_callback {
   referenceId String?  @db.ObjectId
   requestBody Json
   createdAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  paymentReceivedTime  DateTime?
+  settlementTime       DateTime?
+  trxExpirationTime    DateTime?
+
 }
 
 /// Callback disbursement
@@ -192,6 +197,9 @@ model Order {
   feeLauncx        Float?
   qrPayload        String?
   checkoutUrl      String
+  paymentReceivedTime  DateTime?      // full.payment_received_time
+  settlementTime       DateTime?      // full.settlement_time
+  trxExpirationTime    DateTime?      // full.trx_expiration_time
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 }
