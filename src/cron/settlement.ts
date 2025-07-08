@@ -6,6 +6,7 @@ import crypto from 'crypto'
 import { getActiveProviders } from '../service/provider'
 import { HilogateConfig } from '../service/hilogateClient'
 import { OyConfig } from '../service/oyClient'
+import logger from '../logger'
 
 function generateSignature(path: string, secretKey: string): string {
   return crypto
@@ -26,35 +27,42 @@ export function scheduleSettlementChecker() {
       // (1) Ambil semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
         where: { status: 'PENDING_SETTLEMENT', partnerClientId: { not: null } },
-        select: { id: true, partnerClientId: true, pendingAmount: true, channel: true }
-      })
+        select: {
+          id: true,
+          partnerClientId: true,
+          pendingAmount: true,
+          channel: true,
+          subMerchantId: true
+        }   
+         })
 
       // (2) Proses Hilogate
       const hilogateOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'hilogate')
       await Promise.all(hilogateOrders.map(async o => {
         try {
                     // Ambil merchant internal untuk order ini
-          const trx = await prisma.transaction_request.findUnique({
-            where: { id: o.id },
-            select: { merchantId: true }
+          if (!o.subMerchantId) return
+          const sub = await prisma.sub_merchant.findUnique({
+            where: { id: o.subMerchantId },
+            select: { credentials: true }
           })
-          if (!trx?.merchantId) return
+          if (!sub) return
+          const cred = sub.credentials as {
+            merchantId: string
+            env?: 'sandbox' | 'live' | 'production'
+            secretKey: string
+          }
 
-          const subs = await getActiveProviders(trx.merchantId, 'hilogate')
-          if (!subs.length) return
-
-          const cfg = subs[0].config as HilogateConfig
-          const baseUrl = cfg.env === 'live'
-            ? 'https://app.hilogate.com'
-            : 'https://sandbox.hilogate.com'
+          logger.info(`[SettlementCron] ${o.id} uses sub-merchant ${o.subMerchantId}`)
+          const baseUrl = cred.env === 'live' ? 'https://app.hilogate.com' : 'https://sandbox.hilogate.com'
           const path = `/api/v1/transactions/${o.id}`
-          const sig  = generateSignature(path, cfg.secretKey)
+          const sig  = generateSignature(path, cred.secretKey)
           const resp = await axios.get(
             `${config.api.hilogate.baseUrl}${path}`,
             {
               headers: {
                 'Content-Type':  'application/json',
-                'X-Merchant-ID': config.api.hilogate.merchantId,
+                'X-Merchant-ID': cred.merchantId,
                 'X-Signature':   sig
               },
               timeout: 5_000
@@ -94,22 +102,21 @@ export function scheduleSettlementChecker() {
       await Promise.all(oyOrders.map(async o => {
         try {
           // Check-status
-          const statusUrl     = 'https://partner.oyindonesia.com/api/payment-routing/check-status'
-          const trx = await prisma.transaction_request.findUnique({
-            where: { id: o.id },
-            select: { merchantId: true }
+                    if (!o.subMerchantId) return
+          const sub = await prisma.sub_merchant.findUnique({
+            where: { id: o.subMerchantId },
+            select: { credentials: true }
           })
-          if (!trx?.merchantId) return
+          if (!sub) return
+          const cred = sub.credentials as { merchantId: string; secretKey: string }
 
-          const subs = await getActiveProviders(trx.merchantId, 'oy')
-          if (!subs.length) return
-
-          const cfg = subs[0].config as OyConfig
+          logger.info(`[SettlementCron] ${o.id} uses sub-merchant ${o.subMerchantId}`)
+          const statusUrl     = 'https://partner.oyindonesia.com/api/payment-routing/check-status'
           const statusBody = { partner_trx_id: o.id, send_callback: false }
           const headers = {
             'Content-Type':  'application/json',
-            'x-oy-username': cfg.username,
-            'x-api-key':     cfg.apiKey
+            'x-oy-username': cred.merchantId,
+            'x-api-key':     cred.secretKey
           }
 
           const statusResp = await axios.post(statusUrl, statusBody, { headers, timeout: 5_000 })

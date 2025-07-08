@@ -2,13 +2,25 @@ import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { getActiveProviders } from './provider';  // fungsi fetch sub_merchant
 
-export async function syncWithHilogate(refId: string, merchantId: string) {
-  // 1) Ambil kredensial aktif untuk merchant ini
-  const providers = await getActiveProviders(merchantId, 'hilogate');
-  if (!providers.length) throw new Error('No active Hilogate credentials');
+export async function syncWithHilogate(refId: string, subMerchantId: string) {
+  // 1) Ambil kredensial sub-merchant yang tersimpan
+  const sub = await prisma.sub_merchant.findUnique({
+    where: { id: subMerchantId },
+    select: { credentials: true }
+  });
+  if (!sub) throw new Error('Sub-merchant not found');
 
-  // 2) Inisiasi client dinamis dari `config`
-  const cfg = providers[0].config as HilogateConfig;
+  const raw = sub.credentials as unknown as {
+    merchantId: string;
+    env?:       'sandbox' | 'live' | 'production';
+    secretKey:  string;
+  };
+
+  const cfg: HilogateConfig = {
+    merchantId: raw.merchantId,
+    env:        raw.env ?? 'sandbox',
+    secretKey:  raw.secretKey
+  };
   const client = new HilogateClient(cfg);
 
   // 3) Panggil API
