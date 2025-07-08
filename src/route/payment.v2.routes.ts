@@ -1,4 +1,3 @@
-import paymentController from '../controller/paymentV2';
 import validator from '../validation/validation';
 import { Router } from 'express';
 
@@ -86,7 +85,6 @@ paymentRouterV2.post(
     '/initiate',
     ...validator.initiatePaymentValidation,
     validator.handleValidationErrors,
-    paymentController.initiatePayment
 );
 
 /**
@@ -132,7 +130,6 @@ paymentRouterV2.get(
     '/:payment_id/status',
     ...validator.getStatusValidation,
     validator.handleValidationErrors,
-    paymentController.getStatus
 );
 
 export default paymentRouterV2;

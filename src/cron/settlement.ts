@@ -3,6 +3,9 @@ import axios from 'axios'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
 import crypto from 'crypto'
+import { getActiveProviders } from '../service/provider'
+import { HilogateConfig } from '../service/hilogateClient'
+import { OyConfig } from '../service/oyClient'
 
 function generateSignature(path: string, secretKey: string): string {
   return crypto
@@ -18,7 +21,7 @@ export function scheduleSettlementChecker() {
 
   // Jadwal setiap hari jam 17:00 Asia/Jakarta
   cron.schedule(
-    '0 17 * * *',
+    '* * * * *',
     async () => {
       // (1) Ambil semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
@@ -30,8 +33,22 @@ export function scheduleSettlementChecker() {
       const hilogateOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'hilogate')
       await Promise.all(hilogateOrders.map(async o => {
         try {
+                    // Ambil merchant internal untuk order ini
+          const trx = await prisma.transaction_request.findUnique({
+            where: { id: o.id },
+            select: { merchantId: true }
+          })
+          if (!trx?.merchantId) return
+
+          const subs = await getActiveProviders(trx.merchantId, 'hilogate')
+          if (!subs.length) return
+
+          const cfg = subs[0].config as HilogateConfig
+          const baseUrl = cfg.env === 'live'
+            ? 'https://app.hilogate.com'
+            : 'https://sandbox.hilogate.com'
           const path = `/api/v1/transactions/${o.id}`
-          const sig  = generateSignature(path, config.api.hilogate.secretKey)
+          const sig  = generateSignature(path, cfg.secretKey)
           const resp = await axios.get(
             `${config.api.hilogate.baseUrl}${path}`,
             {
@@ -78,14 +95,24 @@ export function scheduleSettlementChecker() {
         try {
           // Check-status
           const statusUrl     = 'https://partner.oyindonesia.com/api/payment-routing/check-status'
-          const statusBody    = { partner_trx_id: o.id, send_callback: false }
-          const statusHeaders = {
+          const trx = await prisma.transaction_request.findUnique({
+            where: { id: o.id },
+            select: { merchantId: true }
+          })
+          if (!trx?.merchantId) return
+
+          const subs = await getActiveProviders(trx.merchantId, 'oy')
+          if (!subs.length) return
+
+          const cfg = subs[0].config as OyConfig
+          const statusBody = { partner_trx_id: o.id, send_callback: false }
+          const headers = {
             'Content-Type':  'application/json',
-            'x-oy-username': config.api.oy.username,
-            'x-api-key':     config.api.oy.apiKey
+            'x-oy-username': cfg.username,
+            'x-api-key':     cfg.apiKey
           }
 
-          const statusResp = await axios.post(statusUrl, statusBody, { headers: statusHeaders, timeout: 5_000 })
+          const statusResp = await axios.post(statusUrl, statusBody, { headers, timeout: 5_000 })
           const s          = statusResp.data
           const code       = s.status?.code
           const settleSt   = (s.settlement_status ?? '').toUpperCase()
@@ -96,7 +123,7 @@ export function scheduleSettlementChecker() {
           const detailParams = { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }
           const detailResp = await axios.get(detailUrl, {
             params: detailParams,
-            headers: statusHeaders,
+            headers,
             timeout: 5_000
           })
 

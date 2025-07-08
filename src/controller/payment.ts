@@ -4,7 +4,7 @@ import { Request, Response }            from 'express'
 import { config }                       from '../config'
 import logger                           from '../logger'
 import { ApiKeyRequest } from '../middleware/apiKeyAuth'
-import { getActiveProvidersForClient } from '../service/provider'
+import { getActiveProviders } from '../service/provider'
 import { createErrorResponse,
          createSuccessResponse }        from '../util/response'
 import paymentService, {
@@ -40,6 +40,31 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
         .status(400)
         .json(createErrorResponse('`price` harus > 0'))
     }
+        const user = await prisma.clientUser.findUnique({
+      where: { id: clientId },
+      select: {
+        partnerClientId: true,
+        partnerClient: { select: { defaultProvider: true } }
+      }
+    })
+    if (!user) return res.status(404).json(createErrorResponse('User tidak ditemukan'))
+    const { partnerClientId } = user
+// 1) Tentukan provider yang valid
+const dp = (user.partnerClient.defaultProvider || 'hilogate').toLowerCase()
+if (dp !== 'hilogate' && dp !== 'oy') {
+  return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
+}
+  const defaultProvider = (user.partnerClient.defaultProvider || 'hilogate').toLowerCase();
+
+// 2) Ambil kredensial sub‐merchant untuk provider itu
+ let subs;
+ if (defaultProvider === 'hilogate') {
+   subs = await getActiveProviders(partnerClientId, 'hilogate');
+ } else {
+   subs = await getActiveProviders(partnerClientId, 'oy');
+ }
+    if (!subs.length) return res.status(400).json(createErrorResponse('No active sub-merchant'))
+    const selectedSubMerchantId = subs[0].id
 
     // 5) Build Transaction – buyer = partner-client ID
     const trx: Transaction = {
@@ -48,6 +73,8 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
       buyer: clientId,
       playerId,
       flow,
+      subMerchantId: selectedSubMerchantId,     // ← ambil dari logic kamu
+      sourceProvider: defaultProvider.toUpperCase() // atau lowercase sesuai enum
     }
 
     // 6) Call service

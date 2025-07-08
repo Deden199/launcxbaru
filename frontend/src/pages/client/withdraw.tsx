@@ -1,10 +1,8 @@
 'use client'
-type ClientOption = { id: string; name: string };
-import axios from 'axios'
-// …
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import apiClient from '@/lib/apiClient'
+import axios from 'axios'
 import {
   Plus,
   Wallet,
@@ -17,6 +15,8 @@ import {
 import * as XLSX from 'xlsx'
 import styles from './WithdrawPage.module.css'
 
+type ClientOption = { id: string; name: string }
+
 interface Withdrawal {
   id: string
   refId: string
@@ -26,37 +26,46 @@ interface Withdrawal {
   status: string
   createdAt: string
 }
+interface SubMerchant {
+  id: string
+  provider: string
+  balance: number
+}
 
 function deriveAlias(fullName: string) {
   const parts = fullName.trim().split(' ')
   if (parts.length === 1) return parts[0]
-  return `${parts[0]} ${parts[parts.length-1][0]}.`
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`
 }
-
 
 export default function WithdrawPage() {
   /* ──────────────── Dashboard data ──────────────── */
   const [balance, setBalance] = useState(0)
   const [pending, setPending] = useState(0)
-const [pageError, setPageError] = useState('')
+  const [pageError, setPageError] = useState('')
 
   /* ──────────────── Withdrawals list ──────────────── */
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [loading, setLoading] = useState(true)
-// Parent–Child
-const [children, setChildren]           = useState<ClientOption[]>([])
-const [selectedChild, setSelectedChild] = useState<'all' | string>('all')
+
+  /* ──────────────── Parent–Child ──────────────── */
+  const [children, setChildren]           = useState<ClientOption[]>([])
+  const [selectedChild, setSelectedChild] = useState<'all' | string>('all')
+// data sub-merchant untuk source withdraw
+const [subs, setSubs] = useState<SubMerchant[]>([])
+// selectedSub akan sama dengan selectedChild di awal
+const [selectedSub, setSelectedSub] = useState<string>(selectedChild)
 
   /* ──────────────── Modal & Form state ──────────────── */
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({
-  bankCode: '',
-  accountNumber: '',
-  accountName: '',
-  accountNameAlias: '',    // ← tambahkan
-  bankName: '',            // ← tambahkan
-  branchName: '',          // ← tambahkan
-  amount: '',
+    bankCode: '',
+    accountNumber: '',
+    accountName: '',
+    accountNameAlias: '',
+    bankName: '',
+    branchName: '',
+    amount: '',
   })
   const [isValid, setIsValid] = useState(false)
   const [busy, setBusy] = useState({ validating: false, submitting: false })
@@ -69,45 +78,50 @@ const [selectedChild, setSelectedChild] = useState<'all' | string>('all')
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
-const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
+  const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
 
   /* ──────────────── Initial fetch ──────────────── */
   useEffect(() => {
-  apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
-    .then(res => setBanks(res.data.banks))
+    apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
+      .then(res => setBanks(res.data.banks))
+      .catch(console.error)
+  }, [])
+
+useEffect(() => {
+  apiClient
+    .get<SubMerchant[]>('/client/withdrawals/submerchants')
+    .then(res => {
+      console.log('Fetched subs:', res.data)
+      setSubs(res.data)
+    })
     .catch(console.error)
 }, [])
 
-useEffect(() => {
-  setLoading(true)
-  setPageError('')            
 
-  Promise.all([
-    apiClient.get<{
-      balance: number
-      totalPending: number
-      children: ClientOption[]
-    }>('/client/dashboard', {
-      params: { clientId: selectedChild }
-    }),
-    apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
-      params: { clientId: selectedChild }
-    }),
-  ])
-    .then(([dash, hist]) => {
-      setBalance(dash.data.balance)
-      setPending(dash.data.totalPending ?? 0)
-      if (children.length === 0) setChildren(dash.data.children)
-      setWithdrawals(hist.data.data)
-    })
-    .catch(console.error)
-    .finally(() => setLoading(false))
-}, [selectedChild])
+  useEffect(() => {
+    setLoading(true)
+    setPageError('')
+
+    Promise.all([
+      apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>('/client/dashboard', {
+        params: { clientId: selectedChild }
+      }),
+      apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
+        params: { clientId: selectedChild }
+      }),
+    ])
+      .then(([dash, hist]) => {
+        setBalance(dash.data.balance)
+        setPending(dash.data.totalPending ?? 0)
+        if (children.length === 0) setChildren(dash.data.children)
+        setWithdrawals(hist.data.data)
+      })
+      .catch(err => setPageError('Failed to load data'))
+      .finally(() => setLoading(false))
+  }, [selectedChild])
 
   /* ──────────────── Helpers ──────────────── */
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setForm(f => ({ ...f, [name]: value }))
     if (name === 'amount') {
@@ -117,41 +131,36 @@ useEffect(() => {
       else setError('')
     } else setError('')
     if (name === 'bankCode' || name === 'accountNumber') {
-        setForm(f => ({
-          ...f,
-          accountName:      '',
-          accountNameAlias: '',
-          bankName:         '',
-          branchName:       '',
-        }))
-        setIsValid(false)
-      }
+      setForm(f => ({
+        ...f,
+        accountName:      '',
+        accountNameAlias: '',
+        bankName:         '',
+        branchName:       '',
+      }))
+      setIsValid(false)
     }
-  
+  }
 
   const validateAccount = async () => {
     setBusy(b => ({ ...b, validating: true }))
     setError('')
     try {
-      const { data } = await apiClient.post(
-        '/client/withdrawals/validate-account',
-        {
-          bank_code: form.bankCode,
-          account_number: form.accountNumber,
-        },
-      )
+      const { data } = await apiClient.post('/client/withdrawals/validate-account', {
+        bank_code: form.bankCode,
+        account_number: form.accountNumber,
+      })
       if (data.status === 'valid') {
-         const holder = data.account_holder as string
-const bankObj = banks.find(b => b.code === form.bankCode);
- 
-  setForm(f => ({
+        const holder = data.account_holder as string
+        const bankObj = banks.find(b => b.code === form.bankCode)
+        setForm(f => ({
           ...f,
           accountName:      holder,
           accountNameAlias: deriveAlias(holder),
-            bankName:         bankObj?.name || '',
-  branchName:       '', 
+          bankName:         bankObj?.name || '',
+          branchName:       '',
         }))
-                setIsValid(true)
+        setIsValid(true)
       } else throw new Error('Akun tidak valid')
     } catch (e: any) {
       setIsValid(false)
@@ -162,48 +171,36 @@ const bankObj = banks.find(b => b.code === form.bankCode);
   }
 
   const submit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  if (!isValid || error) return
-  setBusy(b => ({ ...b, submitting: true }))
-  try {
-    await apiClient.post(
-      '/client/withdrawals',
-      {
-        account_number:     form.accountNumber,
-        bank_code:          form.bankCode,
-        account_name_alias: form.accountNameAlias,
-        amount:             +form.amount,
-      }
-    )
-    // refresh balance + history seperti biasa…
-    const [d, h] = await Promise.all([
-      apiClient.get('/client/dashboard'),
-      apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals'),
-    ])
-    setBalance(d.data.balance)
-    setPending(d.data.totalPending ?? 0)
-    setWithdrawals(h.data.data)
-    setForm(f => ({
-      ...f,
-      amount: '',
-      accountName:      '',
-      accountNameAlias: '',
-      bankName:         '',
-      branchName:       '',
-    }))
-    setIsValid(false)
-    setOpen(false)
-  } catch (err: any) {
-    if (axios.isAxiosError(err)) {
-      setError(err.response?.data?.error || 'Submit gagal')
-    } else {
-      setError('Submit gagal')
-    }
-  } finally {
-    setBusy(b => ({ ...b, submitting: false }))
-  }
-}
+    e.preventDefault()
+    if (!isValid || error) return
+    setBusy(b => ({ ...b, submitting: true }))
+    try {
+await apiClient.post('/client/withdrawals', {
+  subMerchantId:    selectedSub,
+  sourceProvider:   subs.find(s => s.id === selectedSub)?.provider,
+  account_number:   form.accountNumber,
+  bank_code:        form.bankCode,
+  account_name_alias: form.accountNameAlias,
+  amount:           +form.amount,
+})
 
+      const [d, h] = await Promise.all([
+        apiClient.get('/client/dashboard'),
+        apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals'),
+      ])
+      setBalance(d.data.balance)
+      setPending(d.data.totalPending ?? 0)
+      setWithdrawals(h.data.data)
+      setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '' }))
+      setIsValid(false)
+      setOpen(false)
+    } catch (err: any) {
+      if (axios.isAxiosError(err)) setError(err.response?.data?.error || 'Submit gagal')
+      else setError('Submit gagal')
+    } finally {
+      setBusy(b => ({ ...b, submitting: false }))
+    }
+  }
 
   const exportToExcel = () => {
     const rows = [
@@ -235,29 +232,24 @@ const bankObj = banks.find(b => b.code === form.bankCode);
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
   const pageData = filtered.slice((page - 1) * perPage, page * perPage)
 
-  /* ──────────────── JSX ──────────────── */
   return (
-    
-  <div className={styles.page}>
-    {pageError && <p className={styles.pageError}>{pageError}</p>}
-          {children.length > 0 && (
-  <div className={styles.childSelector}>
-    <label>Pilih Child:&nbsp;</label>
-    <select
-      value={selectedChild}
-      onChange={e => setSelectedChild(e.target.value as any)}
-    >
-      <option value="all">Semua Child</option>
-      {children.map(c => (
-        <option key={c.id} value={c.id}>{c.name}</option>
-      ))}
-    </select>
-  </div>
-)}
+    <div className={styles.page}>
+      {pageError && <p className={styles.pageError}>{pageError}</p>}
+      {children.length > 0 && (
+        <div className={styles.childSelector}>
+          <label>Pilih Child:&nbsp;</label>
+          <select value={selectedChild} onChange={e => setSelectedChild(e.target.value as any)}>
+            <option value="all">Semua Child</option>
+            {children.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* === STAT CARDS ===================================================== */}
       <div className={styles.statsGrid}>
-        {/* Active balance */}
+        {/* Active balance
         <div className={`${styles.statCard} ${styles.activeCard}`}>
           <Wallet size={28} />
           <div>
@@ -266,7 +258,24 @@ const bankObj = banks.find(b => b.code === form.bankCode);
               Rp {balance.toLocaleString()}
             </p>
           </div>
+        </div> */}
+      {subs.length > 0 && (
+        <div className={`${styles.statCard} ${styles.activeCard}`}>
+          {subs.map(s => (
+            <div
+              key={s.id}
+              className={s.id === selectedSub ? `${styles.cardIcon} ${styles.selected}` : styles.statCard}
+             onClick={() => setSelectedSub(s.id)}
+           >
+ <h4>
+   {s.provider 
+     ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1) 
+     : `Sub-Merchant ${s.id.substring(0,6)}`}<br></br>
+ </h4>             
+ <p>Rp {s.balance.toLocaleString()}</p>           </div>
+          ))}
         </div>
+      )}
 
         {/* Pending balance */}
         <div className={`${styles.statCard} ${styles.pendingCard}`}>
@@ -439,6 +448,17 @@ const bankObj = banks.find(b => b.code === form.bankCode);
             <h3 className={styles.modalTitle}>New Withdrawal</h3>
 
             <form className={styles.form} onSubmit={submit}>
+              <label>Sub-Merchant</label>
+  <select
+    name="subMerchantId"
+    value={selectedSub}
+    onChange={e => setSelectedSub(e.target.value)}
+    required
+  >
+    {subs.map(s => (
+      <option key={s.id} value={s.id}>{s.provider}</option>
+    ))}
+  </select>
               {/* bank */}
               <div className={styles.field}>
                 <label>Bank</label>

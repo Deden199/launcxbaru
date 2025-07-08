@@ -1,6 +1,7 @@
+// frontend/src/pages/admin/clients/[clientId].tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
@@ -13,6 +14,8 @@ interface Client {
   isActive: boolean
   feePercent: number
   feeFlat: number
+  withdrawFeePercent: number    // new
+  withdrawFeeFlat: number       // new
   parentClientId?: string
   childrenIds?: string[]
   defaultProvider?: string
@@ -31,6 +34,8 @@ export default function EditClientPage() {
   const [isActive, setIsActive]           = useState(true)
   const [feePercent, setFeePercent]       = useState<number>(0)
   const [feeFlat, setFeeFlat]             = useState<number>(0)
+  const [withdrawFeePercent, setWithdrawFeePercent] = useState<number>(0) // new
+  const [withdrawFeeFlat, setWithdrawFeeFlat]       = useState<number>(0) // new
   const [parentClientId, setParentClientId] = useState<string>('')
   const [childrenIds, setChildrenIds]     = useState<string[]>([])
   const [defaultProvider, setDefaultProvider] = useState<string>('')
@@ -48,6 +53,8 @@ export default function EditClientPage() {
         setIsActive(c.isActive)
         setFeePercent(c.feePercent)
         setFeeFlat(c.feeFlat)
+        setWithdrawFeePercent(c.withdrawFeePercent)  // new
+        setWithdrawFeeFlat(c.withdrawFeeFlat)        // new
         setParentClientId(c.parentClientId || '')
         setChildrenIds(c.childrenIds || [])
         setDefaultProvider(c.defaultProvider || '')
@@ -81,6 +88,8 @@ export default function EditClientPage() {
         isActive,
         feePercent,
         feeFlat,
+        withdrawFeePercent,  // new
+        withdrawFeeFlat,     // new
         parentClientId: parentClientId || null,
         childrenIds,
         defaultProvider
@@ -116,17 +125,16 @@ export default function EditClientPage() {
 
           <div className="field">
             <label>Default Provider</label>
-  <div className="default-select-wrapper">
-  <select
-    value={defaultProvider}
-    onChange={e => setDefaultProvider(e.target.value)}
-  >
-    <option value="">-- Select Provider --</option>
-    <option value="hilogate">Hilogate</option>
-    <option value="oy">OY Indonesia</option>
-  </select>
-</div>
-
+            <div className="default-select-wrapper">
+              <select
+                value={defaultProvider}
+                onChange={e => setDefaultProvider(e.target.value)}
+              >
+                <option value="">-- Select Provider --</option>
+                <option value="hilogate">Hilogate</option>
+                <option value="oy">OY Indonesia</option>
+              </select>
+            </div>
           </div>
 
           <div className="field">
@@ -143,7 +151,7 @@ export default function EditClientPage() {
           </div>
 
           <div className="field">
-            <label>Fee %</label>
+            <label>Transaction Fee %</label>
             <input
               type="number"
               step={0.001}
@@ -156,13 +164,39 @@ export default function EditClientPage() {
           </div>
 
           <div className="field">
-            <label>Fee Flat</label>
+            <label>Transaction Fee Flat</label>
             <input
               type="number"
               step={0.01}
               min={0}
               value={feeFlat}
               onChange={e => setFeeFlat(parseFloat(e.target.value) || 0)}
+              placeholder="0.00"
+            />
+          </div>
+
+          {/* New withdraw fee fields */}
+          <div className="field">
+            <label>Withdraw Fee %</label>
+            <input
+              type="number"
+              step={0.001}
+              min={0}
+              max={100}
+              value={withdrawFeePercent}
+              onChange={e => setWithdrawFeePercent(parseFloat(e.target.value) || 0)}
+              placeholder="0.000"
+            />
+          </div>
+
+          <div className="field">
+            <label>Withdraw Fee Flat</label>
+            <input
+              type="number"
+              step={0.01}
+              min={0}
+              value={withdrawFeeFlat}
+              onChange={e => setWithdrawFeeFlat(parseFloat(e.target.value) || 0)}
               placeholder="0.00"
             />
           </div>
@@ -211,7 +245,7 @@ export default function EditClientPage() {
           </div>
 
         </form>
-</div>
+      </div>
 
 
       <style jsx>{`

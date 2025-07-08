@@ -48,12 +48,19 @@ model sub_merchant {
   id             String   @id @default(auto()) @map("_id") @db.ObjectId
   merchantId     String
   provider       String?
+  
   fee            Float  @default(0.0)
   credentials   Json?     // merchantId, env, secretKey
   schedule      Json?     // { weekday: boolean, weekend: boolean }
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   merchant merchant @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
+  withdrawRequests WithdrawRequest[] @relation("SubMerchantWithdrawals")
+  transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
+  orders           Order[]             @relation("OrderSubMerchant")
+
+
+
 }
 
 /// Transaksi
@@ -74,6 +81,8 @@ model transaction_request {
   settlementAmount Int?
   settlementAt     DateTime?
   merchant         merchant?         @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
+  subMerchant      sub_merchant?     @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
+
 }
 
 /// Simpan response mentah dari gateway
@@ -174,6 +183,8 @@ model PartnerClient {
   children         PartnerClient[]  @relation("ParentChildren")
   users            ClientUser[]
   withdraws        WithdrawRequest[]
+  withdrawFeePercent Float @default(0)
+  withdrawFeeFlat    Float @default(0)
 }
 
 model Order {
@@ -182,7 +193,8 @@ model Order {
   // UUID string foreign key, nullable for existing orders
   partnerClientId  String?          @map("partnerClientId")
   partnerClient    PartnerClient?   @relation("PartnerClientOrders", fields: [partnerClientId], references: [id])
-
+  subMerchantId    String?
+  subMerchant      sub_merchant? @relation("OrderSubMerchant",       fields: [subMerchantId], references: [id])
   userId           String
   playerId         String?
   merchantId       String?
@@ -260,8 +272,13 @@ model WithdrawRequest {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   completedAt       DateTime?
-
+  subMerchantId      String
+  sourceProvider     String
+  withdrawFeePercent Float
+  withdrawFeeFlat    Float
   partnerClient PartnerClient @relation(fields: [partnerClientId], references: [id])
+  subMerchant        sub_merchant    @relation("SubMerchantWithdrawals", fields: [subMerchantId], references: [id])
+
 }
 
 

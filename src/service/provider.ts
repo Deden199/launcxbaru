@@ -17,7 +17,7 @@ interface RawSub {
 }
 
 export interface ResultSub<C> {
-  id: string
+  id:       string        // ← ID sub_merchant
   provider: string
   fee: number
   config: C
@@ -103,41 +103,43 @@ export async function getActiveProviders(
     }
   })
 
-  // 2) map & cast
-  return subs.map(s => {
-    const raw = s.credentials as unknown as {
-      merchantId: string
-      env?:        'sandbox' | 'live' | 'production'
-      secretKey:  string
-    }
+ // 2) map & cast
+return subs.map(s => {
+  // common fields untuk kedua provider
+  const common = {
+    id:       s.id,
+    provider: s.provider,
+    fee:      s.fee,
+  }
 
-    if (provider === 'hilogate') {
-      const cfg: HilogateConfig = {
-        merchantId: raw.merchantId,
-        env:        raw.env ?? 'sandbox',
-        secretKey:  raw.secretKey
-      }
-      return {
-        id:       s.id,
-        provider: s.provider,
-        fee:      s.fee,
-        config:   cfg
-      } as ResultSub<HilogateConfig>
-    } else {
-      const cfg: OyConfig = {
-        baseUrl:  process.env.OY_BASE_URL!,
-        username: raw.merchantId,
-        apiKey:   raw.secretKey,
+  const raw = s.credentials as unknown as {
+    merchantId: string
+    env?:       'sandbox' | 'live' | 'production'
+    secretKey:  string
+  }
 
-      }
-      return {
-        id:       s.id,
-        provider: s.provider,
-        fee:      s.fee,
-        config:   cfg
-      } as ResultSub<OyConfig>
+  if (provider === 'hilogate') {
+    const cfg: HilogateConfig = {
+      merchantId: raw.merchantId,
+      env:        raw.env ?? 'sandbox',
+      secretKey:  raw.secretKey,
     }
-  })
+    return {
+      ...common,
+      config: cfg
+    } as ResultSub<HilogateConfig>
+  } else {
+    const cfg: OyConfig = {
+      baseUrl:  process.env.OY_BASE_URL!,
+      username: raw.merchantId,
+      apiKey:   raw.secretKey,
+    }
+    return {
+      ...common,
+      config: cfg
+    } as ResultSub<OyConfig>
+  }
+})
 }
 
 

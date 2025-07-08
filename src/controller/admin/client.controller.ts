@@ -6,24 +6,24 @@ import bcrypt from 'bcrypt'
 
 const prisma = new PrismaClient()
 
-// 1) List semua API-Clients
-// src/controllers/admin/client.controller.ts
-
+// 1) List all clients with withdraw fee settings
 export const getAllClients = async (_: Request, res: Response) => {
   const clients = await prisma.partnerClient.findMany({
     select: {
-      id:         true,
-      name:       true,
-      apiKey:     true,
-      apiSecret:  true,
-      isActive:   true,
-      feePercent: true,
-      feeFlat:    true,
-      defaultProvider:true,          // ← include defaultProvider
-      parentClient: {              // ← ambil relasi parent
+      id:             true,
+      name:           true,
+      apiKey:         true,
+      apiSecret:      true,
+      isActive:       true,
+      feePercent:     true,
+      feeFlat:        true,
+      withdrawFeePercent: true,
+      withdrawFeeFlat:    true,
+      defaultProvider:    true,
+      parentClient: {
         select: { id: true, name: true }
       },
-      children: {                  // ← ambil relasi children
+      children: {
         select: { id: true, name: true }
       }
     }
@@ -47,12 +47,24 @@ export const createClient = async (req: Request, res: Response) => {
   const feeFlat = req.body.feeFlat != null
     ? Number(req.body.feeFlat)
     : 0
+  const withdrawFeePercent = req.body.withdrawFeePercent != null
+    ? Number(req.body.withdrawFeePercent)
+    : 0
+  const withdrawFeeFlat = req.body.withdrawFeeFlat != null
+    ? Number(req.body.withdrawFeeFlat)
+    : 0
 
   if (isNaN(feePercent) || feePercent < 0 || feePercent > 100) {
     return res.status(400).json({ error: 'feePercent must be between 0 and 100' })
   }
   if (isNaN(feeFlat) || feeFlat < 0) {
     return res.status(400).json({ error: 'feeFlat must be >= 0' })
+  }
+  if (isNaN(withdrawFeePercent) || withdrawFeePercent < 0 || withdrawFeePercent > 100) {
+    return res.status(400).json({ error: 'withdrawFeePercent must be between 0 and 100' })
+  }
+  if (isNaN(withdrawFeeFlat) || withdrawFeeFlat < 0) {
+    return res.status(400).json({ error: 'withdrawFeeFlat must be >= 0' })
   }
 
   // 2a) buat PartnerClient
@@ -66,8 +78,9 @@ export const createClient = async (req: Request, res: Response) => {
       isActive:   true,
       feePercent,
       feeFlat,
-      defaultProvider: 'hilogate',   // ← set defaultProvider fallback
-
+      withdrawFeePercent,
+      withdrawFeeFlat,
+      defaultProvider: 'hilogate',
     }
   })
 
@@ -113,13 +126,14 @@ export const getClientById = async (req: Request, res: Response) => {
     isActive: client.isActive,
     feePercent: client.feePercent,
     feeFlat: client.feeFlat,
-    defaultProvider:  client.defaultProvider,  // ← include defaultProvider
+    withdrawFeePercent: client.withdrawFeePercent,
+    withdrawFeeFlat: client.withdrawFeeFlat,
+    defaultProvider:  client.defaultProvider,
     createdAt: client.createdAt,
     parentClientId: client.parentClient?.id ?? null,
     childrenIds: client.children.map(c => c.id)
   })
 }
-
 
 // 4) Update API-Client by ID
 export const updateClient = async (req: Request, res: Response) => {
@@ -129,7 +143,9 @@ export const updateClient = async (req: Request, res: Response) => {
     isActive,
     feePercent,
     feeFlat,
-    defaultProvider,        // ← include in body
+    withdrawFeePercent,
+    withdrawFeeFlat,
+    defaultProvider,
     parentClientId = null,
     childrenIds = []
   } = req.body as {
@@ -137,7 +153,9 @@ export const updateClient = async (req: Request, res: Response) => {
     isActive?: boolean
     feePercent?: number
     feeFlat?: number
-    defaultProvider?: string       // ← add this line
+    withdrawFeePercent?: number
+    withdrawFeeFlat?: number
+    defaultProvider?: string
     parentClientId?: string | null
     childrenIds?: string[]
   }
@@ -158,26 +176,38 @@ export const updateClient = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'feeFlat must be >= 0' })
     data.feeFlat = f
   }
-  data.parentClientId = parentClientId || null
-if (defaultProvider != null) {
-  const dp = String(defaultProvider).trim().toLowerCase()
-  // validasi: hanya izinkan nama provider yang tersedia
-  const allowed = ['hilogate', 'oy', 'gv']  // atau daftar dinamis dari PG
-  if (!allowed.includes(dp)) {
-    return res.status(400).json({ error: `defaultProvider must be one of ${allowed.join(', ')}` })
+  if (withdrawFeePercent != null) {
+    const wf = Number(withdrawFeePercent)
+    if (isNaN(wf)|| wf < 0 || wf > 100)
+      return res.status(400).json({ error: 'withdrawFeePercent must be between 0 and 100' })
+    data.withdrawFeePercent = wf
   }
-  data.defaultProvider = dp
-}
-  // 1) update utama
+  if (withdrawFeeFlat != null) {
+    const wf = Number(withdrawFeeFlat)
+    if (isNaN(wf)|| wf < 0)
+      return res.status(400).json({ error: 'withdrawFeeFlat must be >= 0' })
+    data.withdrawFeeFlat = wf
+  }
+  if (defaultProvider != null) {
+    const dp = String(defaultProvider).trim().toLowerCase()
+    const allowed = ['hilogate', 'oy', 'gv']
+    if (!allowed.includes(dp)) {
+      return res.status(400).json({ error: `defaultProvider must be one of ${allowed.join(', ')}` })
+    }
+    data.defaultProvider = dp
+  }
+  data.parentClientId = parentClientId || null
+
+  // update utama
   const updated = await prisma.partnerClient.update({ where: { id: clientId }, data })
 
-  // 2) lepas relasi parentClientId dari anak lama yang dikeluarkan
+  // lepas relasi parentClientId dari anak lama
   await prisma.partnerClient.updateMany({
     where: { parentClientId: clientId, id: { notIn: childrenIds } },
     data: { parentClientId: null }
   })
 
-  // 3) pasang relasi parentClientId untuk anak yang dipilih
+  // pasang relasi parentClientId untuk anak yang dipilih
   if (childrenIds.length) {
     await prisma.partnerClient.updateMany({
       where: { id: { in: childrenIds } },
@@ -195,49 +225,3 @@ export const listProviders = async (_: Request, res: Response) => {
   })
   res.json(providers)
 }
-
-// // 6) List koneksi PG untuk satu client
-// export const listClientPG = async (req: Request, res: Response) => {
-//   const { clientId } = req.params
-//   const conns = await prisma.clientPG.findMany({
-//     where: { clientId },
-//     select: { id: true, clientId: true, pgProviderId: true, clientFee: true, activeDays: true }
-//   })
-//   res.json(conns)
-// }
-
-// // 7) Upsert koneksi PG (create or update)
-// export const createClientPG = async (req: Request, res: Response) => {
-//   const { clientId } = req.params
-//   const { pgProviderId, clientFee, activeDays } = req.body
-//   if (!pgProviderId || clientFee == null || !Array.isArray(activeDays)) {
-//     return res.status(400).json({ error: 'pgProviderId, clientFee & activeDays are required' })
-//   }
-//   const item = await prisma.clientPG.upsert({
-//     where: { clientId_pgProviderId: { clientId, pgProviderId } },
-//     update: { clientFee, activeDays },
-//     create: { clientId, pgProviderId, clientFee, activeDays }
-//   })
-//   res.json(item)
-// }
-
-// // 8) Update koneksi PG by ID
-// export const updateClientPG = async (req: Request, res: Response) => {
-//   const { id } = req.params
-//   const { clientFee, activeDays } = req.body
-//   if (clientFee == null || !Array.isArray(activeDays)) {
-//     return res.status(400).json({ error: 'clientFee & activeDays are required' })
-//   }
-//   const item = await prisma.clientPG.update({
-//     where: { id },
-//     data: { clientFee, activeDays }
-//   })
-//   res.json(item)
-// }
-
-// // 9) Delete koneksi PG
-// export const deleteClientPG = async (_: Request, res: Response) => {
-//   const { id } = res.locals.params as any
-//   await prisma.clientPG.delete({ where: { id } })
-//   res.status(204).end()
-// }

@@ -40,6 +40,8 @@ export interface Transaction {
   buyer: string;
   flow?: 'embed' | 'redirect';
   playerId?: string;
+  subMerchantId: string;         // ← tambahkan
+  sourceProvider: string;       // ← tambahkan
 }
 export interface OrderRequest {
   amount: number;
@@ -90,7 +92,7 @@ export const createTransaction = async (
     const trx = await prisma.transaction_request.create({
       data: {
         merchantId: merchantRec.id,
-        subMerchantId: '',
+        subMerchantId:   request.subMerchantId, // ← connect ke sub‐merchant
         buyerId: request.buyer,
         playerId: pid,
         amount,
@@ -149,6 +151,7 @@ const qrString = apiResp.data?.qr_string ?? apiResp.qr_string;
         userId: request.buyer,
         merchantId: request.buyer,
         // connect relation to PartnerClient
+        subMerchant:     { connect: { id: request.subMerchantId } }, // ← connect di order juga
         partnerClient: { connect: { id: request.buyer } },
         playerId: pid,
         amount,
@@ -181,7 +184,7 @@ if (mName === 'oy') {
   const trx = await prisma.transaction_request.create({
     data: {
       merchantId:      merchantRec.id,
-      subMerchantId:   '',
+      subMerchantId:   request.subMerchantId, // ← connect ke sub‐merchant
       buyerId:         request.buyer,
       playerId:        pid,
       amount,
@@ -226,6 +229,7 @@ const qrResp = await oyClient.createQRISTransaction({
       id:            refId,
       userId:        request.buyer,
       merchantId:    merchantRec.id,
+      subMerchant:     { connect: { id: request.subMerchantId } }, // ← connect di order juga
       partnerClient: { connect: { id: request.buyer } },
       playerId:      pid,
       amount,

@@ -7,6 +7,7 @@ import {
   requestWithdraw,
   listWithdrawals,
   retryWithdrawal,
+  listSubMerchants,
 } from '../controller/withdrawals.controller'
 
 const router = Router()
@@ -33,6 +34,8 @@ router.get(
   '/',
   listWithdrawals
 )
+router.get('/submerchants', listSubMerchants)
+
 
 // 4) Retry a failed withdrawal
 router.post(
