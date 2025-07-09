@@ -25,9 +25,13 @@ interface Withdrawal {
   amount: number
   status: string
   createdAt: string
+    completedAt?: string
+
 }
 interface SubMerchant {
   id: string
+  name: string
+
   provider: string
   balance: number
 }
@@ -186,8 +190,10 @@ await apiClient.post('/client/withdrawals', {
 
       const [d, h] = await Promise.all([
         apiClient.get('/client/dashboard'),
-        apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals'),
-      ])
+        apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
+          params: { clientId: selectedChild }
+        }),
+            ])
       setBalance(d.data.balance)
       setPending(d.data.totalPending ?? 0)
       setWithdrawals(h.data.data)
@@ -204,9 +210,11 @@ await apiClient.post('/client/withdrawals', {
 
   const exportToExcel = () => {
     const rows = [
-      ['Date', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'],
+      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'],
       ...withdrawals.map(w => [
         new Date(w.createdAt).toLocaleDateString(),
+                w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-',
+
         w.refId,
         w.bankName,
         w.accountNumber,
@@ -264,13 +272,13 @@ await apiClient.post('/client/withdrawals', {
           {subs.map(s => (
             <div
               key={s.id}
-              className={s.id === selectedSub ? `${styles.cardIcon} ${styles.selected}` : styles.statCard}
+              className={s.id === selectedSub ? `${styles.statCard} ${styles.selected}` : styles.statCard}
              onClick={() => setSelectedSub(s.id)}
            >
  <h4>
-   {s.provider 
-     ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1) 
-     : `Sub-Merchant ${s.id.substring(0,6)}`}<br></br>
+   {s.name || (s.provider
+     ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1)
+     : `Sub-Merchant ${s.id.substring(0,6)}`)}<br></br>
  </h4>             
  <p>Rp {s.balance.toLocaleString()}</p>           </div>
           ))}
@@ -355,7 +363,7 @@ await apiClient.post('/client/withdrawals', {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  {['Date', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'].map(
+                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'].map(
                     h => (
                       <th key={h}>
                         {h}
@@ -366,10 +374,12 @@ await apiClient.post('/client/withdrawals', {
                 </tr>
               </thead>
               <tbody>
-                {pageData.length ? (
+                  {pageData.length ? (
                   pageData.map(w => (
                     <tr key={w.id}>
                       <td>{new Date(w.createdAt).toLocaleDateString()}</td>
+                                            <td>{w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-'}</td>
+
                       <td>{w.refId}</td>
                       <td>{w.bankName}</td>
                       <td>{w.accountNumber}</td>
@@ -383,7 +393,7 @@ await apiClient.post('/client/withdrawals', {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className={styles.noData}>
+                    <td colSpan={7} className={styles.noData}>
                       No data
                     </td>
                   </tr>
@@ -448,17 +458,23 @@ await apiClient.post('/client/withdrawals', {
             <h3 className={styles.modalTitle}>New Withdrawal</h3>
 
             <form className={styles.form} onSubmit={submit}>
-              <label>Sub-Merchant</label>
+<label>Sub-Merchant</label>
+<div className={styles.selectWrapper}>
   <select
     name="subMerchantId"
+    className={styles.subMerchantSelect}
     value={selectedSub}
     onChange={e => setSelectedSub(e.target.value)}
     required
   >
     {subs.map(s => (
-      <option key={s.id} value={s.id}>{s.provider}</option>
+      <option key={s.id} value={s.id}>{s.name || s.provider}</option>
+
     ))}
   </select>
+  <span className={styles.selectArrow} />
+</div>
+
               {/* bank */}
               <div className={styles.field}>
                 <label>Bank</label>

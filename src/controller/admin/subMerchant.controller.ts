@@ -13,6 +13,8 @@ const scheduleSchema = z.object({
   weekday: z.boolean(),
   weekend: z.boolean(),
 });
+const nameSchema = z.string().min(1)
+
 const providerSchema = z.enum(['hilogate', 'oy', 'netzme', '2c2p']);
 
 // GET /admin/merchant/:merchantId/pg
@@ -22,6 +24,8 @@ export async function listSubMerchants(req: Request, res: Response) {
     where: { merchantId },
     select: {
       id: true,
+            name: true,
+
       credentials: true,
       schedule: true,
       createdAt: true,
@@ -35,6 +39,8 @@ export async function listSubMerchants(req: Request, res: Response) {
 export async function createSubMerchant(req: Request, res: Response) {
   const merchantId = req.params.merchantId;
   // parse dan validasi body
+    const name = nameSchema.parse(req.body.name);
+
   const provider = providerSchema.parse(req.body.provider);
   const credentials = credentialsSchema.parse(req.body.credentials);
   const schedule = scheduleSchema.parse(req.body.schedule);
@@ -43,6 +49,8 @@ export async function createSubMerchant(req: Request, res: Response) {
     data: {
       merchant:    { connect: { id: merchantId } },
       provider,
+            name,
+
       credentials,
       schedule,
     },
@@ -50,26 +58,51 @@ export async function createSubMerchant(req: Request, res: Response) {
   return res.status(201).json(created);
 }
 
-// PATCH /admin/merchant/:merchantId/pg/:subId
 export async function updateSubMerchant(req: Request, res: Response) {
-  const { merchantId, subId } = req.params;
-  // input validation
-  const data: any = {};
-  if (req.body.provider) {
-    data.provider = providerSchema.parse(req.body.provider);
-  }
-  if (req.body.credentials) {
-    data.credentials = credentialsSchema.parse(req.body.credentials);
-  }
-  if (req.body.schedule) {
-    data.schedule = scheduleSchema.parse(req.body.schedule);
-  }
+  const { merchantId, subId } = req.params
 
-  const updated = await prisma.sub_merchant.update({
-    where: { id: subId },
-    data,
-  });
-  return res.json(updated);
+  try {
+    // Pastikan sub-merchant ada dan milik merchant yang benar
+    const existing = await prisma.sub_merchant.findUnique({
+      where: { id: subId },
+      select: { merchantId: true }
+    })
+    if (!existing) {
+      return res.status(404).json({ error: 'Sub-merchant tidak ditemukan.' })
+    }
+    if (existing.merchantId !== merchantId) {
+      return res.status(403).json({ error: 'Anda tidak memiliki akses untuk mengubah sub-merchant ini.' })
+    }
+
+    // Validasi input dan bangun objek data
+    const data: any = {}
+    if (req.body.provider !== undefined) {
+      data.provider = providerSchema.parse(req.body.provider)
+    }
+    if (req.body.name !== undefined) {
+      data.name = nameSchema.parse(req.body.name)
+    }
+    if (req.body.credentials !== undefined) {
+      data.credentials = credentialsSchema.parse(req.body.credentials)
+    }
+    if (req.body.schedule !== undefined) {
+      data.schedule = scheduleSchema.parse(req.body.schedule)
+    }
+
+    // Update di database
+    const updated = await prisma.sub_merchant.update({
+      where: { id: subId },
+      data,
+    })
+
+    return res.json(updated)
+  } catch (err: any) {
+    console.error('Gagal update sub-merchant:', err)
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ error: err.errors.map((e: any) => e.message).join(', ') })
+    }
+    return res.status(500).json({ error: 'Terjadi kesalahan saat memperbarui data.' })
+  }
 }
 
 // DELETE /admin/merchant/:merchantId/pg/:subId

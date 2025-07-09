@@ -14,7 +14,7 @@ interface ClientLayoutProps {
 const navItems = [
   { label: 'Dashboard',         href: '/client/dashboard',         Icon: Home },
   { label: 'Withdraw',          href: '/client/withdraw',          Icon: CreditCard },
-  { label: 'Callback Settings', href: '/client/callback-settings', Icon: IconSettings },
+  { label: 'Settings', href: '/client/callback-settings', Icon: IconSettings },
 ]
 
 export default function ClientLayout({ children }: ClientLayoutProps) {

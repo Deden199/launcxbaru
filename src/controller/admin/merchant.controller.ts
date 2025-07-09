@@ -91,13 +91,13 @@ export const setFeeRate = async (req: Request, res: Response) => {
 export const connectPG = async (req: Request, res: Response) => {
   try {
     const merchantId = req.params.id;
-    const { provider, credentials, fee } = req.body;
+  const { provider, credentials, fee, name } = req.body;
 
     // 1) Обязательные поля
-    if (!provider || !credentials?.merchantId || !credentials?.secretKey) {
+    if (!provider || !credentials?.merchantId || !credentials?.secretKey || !name) {
       return res
         .status(400)
-        .json({ error: 'provider, merchantId & secretKey required' });
+        .json({ error: 'provider, merchantId, secretKey, and name required' });
     }
 
     // 2) Дефолт для schedule
@@ -132,6 +132,7 @@ export const connectPG = async (req: Request, res: Response) => {
       data: {
         merchant:   { connect: { id: merchantId } },
         provider,
+        name,
         credentials,           // Prisma: Json
         schedule,              // Prisma: Json
         fee: fee != null ? Number(fee) : 0,
@@ -157,17 +158,59 @@ export const listPGs = async (req: Request, res: Response) => {
 
 // 9. Update fee koneksi PG
 export const updatePGFee = async (req: Request, res: Response) => {
-  const subId = req.params.subId;
-  const { fee } = req.body;
-  if (fee == null) {
-    return res.status(400).json({ error: 'fee required' });
+   try {
+     const merchantId = req.params.id
+    const subId       = req.params.subId
+    const { provider, credentials, fee, name, schedule: rawSched } = req.body
+
+    // 1) Pastikan record ada dan milik merchant yang sama
+    const existing = await prisma.sub_merchant.findUnique({
+      where: { id: subId },
+      select: { merchantId: true }
+    })
+    if (!existing) {
+      return res.status(404).json({ error: 'Sub-merchant tidak ditemukan.' })
+    }
+    if (existing.merchantId !== merchantId) {
+      return res.status(403).json({ error: 'Akses ditolak.' })
+    }
+
+    // 2) Build objek `data` hanya dari field yang dikirim
+    const data: any = {}
+    if (provider) {
+      data.provider = provider
+    }
+    if (name) {
+      data.name = name
+    }
+    if (credentials?.merchantId && credentials?.secretKey) {
+      data.credentials = credentials
+    }
+    if (typeof fee !== 'undefined') {
+      data.fee = Number(fee)
+    }
+    if (
+      rawSched &&
+      typeof rawSched.weekday === 'boolean' &&
+      typeof rawSched.weekend === 'boolean'
+    ) {
+      data.schedule = rawSched
+    }
+
+    // 3) Lakukan update
+    const updated = await prisma.sub_merchant.update({
+      where: { id: subId },
+      data,
+    })
+
+    return res.json(updated)
+  } catch (err: any) {
+    console.error('[updateSubMerchant]', err)
+    return res
+      .status(500)
+      .json({ error: 'Gagal memperbarui koneksi PG, silakan coba lagi nanti.' })
   }
-  const updated = await prisma.sub_merchant.update({
-    where: { id: subId },
-    data: { fee: Number(fee) },
-  });
-  res.json(updated);
-};
+}
 
 // 10. Disconnect PG
 export const disconnectPG = async (req: Request, res: Response) => {

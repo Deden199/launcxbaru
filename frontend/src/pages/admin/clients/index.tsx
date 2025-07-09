@@ -105,11 +105,11 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
   <option value="hilogate">Hilogate</option>
   <option value="oy">OY Indonesia</option>
 </select>
-          <select value={newParentId} onChange={e => setNewParentId(e.target.value)}>
+          {/* <select value={newParentId} onChange={e => setNewParentId(e.target.value)}>
             <option value="">No Parent</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <input
+          </select> */}
+          {/* <input
             placeholder="Fee %" type="number" step={0.001} min={0} max={100}
             value={newFeePercent}
             onChange={e => setNewFeePercent(parseFloat(e.target.value) || 0)}
@@ -118,7 +118,7 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
             placeholder="Fee Flat" type="number" step="0.01" min={0}
             value={newFeeFlat}
             onChange={e => setNewFeeFlat(parseFloat(e.target.value) || 0)}
-          />
+          /> */}
           <button onClick={addClient} disabled={loading}>
             {loading ? 'Menambahkan…' : 'Tambah Client'}
           </button>

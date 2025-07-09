@@ -19,6 +19,8 @@ interface Client {
   parentClientId?: string
   childrenIds?: string[]
   defaultProvider?: string
+    weekendFeePercent: number
+  weekendFeeFlat: number
 }
 
 type Option = { id: string; name: string }
@@ -34,6 +36,8 @@ export default function EditClientPage() {
   const [isActive, setIsActive]           = useState(true)
   const [feePercent, setFeePercent]       = useState<number>(0)
   const [feeFlat, setFeeFlat]             = useState<number>(0)
+    const [weekendFeePercent, setWeekendFeePercent] = useState<number>(0)
+  const [weekendFeeFlat, setWeekendFeeFlat] = useState<number>(0)
   const [withdrawFeePercent, setWithdrawFeePercent] = useState<number>(0) // new
   const [withdrawFeeFlat, setWithdrawFeeFlat]       = useState<number>(0) // new
   const [parentClientId, setParentClientId] = useState<string>('')
@@ -53,6 +57,8 @@ export default function EditClientPage() {
         setIsActive(c.isActive)
         setFeePercent(c.feePercent)
         setFeeFlat(c.feeFlat)
+                setWeekendFeePercent(c.weekendFeePercent)
+        setWeekendFeeFlat(c.weekendFeeFlat)
         setWithdrawFeePercent(c.withdrawFeePercent)  // new
         setWithdrawFeeFlat(c.withdrawFeeFlat)        // new
         setParentClientId(c.parentClientId || '')
@@ -88,6 +94,8 @@ export default function EditClientPage() {
         isActive,
         feePercent,
         feeFlat,
+        weekendFeePercent,
+        weekendFeeFlat,
         withdrawFeePercent,  // new
         withdrawFeeFlat,     // new
         parentClientId: parentClientId || null,
@@ -171,6 +179,30 @@ export default function EditClientPage() {
               min={0}
               value={feeFlat}
               onChange={e => setFeeFlat(parseFloat(e.target.value) || 0)}
+              placeholder="0.00"
+            />
+          </div>
+      <div className="field">
+            <label>Weekend Fee %</label>
+            <input
+              type="number"
+              step={0.001}
+              min={0}
+              max={100}
+              value={weekendFeePercent}
+              onChange={e => setWeekendFeePercent(parseFloat(e.target.value) || 0)}
+              placeholder="0.000"
+            />
+          </div>
+
+          <div className="field">
+            <label>Weekend Fee Flat</label>
+            <input
+              type="number"
+              step={0.01}
+              min={0}
+              value={weekendFeeFlat}
+              onChange={e => setWeekendFeeFlat(parseFloat(e.target.value) || 0)}
               placeholder="0.00"
             />
           </div>

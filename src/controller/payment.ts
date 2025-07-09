@@ -15,6 +15,7 @@ import paymentService, {
 import { AuthRequest }                  from '../middleware/auth'
 import { prisma }               from '../core/prisma'
 import Decimal from 'decimal.js'
+import { isJakartaWeekend } from '../util/time'
 
 
 export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
@@ -202,18 +203,24 @@ export const transactionCallback = async (req: Request, res: Response) => {
     // 7) Ambil konfigurasi fee partner
     const partnerConfig = await prisma.partnerClient.findUnique({
       where: { id: merchantId },
-      select: { feePercent: true, feeFlat: true }
-    })
+      select: {
+        feePercent:       true,
+        feeFlat:          true,
+        weekendFeePercent:true,
+        weekendFeeFlat:   true,
+      }
+        })
     if (!partnerConfig) throw new Error(`Partner ${merchantId} not found`)
-    const { feePercent = 0, feeFlat = 0 } = partnerConfig
-
+    const weekend = isJakartaWeekend(paymentReceivedTime)
+    const pctFee  = weekend ? partnerConfig.weekendFeePercent ?? 0 : partnerConfig.feePercent ?? 0
+    const flatFee = weekend ? partnerConfig.weekendFeeFlat ?? 0 : partnerConfig.feeFlat ?? 0
   // 8) Hitung fee Launcx dengan presisi 3 digit (opsi 1)
-const pct       = new Decimal(feePercent)            // misal 1,05 → 1.05
+const pct       = new Decimal(pctFee)                // misal 1,05 → 1.05
 const grossDec  = new Decimal(grossAmount)           // misal 1000
 const rawFee    = grossDec.times(pct).dividedBy(100) // 10.5
 // round 3 digit; pakai ROUND_HALF_UP (bisa diganti ROUND_FLOOR / ROUND_CEIL)
-const feeRounded    = rawFee.toDecimalPlaces(3, Decimal.ROUND_HALF_UP) 
-const feeLauncxCalc = feeRounded.plus(new Decimal(feeFlat))            // + feeFlat
+const feeRounded    = rawFee.toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
+const feeLauncxCalc = feeRounded.plus(new Decimal(flatFee))          // + feeFlat
 
 // 9) Simpan status, fee, dan amounts
 await prisma.order.update({
@@ -372,17 +379,22 @@ if (!orderRecord) throw new Error('Order not found for callback')
 
 const pc = await prisma.partnerClient.findUnique({
   where: { id: orderRecord.userId },
-  select: { feePercent: true, feeFlat: true, callbackUrl: true, callbackSecret: true }
+  select: { feePercent: true, feeFlat: true, weekendFeePercent: true, weekendFeeFlat: true, callbackUrl: true, callbackSecret: true }
 })
 if (!pc) throw new Error('PartnerClient not found for callback')
 
 
     // 6) Hitung fee Launcx
+
+     const weekend = isJakartaWeekend(paymentReceivedTime ?? new Date())
+    const pctFee  = weekend ? pc.weekendFeePercent ?? 0 : pc.feePercent ?? 0
+    const flatFee = weekend ? pc.weekendFeeFlat ?? 0 : pc.feeFlat ?? 0
+
     const grossDec    = new Decimal(receivedAmt)
-    const rawFee      = grossDec.times(pc.feePercent).dividedBy(100)
+    const rawFee      = grossDec.times(pctFee).dividedBy(100)
     const feeLauncx   = rawFee
       .toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
-      .plus(new Decimal(pc.feeFlat))
+      .plus(new Decimal(flatFee))
     const pendingAmt  = isSuccess
       ? grossDec.minus(feeLauncx).toNumber()
       : null

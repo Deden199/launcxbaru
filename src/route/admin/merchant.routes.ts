@@ -29,7 +29,7 @@ router.patch('/:id',      ctrl.updateMerchant)
 router.patch('/:id/fee',  ctrl.setFeeRate)
 router.delete('/:id',     ctrl.deleteMerchant)
 
-// Manage PG connections (sub-merchant)
+// Manage PG connectioncs (sub-merchant)
 router.get('/:id/pg',           ctrl.listPGs)
 router.post('/:id/pg',          ctrl.connectPG)
 router.patch('/:id/pg/:subId',  ctrl.updatePGFee)

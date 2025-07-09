@@ -12,7 +12,12 @@ export default function CallbackPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
-
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwMessage, setPwMessage] = useState('')
+  const [pwError, setPwError] = useState(false)
   useEffect(() => {
     apiClient
       .get('/client/callback-url')
@@ -50,6 +55,32 @@ export default function CallbackPage() {
       setIsError(false)
     }
   }
+    const handleChangePassword = async () => {
+    if (newPassword !== confirmPassword) {
+      setPwMessage('Konfirmasi password tidak cocok')
+      setPwError(true)
+      return
+    }
+    setPwSaving(true)
+    setPwMessage('')
+    setPwError(false)
+    try {
+      await apiClient.post('/client/change-password', {
+        oldPassword,
+        newPassword,
+      })
+      setPwMessage('Password berhasil diubah!')
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch {
+      setPwMessage('Gagal mengubah password')
+      setPwError(true)
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
 
   return (
     <div className={styles.wrapper}>
@@ -102,8 +133,66 @@ export default function CallbackPage() {
 
         {message && (
           <div className={styles.messageWrapper}>
-            {isError ? <AlertCircle size={20} className={styles.errorIcon} /> : <CheckCircle size={20} className={styles.successIcon} />}
-            <span className={`${styles.message} ${isError ? styles.error : styles.success}`}>{message}</span>
+            {isError ? (
+              <AlertCircle size={20} className={styles.errorIcon} />
+            ) : (
+              <CheckCircle size={20} className={styles.successIcon} />
+            )}            <span className={`${styles.message} ${isError ? styles.error : styles.success}`}>{message}</span>
+          </div>
+        )}
+    
+        <div className={styles.sectionDivider} />
+        <h2 className={styles.subtitle}>Change Password</h2>
+
+        <div className={styles.field}>
+          <label className={styles.label}>Password Lama</label>
+          <input
+            type="password"
+            className={styles.input}
+            value={oldPassword}
+            onChange={e => setOldPassword(e.target.value)}
+            disabled={pwSaving}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <label className={styles.label}>Password Baru</label>
+          <input
+            type="password"
+            className={styles.input}
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            disabled={pwSaving}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <label className={styles.label}>Konfirmasi Password Baru</label>
+          <input
+            type="password"
+            className={styles.input}
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            disabled={pwSaving}
+          />
+        </div>
+
+        <button
+          className={styles.button}
+          onClick={handleChangePassword}
+          disabled={pwSaving || !oldPassword || !newPassword}
+        >
+          {pwSaving ? 'Menyimpan…' : 'Ganti Password'}
+        </button>
+
+        {pwMessage && (
+          <div className={styles.messageWrapper}>
+            {pwError ? (
+              <AlertCircle size={20} className={styles.errorIcon} />
+            ) : (
+              <CheckCircle size={20} className={styles.successIcon} />
+            )}
+            <span className={`${styles.message} ${pwError ? styles.error : styles.success}`}>{pwMessage}</span>
           </div>
         )}
       </div>

@@ -17,6 +17,8 @@ export const getAllClients = async (_: Request, res: Response) => {
       isActive:       true,
       feePercent:     true,
       feeFlat:        true,
+      weekendFeePercent: true,
+      weekendFeeFlat:    true,
       withdrawFeePercent: true,
       withdrawFeeFlat:    true,
       defaultProvider:    true,
@@ -47,6 +49,12 @@ export const createClient = async (req: Request, res: Response) => {
   const feeFlat = req.body.feeFlat != null
     ? Number(req.body.feeFlat)
     : 0
+      const weekendFeePercent = req.body.weekendFeePercent != null
+    ? Number(req.body.weekendFeePercent)
+    : 0
+  const weekendFeeFlat = req.body.weekendFeeFlat != null
+    ? Number(req.body.weekendFeeFlat)
+    : 0
   const withdrawFeePercent = req.body.withdrawFeePercent != null
     ? Number(req.body.withdrawFeePercent)
     : 0
@@ -59,6 +67,12 @@ export const createClient = async (req: Request, res: Response) => {
   }
   if (isNaN(feeFlat) || feeFlat < 0) {
     return res.status(400).json({ error: 'feeFlat must be >= 0' })
+  }
+  if (isNaN(weekendFeePercent) || weekendFeePercent < 0 || weekendFeePercent > 100) {
+    return res.status(400).json({ error: 'weekendFeePercent must be between 0 and 100' })
+  }
+  if (isNaN(weekendFeeFlat) || weekendFeeFlat < 0) {
+    return res.status(400).json({ error: 'weekendFeeFlat must be >= 0' })
   }
   if (isNaN(withdrawFeePercent) || withdrawFeePercent < 0 || withdrawFeePercent > 100) {
     return res.status(400).json({ error: 'withdrawFeePercent must be between 0 and 100' })
@@ -78,6 +92,8 @@ export const createClient = async (req: Request, res: Response) => {
       isActive:   true,
       feePercent,
       feeFlat,
+       weekendFeePercent,
+      weekendFeeFlat,
       withdrawFeePercent,
       withdrawFeeFlat,
       defaultProvider: 'hilogate',
@@ -126,6 +142,8 @@ export const getClientById = async (req: Request, res: Response) => {
     isActive: client.isActive,
     feePercent: client.feePercent,
     feeFlat: client.feeFlat,
+    weekendFeePercent: client.weekendFeePercent,
+    weekendFeeFlat: client.weekendFeeFlat,
     withdrawFeePercent: client.withdrawFeePercent,
     withdrawFeeFlat: client.withdrawFeeFlat,
     defaultProvider:  client.defaultProvider,
@@ -143,6 +161,8 @@ export const updateClient = async (req: Request, res: Response) => {
     isActive,
     feePercent,
     feeFlat,
+    weekendFeePercent,
+    weekendFeeFlat,
     withdrawFeePercent,
     withdrawFeeFlat,
     defaultProvider,
@@ -153,6 +173,8 @@ export const updateClient = async (req: Request, res: Response) => {
     isActive?: boolean
     feePercent?: number
     feeFlat?: number
+    weekendFeePercent?: number
+    weekendFeeFlat?: number
     withdrawFeePercent?: number
     withdrawFeeFlat?: number
     defaultProvider?: string
@@ -175,6 +197,18 @@ export const updateClient = async (req: Request, res: Response) => {
     if (isNaN(f) || f < 0)
       return res.status(400).json({ error: 'feeFlat must be >= 0' })
     data.feeFlat = f
+  }
+    if (weekendFeePercent != null) {
+    const wf = Number(weekendFeePercent)
+    if (isNaN(wf) || wf < 0 || wf > 100)
+      return res.status(400).json({ error: 'weekendFeePercent must be between 0 and 100' })
+    data.weekendFeePercent = wf
+  }
+  if (weekendFeeFlat != null) {
+    const wf = Number(weekendFeeFlat)
+    if (isNaN(wf) || wf < 0)
+      return res.status(400).json({ error: 'weekendFeeFlat must be >= 0' })
+    data.weekendFeeFlat = wf
   }
   if (withdrawFeePercent != null) {
     const wf = Number(withdrawFeePercent)

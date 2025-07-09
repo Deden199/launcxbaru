@@ -17,5 +17,6 @@ router.use(authMiddleware, (req: AuthRequest, res, next) => {
 router.get  ('/',       ctrl.listSubMerchants)
 router.post ('/',       ctrl.createSubMerchant)
 router.delete('/:subId', ctrl.deleteSubMerchant)
+router.patch ('/:subId',  ctrl.updateSubMerchant)   // ← tambahkan ini
 
 export default router

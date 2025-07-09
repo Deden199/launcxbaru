@@ -22,6 +22,56 @@
   border-color: #0070f3;
   box-shadow: 0 0 0 2px rgba(0,112,243,0.3);
 }
+/* Bungkus dropdown agar position: relative */
+.selectWrapper {
+  position: relative;
+  display: inline-block;
+  width: 200px; /* sesuaikan lebar */
+}
+
+/* Styling utama select */
+.subMerchantSelect {
+  appearance: none;           /* sembunyikan panah default */
+  width: 100%;
+  padding: 8px 32px 8px 12px; /* ruang untuk teks + panah */
+  font-size: 14px;
+  line-height: 1.4;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+/* Hover & focus state */
+.subMerchantSelect:hover {
+  border-color: #888;
+}
+.subMerchantSelect:focus {
+  outline: none;
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
+}
+
+/* Panah custom */
+.selectArrow {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid #555;
+}
+
+/* Jika butuh disabled styling */
+.subMerchantSelect:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
 
 /* === HISTORY =========================================================== */
 .historyCard   { background:#fff; padding:2rem; border-radius:16px;

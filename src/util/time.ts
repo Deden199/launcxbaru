@@ -7,3 +7,11 @@ export function wibTimestamp(): string {
   const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   return wib.toISOString().replace(/\.\d{3}Z$/, '') + '+07:00';
 }
+export function isJakartaWeekend(date: Date = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'short',
+  }).formatToParts(date);
+  const day = parts.find(p => p.type === 'weekday')!.value;
+  return day === 'Sat' || day === 'Sun';
+}

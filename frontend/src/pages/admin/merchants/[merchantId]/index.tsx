@@ -6,6 +6,8 @@ import api from '@/lib/api'
 
 interface ProviderEntry {
   id: string
+  name: string
+
   provider: string
   credentials: {
     merchantId: string
@@ -21,6 +23,7 @@ interface ProviderEntry {
 export default function PaymentProvidersPage() {
   const router = useRouter()
   const { merchantId } = router.query as { merchantId?: string }
+  const [editId, setEditId] = useState<string | null>(null)
 
   const [merchant, setMerchant] = useState<{ name: string } | null>(null)
   const [entries, setEntries] = useState<ProviderEntry[]>([])
@@ -30,6 +33,8 @@ export default function PaymentProvidersPage() {
     provider: 'hilogate',
     credentials: { merchantId: '', env: 'sandbox', secretKey: '' },
     schedule: { weekday: true, weekend: false },
+    name: ''
+
   })
 
   useEffect(() => {
@@ -50,7 +55,7 @@ export default function PaymentProvidersPage() {
     }
   }
 
-  async function addEntry() {
+  async function saveEntry() {
     if (!merchantId) return
     setErrorMsg('')
 
@@ -61,17 +66,37 @@ export default function PaymentProvidersPage() {
     }
 
     try {
-      await api.post(`/admin/merchants/${merchantId}/pg`, {
-        provider: form.provider,
-        credentials: creds,
-        schedule: form.schedule
-      })
+      if (editId) {
+        await api.patch(`/admin/merchants/${merchantId}/pg/${editId}`, {
+          provider: form.provider,
+          name: form.name,
+          credentials: creds,
+          schedule: form.schedule,
+        })
+      } else {
+        await api.post(`/admin/merchants/${merchantId}/pg`, {
+          provider: form.provider,
+          name: form.name,
+          credentials: creds,
+          schedule: form.schedule,
+        })
+      }
       setShowForm(false)
+            setEditId(null)
+
       fetchEntries()
     } catch (err: any) {
       setErrorMsg(err.response?.data.error || 'Gagal menyimpan, coba lagi.')
     }
   }
+
+    function startEdit(entry: ProviderEntry) {
+    setForm(entry)
+    setEditId(entry.id)
+    setErrorMsg('')
+    setShowForm(true)
+  }
+
 
   async function deleteEntry(subId: string) {
     if (!merchantId) return
@@ -86,6 +111,7 @@ export default function PaymentProvidersPage() {
     }
   }
 
+
   return (
     <div className="container">
       <header className="header">
@@ -94,8 +120,7 @@ export default function PaymentProvidersPage() {
         </h2>
         <button
           className="add-btn"
-          onClick={() => { setErrorMsg(''); setShowForm(true) }}
-          disabled={!merchant}
+          onClick={() => { setErrorMsg(''); setEditId(null); setForm({ provider: 'hilogate', credentials: { merchantId: '', env: 'sandbox', secretKey: '' }, schedule: { weekday: true, weekend: false }, name: '' }); setShowForm(true) }}          disabled={!merchant}
         >
           + Tambah Provider
         </button>
@@ -106,7 +131,9 @@ export default function PaymentProvidersPage() {
           <thead>
             <tr>
               <th>Provider</th>
-              <th>Merchant ID</th>
+                            <th>Name</th>
+
+              <th>Provider</th>
               <th>Env</th>
               <th>Weekday</th>
               <th>Weekend</th>
@@ -117,11 +144,16 @@ export default function PaymentProvidersPage() {
             {entries.map(e => (
               <tr key={e.id}>
                 <td className="cell-bold">{e.provider}</td>
+                                <td className="cell-bold">{e.name}</td>
+                <td>{e.provider}</td>
                 <td>{e.credentials.merchantId}</td>
                 <td>{e.credentials.env}</td>
                 <td>{e.schedule.weekday ? '✔' : '–'}</td>
                 <td>{e.schedule.weekend ? '✔' : '–'}</td>
+                
                 <td>
+                  <button className="edit-btn" onClick={() => startEdit(e)}>Edit</button>{' '}
+
                   <button className="delete-btn" onClick={() => deleteEntry(e.id)}>
                     Hapus
                   </button>
@@ -140,9 +172,9 @@ export default function PaymentProvidersPage() {
       </div>
 
       {showForm && (
-        <div className="overlay" onClick={() => setShowForm(false)}>
+        <div className="overlay" onClick={() => { setShowForm(false); setEditId(null) }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">Tambah Provider Baru</h3>
+            <h3 className="modal-title">{editId ? 'Edit Provider' : 'Tambah Provider Baru'}</h3>
             {errorMsg && <div className="error-banner">{errorMsg}</div>}
 
             <div className="form-group">
@@ -154,6 +186,14 @@ export default function PaymentProvidersPage() {
                 <option value="hilogate">Hilogate</option>
                 <option value="oy">OY</option>
               </select>
+            </div>
+            <div className="form-group">
+              <label>Name</label>
+              <input
+                type="text"
+                value={form.name || ''}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              />
             </div>
 
             <div className="form-group">
@@ -218,7 +258,8 @@ export default function PaymentProvidersPage() {
             </div>
 
             <div className="modal-actions">
-              <button className="save-btn" onClick={addEntry}>Simpan</button>
+              <button className="save-btn" onClick={saveEntry}>{editId ? 'Update' : 'Simpan'}</button>
+              <button className="cancel-btn" onClick={() => { setShowForm(false); setEditId(null) }}>Batal</button>
               <button className="cancel-btn" onClick={() => setShowForm(false)}>Batal</button>
             </div>
           </div>
@@ -285,6 +326,8 @@ export default function PaymentProvidersPage() {
           width: 100%;
           border-collapse: collapse;
         }
+
+
         .providers th,
         .providers td {
           padding: 0.875rem 1.25rem;
@@ -316,6 +359,18 @@ export default function PaymentProvidersPage() {
           transition: background 0.3s;
         }
         .delete-btn:hover {
+          background: var(--danger-hover);
+        }
+                  .edit-btn {
+          background: var(--danger);
+          color: var(--bg-white);
+          border: none;
+          padding: 0.5rem 0.9rem;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background 0.3s;
+        }
+        .edit-btn:hover {
           background: var(--danger-hover);
         }
         .no-data {

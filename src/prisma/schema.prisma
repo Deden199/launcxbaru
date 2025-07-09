@@ -48,7 +48,8 @@ model sub_merchant {
   id             String   @id @default(auto()) @map("_id") @db.ObjectId
   merchantId     String
   provider       String?
-  
+  name           String
+
   fee            Float  @default(0.0)
   credentials   Json?     // merchantId, env, secretKey
   schedule      Json?     // { weekday: boolean, weekend: boolean }
@@ -185,6 +186,8 @@ model PartnerClient {
   withdraws        WithdrawRequest[]
   withdrawFeePercent Float @default(0)
   withdrawFeeFlat    Float @default(0)
+  weekendFeePercent  Float @default(0)
+  weekendFeeFlat     Float @default(0)
 }
 
 model Order {

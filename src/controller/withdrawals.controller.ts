@@ -33,7 +33,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
   // 2) Ambil semua sub_merchant dengan provider matching defaultProvider
   const subs = await prisma.sub_merchant.findMany({
     where: { provider: defaultProvider },
-    select: { id: true, provider: true }
+    select: { id: true, name: true, provider: true }
   })
 
   // 3) Hitung balance tiap sub-merchant dari Order, bukan transaction_request
@@ -60,6 +60,8 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
 
     return {
       id:       s.id,
+            name:     s.name,
+
       provider: s.provider,
       balance:  totalIn - totalOut
     }

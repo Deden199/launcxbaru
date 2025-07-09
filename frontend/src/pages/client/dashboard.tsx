@@ -23,6 +23,9 @@ type Tx = {
   netSettle:        number
   status:           '' | 'SUCCESS' | 'DONE'
   settlementStatus?: string
+    paymentReceivedTime?: string
+  settlementTime?: string
+  trxExpirationTime?: string
 }
 
 type ClientOption = { id: string; name: string }
@@ -234,6 +237,8 @@ export default function ClientDashboardPage() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                                        <th>Paid At</th>
+                    <th>Settled At</th>
                     <th>TRX ID</th>
                     <th>RRN</th>
                     <th>Player ID</th>
@@ -248,6 +253,8 @@ export default function ClientDashboardPage() {
                   {filtered.map(t => (
                     <tr key={t.id}>
                       <td>{new Date(t.date).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' })}</td>
+                                            <td>{t.paymentReceivedTime ? new Date(t.paymentReceivedTime).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }) : '-'}</td>
+                      <td>{t.settlementTime ? new Date(t.settlementTime).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }) : '-'}</td>
                       <td>
                         <code className="font-mono">{t.id}</code>
                         <button className={styles.copyBtn} onClick={() => copyText(t.id)} title="Copy TRX ID">
