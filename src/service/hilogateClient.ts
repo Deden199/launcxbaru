@@ -12,13 +12,7 @@ export interface HilogateConfig {
   env: 'sandbox' | 'live' | 'production'; // tambahkan "production"
   secretKey: string;
 }
-export interface CreateTransactionParams {
-  ref_id:    string;
-  amount:    number;
-  method?:   string;
-  qr_type?:  'DYNAMIC' | 'STATIC';
-  expires_at?: number;
-}
+
 export class HilogateClient {
   private axiosInst: AxiosInstance;
   private secretKey: string;
@@ -113,53 +107,19 @@ export class HilogateClient {
     return this.request('post', path, body);
   }
 
-// File: src/core/hilogateClient.ts
-public async createTransaction(opts: CreateTransactionParams): Promise<{
-  id: string;
-  ref_id: string;
-  merchant_id: string;
-  merchant_name: string;
-  amount: number;
-  net_amount: number;
-  fee: number;
-  method: string;
-  qr_type: string;
-  qr_string: string;
-  checkout_url: string;
-  status: string;
-  expires_at: number;
-  created_at: number;
-  updated_at: number;
-  completed_at: number;
-  deleted_at: number | null;
-  response: any;
-}>{
-  // 1. Path endpoint
-  const path = '/api/v1/transactions';  // atau '/transactions' jika baseURL sudah inklusif '/api/v1'
+  /** Buat transaksi QRIS */
+  public async createTransaction(opts: {
+    ref_id: string;
+    amount: number;
+    method?: string;
+  }): Promise<any> {
+    return this.requestFull('post', '/api/v1/transactions', {
+      ref_id: opts.ref_id,
+      amount: opts.amount,
+      method: opts.method || 'qris',
+    });
+  }
 
-  // 2. Siapkan body sesuai docs
-  const body = {
-    ref_id:     opts.ref_id,
-    amount:     opts.amount,
-    method:     opts.method   || 'qris',
-    qr_type:    opts.qr_type  || 'DYNAMIC',
-    expires_at: opts.expires_at,
-  };
-
-  // 3. Hitung signature
-  const signature = this.sign(path, body);
-
-  // 4. Panggil API dengan header lengkap
-  const res = await this.axiosInst.post(path, body, {
-    headers: {
-      'X-Signature':    signature,
-      'X-Merchant-Key': this.secretKey,
-    },
-  });
-
-  // 5. Kembalikan inner data (yang berisi qr_string & checkout_url)
-  return res.data.data;
-}
   /** Ambil status transaksi */
   public async getTransaction(ref_id: string): Promise<any> {
     return this.requestFull('get', `/api/v1/transactions/${ref_id}`);
