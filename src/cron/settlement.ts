@@ -22,7 +22,7 @@ export function scheduleSettlementChecker() {
 
   // Jadwal setiap hari jam 17:00 Asia/Jakarta
   cron.schedule(
-    '* * * * *',
+  '0 17 * * *',
     async () => {
       // (1) Ambil semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({
