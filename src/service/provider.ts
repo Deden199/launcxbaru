@@ -167,6 +167,7 @@ export async function getActiveProvidersForClient(
       supportsQR: true,
       async generateQR({ orderId, amount }) {
         if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
+        
 const raw = hilogateSubs[0].config as {
   merchantId: string;
   env:        'sandbox' | 'live';
@@ -179,15 +180,25 @@ const cfg: HilogateConfig = {
   env:        raw.env,
 };
 const client = new HilogateClient(cfg);
-        const res = await client.createTransaction({ ref_id: orderId, amount });
-        return res.qr_string;
+      const res = await client.createTransaction({
+        ref_id:     orderId,
+        amount:     amount,
+        qr_type:    'DYNAMIC',               // ← wajib
+        expires_at: Date.now() + 30*60*1000,  // ← opsional
+      });
+      return res.qr_string;
       },
       async generateCheckoutUrl({ orderId, amount }) {
         if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
         const cfg = hilogateSubs[0].config as unknown as HilogateConfig;
         const client = new HilogateClient(cfg);
-        const res = await client.createTransaction({ ref_id: orderId, amount });
-        return res.checkout_url;
+      const res = await client.createTransaction({
+        ref_id:     orderId,
+        amount:     amount,
+        qr_type:    'DYNAMIC',
+        expires_at: Date.now() + 30*60*1000,
+      });
+      return res.checkout_url;
       },
     },
 
