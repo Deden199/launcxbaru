@@ -149,12 +149,13 @@ export const transactionCallback = async (req: Request, res: Response) => {
     }
    const paymentReceivedTime = new Date();
   // settlementTime ← full.updated_at (gateway’s completion timestamp)
-    const settlementTime = full.updated_at
-      ? new Date(full.updated_at * 1000)
-      : null;
-    const trxExpirationTime = full.expires_at
-      ? new Date(full.expires_at * 1000)
-      : null;
+const settlementTime = full.updated_at?.value
+  ? new Date(full.updated_at.value)
+  : null;
+
+const trxExpirationTime = full.expires_at?.value
+  ? new Date(full.expires_at.value)
+  : null;
     // 3) Persist raw callback untuk idempotensi
    const cb = await prisma.transaction_callback.findFirst({
       where: { referenceId: full.ref_id }
