@@ -56,14 +56,25 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     if (defaultProvider !== 'hilogate' && defaultProvider !== 'oy') {
       return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
+
+        // Fetch internal merchant for the selected provider
+    const merchant = await prisma.merchant.findFirst({
+      where: { name: defaultProvider },
+    })
+    if (!merchant) {
+      return res
+        .status(500)
+        .json(createErrorResponse('Internal merchant not found'))
+    }
+
 // 2) Ambil kredensial sub‐merchant untuk provider itu
  let subs;
  if (defaultProvider === 'hilogate') {
-   subs = await getActiveProviders(partnerClientId, 'hilogate');
+   subs = await getActiveProviders(merchant.id, 'hilogate');
  } else {
-   subs = await getActiveProviders(partnerClientId, 'oy');
+   subs = await getActiveProviders(merchant.id, 'oy');
  }
-    if (!subs.length) return res.status(400).json(createErrorResponse('No active sub-merchant'))
+    if (!subs.length) return res.status(400).json(createErrorResponse('sno'))
     const selectedSubMerchantId = subs[0].id
 
     // 5) Build Transaction – buyer = partner-client ID
