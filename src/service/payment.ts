@@ -19,7 +19,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { config } from '../config';
 import { getActiveProvidersForClient, Provider } from './provider';
-import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
+import { HilogateClient, HilogateConfig,CreateTransactionParams } from '../service/hilogateClient';
 import {OyClient, OyConfig} from './oyClient';
 import { getActiveProviders } from './provider';
 
@@ -106,15 +106,15 @@ export const createTransaction = async (
 const hilSubs = await getActiveProviders(merchantRec.id, 'hilogate');
 if (!hilSubs.length) throw new Error('No active Hilogate credentials');
 
-// ambil HilogateConfig dari properti `config`
 const hilCfg = hilSubs[0].config as HilogateConfig;
 const hilClient = new HilogateClient(hilCfg);
-
 // panggil transaksi
 const apiResp = await hilClient.createTransaction({
-  ref_id: refId,
-  method: 'qris',
-  amount,
+  ref_id:    refId,           // string
+  amount:    amount,          // number
+  method:    'qris',          // atau omit, default 'qris'
+  qr_type:   'DYNAMIC',       // wajib jika butuh qr_string
+  expires_at: Date.now() + 30 * 60 * 1000,  // opsional: timestamp kadaluarsa
 });
 
 // bentuk respons createTransaction (sesuai implementasi `requestFull`) biasanya:

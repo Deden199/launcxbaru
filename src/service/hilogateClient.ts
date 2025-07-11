@@ -12,7 +12,13 @@ export interface HilogateConfig {
   env: 'sandbox' | 'live' | 'production'; // tambahkan "production"
   secretKey: string;
 }
-
+export interface CreateTransactionParams {
+  ref_id:    string;
+  amount:    number;
+  method?:   string;
+  qr_type?:  'DYNAMIC' | 'STATIC';
+  expires_at?: number;
+}
 export class HilogateClient {
   private axiosInst: AxiosInstance;
   private secretKey: string;
@@ -108,16 +114,16 @@ export class HilogateClient {
   }
 
   /** Buat transaksi QRIS */
-  public async createTransaction(opts: {
-    ref_id: string;
-    amount: number;
-    method?: string;
-  }): Promise<any> {
-    return this.requestFull('post', '/api/v1/transactions', {
-      ref_id: opts.ref_id,
-      amount: opts.amount,
-      method: opts.method || 'qris',
-    });
+  public async createTransaction(params: CreateTransactionParams): Promise<any> {
+    // pastikan default method = 'qris' jika tidak diset
+    const body = {
+      ref_id:    params.ref_id,
+      amount:    params.amount,
+      method:    params.method ?? 'qris',
+      qr_type:   params.qr_type,      // sekarang dikenali TS
+      expires_at: params.expires_at,   // opsional
+    };
+    return this.requestFull('post', '/api/v1/transactions', body);
   }
 
   /** Ambil status transaksi */
