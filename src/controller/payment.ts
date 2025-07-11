@@ -135,10 +135,23 @@ export const transactionCallback = async (req: Request, res: Response) => {
       amount: full.amount,
       method: full.method,
     })
+        const orderRecord = await prisma.order.findUnique({
+      where: { id: full.ref_id },
+      select: { subMerchantId: true }
+    })
+    if (!orderRecord)
+      throw new Error(`Order ${full.ref_id} not found`)
+    const sub = await prisma.sub_merchant.findUnique({
+      where: { id: orderRecord.subMerchantId! },
+      select: { credentials: true }
+    })
+    if (!sub)
+      throw new Error(`Sub-merchant ${orderRecord.subMerchantId} not found`)
+    const cred = sub.credentials as { secretKey: string }
     const expectedSig = crypto
       .createHash('md5')
       .update(
-        '/api/v1/transactions' + minimalPayload + config.api.hilogate.secretKey,
+        '/api/v1/transactions' + minimalPayload + cred.secretKey,
         'utf8'
       )
       .digest('hex')

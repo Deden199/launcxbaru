@@ -95,7 +95,6 @@ useEffect(() => {
   apiClient
     .get<SubMerchant[]>('/client/withdrawals/submerchants')
     .then(res => {
-      console.log('Fetched subs:', res.data)
       setSubs(res.data)
     })
     .catch(console.error)
