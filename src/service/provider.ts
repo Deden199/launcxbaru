@@ -180,7 +180,7 @@ const cfg: HilogateConfig = {
 };
 const client = new HilogateClient(cfg);
         const res = await client.createTransaction({ ref_id: orderId, amount });
-        return res.qr_code;
+        return res.qr_string;
       },
       async generateCheckoutUrl({ orderId, amount }) {
         if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');

@@ -113,19 +113,53 @@ export class HilogateClient {
     return this.request('post', path, body);
   }
 
-  /** Buat transaksi QRIS */
-  public async createTransaction(params: CreateTransactionParams): Promise<any> {
-    // pastikan default method = 'qris' jika tidak diset
-    const body = {
-      ref_id:    params.ref_id,
-      amount:    params.amount,
-      method:    params.method ?? 'qris',
-      qr_type:   params.qr_type,      // sekarang dikenali TS
-      expires_at: params.expires_at,   // opsional
-    };
-    return this.requestFull('post', '/api/v1/transactions', body);
-  }
+// File: src/core/hilogateClient.ts
+public async createTransaction(opts: CreateTransactionParams): Promise<{
+  id: string;
+  ref_id: string;
+  merchant_id: string;
+  merchant_name: string;
+  amount: number;
+  net_amount: number;
+  fee: number;
+  method: string;
+  qr_type: string;
+  qr_string: string;
+  checkout_url: string;
+  status: string;
+  expires_at: number;
+  created_at: number;
+  updated_at: number;
+  completed_at: number;
+  deleted_at: number | null;
+  response: any;
+}>{
+  // 1. Path endpoint
+  const path = '/api/v1/transactions';  // atau '/transactions' jika baseURL sudah inklusif '/api/v1'
 
+  // 2. Siapkan body sesuai docs
+  const body = {
+    ref_id:     opts.ref_id,
+    amount:     opts.amount,
+    method:     opts.method   || 'qris',
+    qr_type:    opts.qr_type  || 'DYNAMIC',
+    expires_at: opts.expires_at,
+  };
+
+  // 3. Hitung signature
+  const signature = this.sign(path, body);
+
+  // 4. Panggil API dengan header lengkap
+  const res = await this.axiosInst.post(path, body, {
+    headers: {
+      'X-Signature':    signature,
+      'X-Merchant-Key': this.secretKey,
+    },
+  });
+
+  // 5. Kembalikan inner data (yang berisi qr_string & checkout_url)
+  return res.data.data;
+}
   /** Ambil status transaksi */
   public async getTransaction(ref_id: string): Promise<any> {
     return this.requestFull('get', `/api/v1/transactions/${ref_id}`);
