@@ -22,6 +22,8 @@ router.get('/create-order', async (req: Request, res: Response) => {
     //   amount,
     // })
 
+    
+
     const checkoutHosts = [
       'https://checkout1.launcx.com',
       'https://altcheckout.launcx.com',

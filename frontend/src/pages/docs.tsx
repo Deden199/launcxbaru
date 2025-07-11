@@ -161,8 +161,12 @@ Body:
       </p>
       <pre className={styles.codeBlock}><code>{`{
   "orderId": "685d4578f2745f068c635f17",
-  "status": "SUCCESS",
-  "amount": 50000,
+  "status": "PENDING_SETTLEMENT",
+  "settlementStatus": "PENDING",
+  "grossAmount": 50000,
+  "feeLauncx": 2500,
+  "netAmount": 47500,
+  "qrPayload": "qris://0123456789",
   "timestamp": "2025-06-26T14:30:00Z",
   "nonce": "uuid-v4"
 }`}</code></pre>

@@ -17,7 +17,7 @@ export function scheduleSettlementChecker() {
   cronStarted = true
 
   cron.schedule(
-    '* * * * *',
+    '* * * *',
     async () => {
       // (1) ambil semua order PENDING_SETTLEMENT
       const pendingOrders = await prisma.order.findMany({

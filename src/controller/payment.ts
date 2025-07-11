@@ -41,22 +41,21 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
         .status(400)
         .json(createErrorResponse('`price` harus > 0'))
     }
-        const user = await prisma.clientUser.findUnique({
+    const client = await prisma.partnerClient.findUnique({
       where: { id: clientId },
-      select: {
-        partnerClientId: true,
-        partnerClient: { select: { defaultProvider: true } }
-      }
-    })
-    if (!user) return res.status(404).json(createErrorResponse('User tidak ditemukan'))
-    const { partnerClientId } = user
-// 1) Tentukan provider yang valid
-const dp = (user.partnerClient.defaultProvider || 'hilogate').toLowerCase()
-if (dp !== 'hilogate' && dp !== 'oy') {
-  return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
-}
-  const defaultProvider = (user.partnerClient.defaultProvider || 'hilogate').toLowerCase();
+      select: { defaultProvider: true }
 
+    })
+    if (!client) {
+      return res
+        .status(404)
+        .json(createErrorResponse('PartnerClient tidak ditemukan'))
+    }
+    const partnerClientId = clientId
+    const defaultProvider = (client.defaultProvider ?? 'hilogate').toLowerCase()
+    if (defaultProvider !== 'hilogate' && defaultProvider !== 'oy') {
+      return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
+    }
 // 2) Ambil kredensial sub‐merchant untuk provider itu
  let subs;
  if (defaultProvider === 'hilogate') {
