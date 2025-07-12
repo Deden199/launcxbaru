@@ -237,7 +237,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
           : DisbursementStatus.PENDING
 
     // 6) Idempotent update + retry
-    const { count } = await retry(() =>
+    const { count } = await retry<{ count: number }>(() =>
       prisma.withdrawRequest.updateMany({
         where: { refId: ref_id, status: DisbursementStatus.PENDING },
         data: {
@@ -268,6 +268,10 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
   const { subMerchantId, account_number, bank_code } = req.body;
 
   try {
+        if (!subMerchantId) {
+      return res.status(400).json({ error: 'subMerchantId is required' });
+    }
+
     // 1) Ambil kredensial sub-merchant langsung
     const sub = await getProviderBySubId(subMerchantId);
     if (!sub || sub.provider !== 'hilogate') {
@@ -332,6 +336,10 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
   const partnerClientId = user.partnerClientId
 
   try {
+        if (!subMerchantId) {
+      return res.status(400).json({ error: 'subMerchantId is required' });
+    }
+
     // 1) Ambil konfigurasi credentials dari sub-merchant
     const sub = await getProviderBySubId(subMerchantId)
     if (!sub) throw new Error('SubMerchantNotFound')
@@ -343,9 +351,9 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     }
     const providerCfg = sub.config
     // 2) Instantiate PG client sesuai provider
-const pgClient = sourceProvider === 'hilogate'
-  ? new HilogateClient(providerCfg as HilogateConfig)
-  : new OyClient(providerCfg as OyConfig);
+    const pgClient = sourceProvider === 'hilogate'
+      ? new HilogateClient(providerCfg as HilogateConfig)
+      : new OyClient(providerCfg as OyConfig)
 
     // 3-4) Validasi akun & dapatkan bankName / holder
     let acctHolder: string
