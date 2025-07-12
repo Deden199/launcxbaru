@@ -1,6 +1,6 @@
 import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
-import { getActiveProviders } from './provider';  // fungsi fetch sub_merchant
+import { getActiveProviders, getProviderBySubId } from './provider';  // fungsi fetch sub_merchant
 
 export async function syncWithHilogate(refId: string, subMerchantId: string) {
   // 1) Ambil kredensial sub-merchant yang tersimpan
@@ -60,14 +60,14 @@ export async function inquiryAccount(
   return client.validateAccount(accountNumber, bankCode);
 }
 
-export async function retryDisbursement(refId: string, merchantId: string) {
+export async function retryDisbursement(refId: string, subMerchantId: string) {
   const wr = await prisma.withdrawRequest.findUnique({ where: { refId } });
   if (!wr) throw new Error('WithdrawRequest not found');
 
-  const providers = await getActiveProviders(merchantId, 'hilogate');
-  if (!providers.length) throw new Error('No active Hilogate credentials');
-
-  const cfg = providers[0].config as HilogateConfig;
+  const sub = await getProviderBySubId(subMerchantId);
+  if (!sub || sub.provider !== 'hilogate')
+    throw new Error('No active Hilogate credentials');
+  const cfg = sub.config as HilogateConfig;
   const client = new HilogateClient(cfg);
 
   const payload = {

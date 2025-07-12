@@ -7,8 +7,8 @@ import crypto from 'crypto'
 import { config } from '../config'
 import logger from '../logger'
 import { DisbursementStatus } from '@prisma/client'
-import { getActiveProviders } from '../service/provider';
-import {OyClient}          from '../service/oyClient'    // sesuaikan path
+import { getActiveProviders, getProviderBySubId } from '../service/provider';
+import {OyClient, OyConfig}          from '../service/oyClient'    // sesuaikan path
 
 
 
@@ -159,7 +159,7 @@ export async function retryWithdrawal(req: Request, res: Response) {
   // 1) Ownership check
   const wr = await prisma.withdrawRequest.findUnique({
     where: { refId: id },
-    select: { refId: true, status: true, partnerClientId: true }
+    select: { refId: true, status: true, partnerClientId: true, subMerchantId: true }
   });
   if (!wr || wr.partnerClientId !== clientId) {
     return res.status(403).json({ error: 'Access denied' });
@@ -174,7 +174,7 @@ export async function retryWithdrawal(req: Request, res: Response) {
 
   // 3) Retry process with merchantId
   try {
-    const result = await retryDisbursement(wr.refId, wr.partnerClientId);
+    const result = await retryDisbursement(wr.refId, wr.subMerchantId);
     return res.json({ success: true, result });
   } catch (err: any) {
     console.error('Retry withdrawal error:', err);
@@ -265,23 +265,15 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
   }
 }
 export async function validateAccount(req: ClientAuthRequest, res: Response) {
-  const { account_number, bank_code } = req.body;
+  const { subMerchantId, account_number, bank_code } = req.body;
 
   try {
-    // 1) Temukan internal merchant Hilogate
- const merchant = await prisma.merchant.findFirst({
-   where: { name: 'hilogate' },
-    });
-    if (!merchant) {
-      return res.status(500).json({ error: 'Internal Hilogate merchant not found' });
+    // 1) Ambil kredensial sub-merchant langsung
+    const sub = await getProviderBySubId(subMerchantId);
+    if (!sub || sub.provider !== 'hilogate') {
+      return res.status(400).json({ error: 'Invalid subMerchantId' });
     }
-
-    // 2) Ambil kredensial aktif (weekday/weekend) dari DB
-    const subs = await getActiveProviders(merchant.id, 'hilogate');
-    if (subs.length === 0) {
-      return res.status(500).json({ error: 'No active Hilogate credentials today' });
-    }
- const cfg = subs[0].config as unknown as HilogateConfig;
+    const cfg = sub.config as HilogateConfig;
 
     // 3) Instansiasi client dengan kredensial DB
     const client = new HilogateClient(cfg);
@@ -323,7 +315,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     amount
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'HILOGATE' | 'OY'
+    sourceProvider: 'hilogate' | 'oy'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -340,28 +332,26 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
   const partnerClientId = user.partnerClientId
 
   try {
-    // 1) Ambil konfigurasi credentials dari provider
-    let providerCfg: any
-    if (sourceProvider === 'HILOGATE') {
-      const subs = await getActiveProviders(partnerClientId, 'hilogate')
-      if (!subs.length) throw new Error('No active Hilogate credentials')
-      providerCfg = subs[0].config
-    } else {
-      const subs = await getActiveProviders(partnerClientId, 'oy')
-      if (!subs.length) throw new Error('No active OY credentials')
-      providerCfg = subs[0].config
+    // 1) Ambil konfigurasi credentials dari sub-merchant
+    const sub = await getProviderBySubId(subMerchantId)
+    if (!sub) throw new Error('SubMerchantNotFound')
+    if (
+      (sourceProvider === 'hilogate' && sub.provider !== 'hilogate') ||
+      (sourceProvider === 'oy' && sub.provider !== 'oy')
+    ) {
+      return res.status(400).json({ error: 'Provider mismatch' })
     }
-
+    const providerCfg = sub.config
     // 2) Instantiate PG client sesuai provider
-    const pgClient = sourceProvider === 'HILOGATE'
-      ? new HilogateClient(providerCfg)
-      : new OyClient(providerCfg)
+const pgClient = sourceProvider === 'hilogate'
+  ? new HilogateClient(providerCfg as HilogateConfig)
+  : new OyClient(providerCfg as OyConfig);
 
     // 3-4) Validasi akun & dapatkan bankName / holder
     let acctHolder: string
     let alias: string
     let bankName: string
-    if (sourceProvider === 'HILOGATE') {
+    if (sourceProvider === 'hilogate') {
       const valid = await (pgClient as HilogateClient).validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
         return res.status(400).json({ error: 'Akun bank tidak valid' })
@@ -444,7 +434,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
     // 6) Kirim ke provider & update status berdasarkan response
     let resp: any
-    if (sourceProvider === 'HILOGATE') {
+    if (sourceProvider === 'hilogate') {
       resp = await (pgClient as HilogateClient).createWithdrawal({
         ref_id:             wr.refId,
         amount,
@@ -470,7 +460,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     }
 
     // Map response code ke DisbursementStatus
-    const newStatus = sourceProvider === 'HILOGATE'
+    const newStatus = sourceProvider === 'hilogate'
       ? (['WAITING','PENDING'].includes(resp.status)
           ? DisbursementStatus.PENDING
           : ['COMPLETED','SUCCESS'].includes(resp.status)
@@ -487,7 +477,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       where: { refId: wr.refId },
       data: {
         paymentGatewayId:  resp.trx_id || resp.trxId,
-        isTransferProcess: sourceProvider === 'HILOGATE' ? (resp.is_transfer_process ?? false) : true,
+        isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
         status:            newStatus
       }
     })
