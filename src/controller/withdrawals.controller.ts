@@ -400,10 +400,13 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       })
 
       // b) Hitung total masuk (settled) dari transaction_request
-      const inAgg = await tx.transaction_request.aggregate({
-        _sum: { settlementAmount: true },
-        where: { subMerchantId, settlementAt: { not: null } }
-      })
+  const inAgg = await tx.order.aggregate({
+    _sum: { settlementAmount: true },
+    where: {
+      subMerchantId,
+      settlementTime: { not: null }
+    }
+  })
       const totalIn = inAgg._sum.settlementAmount ?? 0
 
       // c) Hitung total keluar (withdraw) dari WithdrawRequest
