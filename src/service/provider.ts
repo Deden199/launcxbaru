@@ -142,38 +142,6 @@ return subs.map(s => {
 })
 }
 
-export async function getProviderBySubId(
-  subId: string,
-): Promise<ResultSub<HilogateConfig> | ResultSub<OyConfig> | null> {
-  const sub = await prisma.sub_merchant.findUnique({
-    where: { id: subId },
-    select: { provider: true, fee: true, credentials: true },
-  })
-  if (!sub) return null
-
-  const common = { id: subId, provider: sub.provider, fee: sub.fee }
-  const raw = sub.credentials as unknown as {
-    merchantId: string
-    env?: 'sandbox' | 'live' | 'production'
-    secretKey: string
-  }
-
-  if (sub.provider === 'hilogate') {
-    const cfg: HilogateConfig = {
-      merchantId: raw.merchantId,
-      env: raw.env ?? 'sandbox',
-      secretKey: raw.secretKey,
-    }
-    return { ...common, config: cfg } as ResultSub<HilogateConfig>
-  }
-
-  const cfg: OyConfig = {
-    baseUrl: process.env.OY_BASE_URL!,
-    username: raw.merchantId,
-    apiKey: raw.secretKey,
-  }
-  return { ...common, config: cfg } as ResultSub<OyConfig>
-}
 
 /* ═════════════ Interface Provider ═════════════ */
 
