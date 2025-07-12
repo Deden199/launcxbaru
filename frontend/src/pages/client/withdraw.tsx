@@ -96,6 +96,10 @@ useEffect(() => {
     .get<SubMerchant[]>('/client/withdrawals/submerchants')
     .then(res => {
       setSubs(res.data)
+      // <-- tambahkan ini:
+      if (res.data.length > 0) {
+        setSelectedSub(res.data[0].id)
+      }
     })
     .catch(console.error)
 }, [])
