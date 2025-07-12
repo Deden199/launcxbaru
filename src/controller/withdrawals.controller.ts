@@ -323,7 +323,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     amount
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'HILOGATE' | 'OY'
+    sourceProvider: 'hilogate' | 'oy'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -348,7 +348,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
     // Cast sesuai provider
     let providerCfg: any
-    if (sourceProvider === 'HILOGATE') {
+    if (sourceProvider === 'hilogate') {
       const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
       providerCfg = {
         merchantId: raw.merchantId,
@@ -365,7 +365,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     }
 
     // 2) Instantiate PG client sesuai provider
-    const pgClient = sourceProvider === 'HILOGATE'
+    const pgClient = sourceProvider === 'hilogate'
       ? new HilogateClient(providerCfg)
       : new OyClient(providerCfg)
 
@@ -373,7 +373,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     let acctHolder: string
     let alias: string
     let bankName: string
-    if (sourceProvider === 'HILOGATE') {
+    if (sourceProvider === 'hilogate') {
       const valid = await (pgClient as HilogateClient).validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
         return res.status(400).json({ error: 'Akun bank tidak valid' })
@@ -459,7 +459,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
     // 6) Kirim ke provider & update status berdasarkan response
     let resp: any
-    if (sourceProvider === 'HILOGATE') {
+    if (sourceProvider === 'hilogate') {
       resp = await (pgClient as HilogateClient).createWithdrawal({
         ref_id:             wr.refId,
         amount,
@@ -485,7 +485,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     }
 
     // Map response code ke DisbursementStatus
-    const newStatus = sourceProvider === 'HILOGATE'
+    const newStatus = sourceProvider === 'hilogate'
       ? (['WAITING','PENDING'].includes(resp.status)
           ? DisbursementStatus.PENDING
           : ['COMPLETED','SUCCESS'].includes(resp.status)
@@ -502,7 +502,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       where: { refId: wr.refId },
       data: {
         paymentGatewayId:  resp.trx_id || resp.trxId,
-        isTransferProcess: sourceProvider === 'HILOGATE' ? (resp.is_transfer_process ?? false) : true,
+        isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
         status:            newStatus
       }
     })
