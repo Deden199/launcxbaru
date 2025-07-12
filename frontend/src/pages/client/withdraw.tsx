@@ -281,7 +281,7 @@ await apiClient.post('/client/withdrawals', {
  <h4>
    {s.name || (s.provider
      ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1)
-     : `Sub-Merchant ${s.id.substring(0,6)}`)}<br></br>
+     : `Sub-wallet ${s.id.substring(0,6)}`)}<br></br>
  </h4>             
  <p>Rp {s.balance.toLocaleString()}</p>           </div>
           ))}
