@@ -30,7 +30,7 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
 
     // 2) price & playerId
     const price    = Number(req.body.price ?? req.body.amount)
-    const playerId = String(req.body.playerId ?? clientId)
+    const playerId = String(req.body.playerId ?? 0)
 
     // 3) flow
     const flow = req.body.flow === 'redirect' ? 'redirect' : 'embed'

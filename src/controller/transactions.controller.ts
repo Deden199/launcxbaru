@@ -67,7 +67,7 @@ export async function createTransaction (req: AuthRequest, res: Response) {
   try {
     const merchantId = req.userId!            // partner-client yg login
     const { buyerId, amount, playerId: bodyPid } = req.body
-    const pid = bodyPid ?? req.userId
+    const pid = String(bodyPid ?? 0)
 const trx = await prisma.transaction_request.create({
   data: {
     merchantId,              // FK merchant
