@@ -21,6 +21,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
       partnerClientId: true,
       partnerClient: {
         select: { defaultProvider: true }
+        
       }
     }
   })
@@ -43,6 +44,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
       _sum: { settlementAmount: true },
       where: {
         subMerchantId:  s.id,
+        partnerClientId: partnerClientId,
         settlementTime: { not: null }
       }
     })
@@ -53,6 +55,8 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
       _sum: { netAmount: true },
       where: {
         subMerchantId: s.id,
+         partnerClientId: partnerClientId,
+
         status:        { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
       }
     })
@@ -404,6 +408,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     _sum: { settlementAmount: true },
     where: {
       subMerchantId,
+      partnerClientId,
       settlementTime: { not: null }
     }
   })
@@ -414,6 +419,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
         _sum: { netAmount: true },
         where: {
           subMerchantId,
+          partnerClientId,
           status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
         }
       })
