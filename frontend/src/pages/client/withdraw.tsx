@@ -509,7 +509,7 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
             <h3 className={styles.modalTitle}>New Withdrawal</h3>
 
             <form className={styles.form} onSubmit={submit}>
-<label>Sub-Merchant</label>
+<label>Sub-wallet</label>
 <div className={styles.selectWrapper}>
   <select
     name="subMerchantId"
