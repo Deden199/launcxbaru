@@ -22,6 +22,9 @@ interface Withdrawal {
   refId: string
   bankName: string
   accountNumber: string
+     netAmount: number
+  withdrawFeePercent: number
+  withdrawFeeFlat: number
   amount: number
   status: string
   createdAt: string
@@ -213,7 +216,7 @@ await apiClient.post('/client/withdrawals', {
 
   const exportToExcel = () => {
     const rows = [
-      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'],
+      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Fee', 'Net Amount', 'Status'],
       ...withdrawals.map(w => [
         new Date(w.createdAt).toLocaleDateString(),
                 w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-',
@@ -222,6 +225,8 @@ await apiClient.post('/client/withdrawals', {
         w.bankName,
         w.accountNumber,
         w.amount,
+        w.amount - w.netAmount,
+        w.netAmount,
         w.status,
       ]),
     ]
@@ -387,6 +392,8 @@ await apiClient.post('/client/withdrawals', {
                       <td>{w.bankName}</td>
                       <td>{w.accountNumber}</td>
                       <td>Rp {w.amount.toLocaleString()}</td>
+                                            <td>Rp {(w.amount - w.netAmount).toLocaleString()}</td>
+                      <td>Rp {w.netAmount.toLocaleString()}</td>
                       <td>
                         <span className={styles[`s${w.status}`]}>
                           {w.status}
@@ -396,7 +403,7 @@ await apiClient.post('/client/withdrawals', {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className={styles.noData}>
+                    <td colSpan={9} className={styles.noData}>
                       No data
                     </td>
                   </tr>

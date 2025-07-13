@@ -52,7 +52,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
 
     // pending/completed out dari WithdrawRequest
     const outAgg = await prisma.withdrawRequest.aggregate({
-      _sum: { netAmount: true },
+      _sum: { amount: true },
       where: {
         subMerchantId: s.id,
          partnerClientId: partnerClientId,
@@ -60,7 +60,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
         status:        { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
       }
     })
-    const totalOut = outAgg._sum.netAmount ?? 0
+    const totalOut = outAgg._sum.amount ?? 0
 
     return {
       id:       s.id,
@@ -132,6 +132,9 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
         bankName:      true,
         accountNumber: true,
         amount:        true,
+        netAmount:     true,
+        withdrawFeePercent: true,
+        withdrawFeeFlat:    true,
         status:        true,
         createdAt:     true,
         completedAt:   true,
@@ -146,6 +149,9 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     bankName:      w.bankName,
     accountNumber: w.accountNumber,
     amount:        w.amount,
+        netAmount:     w.netAmount,
+    withdrawFeePercent: w.withdrawFeePercent,
+    withdrawFeeFlat:    w.withdrawFeeFlat,
     status:        w.status,
     createdAt:     w.createdAt.toISOString(),
     completedAt:   w.completedAt?.toISOString() ?? null,
@@ -416,14 +422,14 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
       // c) Hitung total keluar (withdraw) dari WithdrawRequest
       const outAgg = await tx.withdrawRequest.aggregate({
-        _sum: { netAmount: true },
+        _sum: { amount: true },
         where: {
           subMerchantId,
           partnerClientId,
           status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
         }
       })
-      const totalOut = outAgg._sum.netAmount ?? 0
+      const totalOut = outAgg._sum.amount ?? 0
 
       // d) Validasi available balance
       const available = totalIn - totalOut
@@ -463,58 +469,83 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       return w
     })
 
-    // 6) Kirim ke provider & update status berdasarkan response
-    let resp: any
-    if (sourceProvider === 'hilogate') {
-      resp = await (pgClient as HilogateClient).createWithdrawal({
-        ref_id:             wr.refId,
-        amount,
-        currency:           'IDR',
-        account_number,
-        account_name:       wr.accountName,
-        account_name_alias: wr.accountNameAlias,
-        bank_code,
-        bank_name:          wr.bankName,
-        branch_name:        '',
-        description:        `Withdraw Rp ${amount}`
+       try {
+      let resp: any
+      if (sourceProvider === 'hilogate') {
+        resp = await (pgClient as HilogateClient).createWithdrawal({
+          ref_id:             wr.refId,
+          amount,
+          currency:           'IDR',
+          account_number,
+          account_name:       wr.accountName,
+          account_name_alias: wr.accountNameAlias,
+          bank_code,
+          bank_name:          wr.bankName,
+          branch_name:        '',
+          description:        `Withdraw Rp ${amount}`
+        })
+      } else {
+        const disburseReq = {
+          recipient_bank:     bank_code,
+          recipient_account:  account_number,
+          amount,
+          note:               `Withdraw Rp ${amount}`,
+          partner_trx_id:     wr.refId,
+          email:              acctHolder
+        }
+        resp = await (pgClient as OyClient).disburse(disburseReq)
+      }
+
+       // Map response code ke DisbursementStatus
+      const newStatus = sourceProvider === 'hilogate'
+        ? (['WAITING','PENDING'].includes(resp.status)
+            ? DisbursementStatus.PENDING
+            : ['COMPLETED','SUCCESS'].includes(resp.status)
+              ? DisbursementStatus.COMPLETED
+              : DisbursementStatus.FAILED)
+        : (resp.status.code === '101'
+            ? DisbursementStatus.PENDING
+            : resp.status.code === '000'
+              ? DisbursementStatus.COMPLETED
+              : DisbursementStatus.FAILED)
+
+      // Update withdrawal record
+      await prisma.withdrawRequest.update({
+        where: { refId: wr.refId },
+        data: {
+          paymentGatewayId:  resp.trx_id || resp.trxId,
+          isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
+          status:            newStatus
+        }
       })
-    } else {
-      const disburseReq = {
-        recipient_bank:     bank_code,
-        recipient_account:  account_number,
-        amount,
-        note:               `Withdraw Rp ${amount}`,
-        partner_trx_id:     wr.refId,
-        email:              acctHolder
+
+      if (newStatus === DisbursementStatus.FAILED) {
+        await prisma.partnerClient.update({
+          where: { id: partnerClientId },
+          data: { balance: { increment: amount } }
+        })
+        return res.status(400).json({ error: 'Withdrawal failed', status: resp.status })
+      }   
+
+      return res.status(201).json({ id: wr.id, refId: wr.refId, status: newStatus })
+    } catch (err: any) {
+      logger.error('[requestWithdraw provider]', err)
+      try {
+        await prisma.$transaction([
+          prisma.withdrawRequest.update({
+            where: { refId: wr.refId },
+            data: { status: DisbursementStatus.FAILED }
+          }),
+          prisma.partnerClient.update({
+            where: { id: partnerClientId },
+            data: { balance: { increment: amount } }
+          })
+        ])
+      } catch (rollbackErr) {
+        logger.error('[requestWithdraw rollback]', rollbackErr)
       }
-      resp = await (pgClient as OyClient).disburse(disburseReq)
+      return res.status(500).json({ error: err.message || 'Internal server error' })
     }
-
-    // Map response code ke DisbursementStatus
-    const newStatus = sourceProvider === 'hilogate'
-      ? (['WAITING','PENDING'].includes(resp.status)
-          ? DisbursementStatus.PENDING
-          : ['COMPLETED','SUCCESS'].includes(resp.status)
-            ? DisbursementStatus.COMPLETED
-            : DisbursementStatus.FAILED)
-      : (resp.status.code === '101'
-          ? DisbursementStatus.PENDING
-          : resp.status.code === '000'
-            ? DisbursementStatus.COMPLETED
-            : DisbursementStatus.FAILED)
-
-    // Update withdrawal record
-    await prisma.withdrawRequest.update({
-      where: { refId: wr.refId },
-      data: {
-        paymentGatewayId:  resp.trx_id || resp.trxId,
-        isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
-        status:            newStatus
-      }
-    })
-
-    return res.status(201).json({ id: wr.id, refId: wr.refId, status: newStatus })
-
   } catch (err: any) {
     if (err.message === 'InsufficientBalance')
       return res.status(400).json({ error: 'Saldo tidak mencukupi' })
