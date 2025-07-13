@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react'
 import apiClient from '@/lib/apiClient'
 import axios from 'axios'
+import { oyCodeMap } from '../../utils/oyCodeMap'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 import {
   Plus,
   Wallet,
@@ -20,8 +23,11 @@ type ClientOption = { id: string; name: string }
 interface Withdrawal {
   id: string
   refId: string
+
   bankName: string
   accountNumber: string
+    accountName: string      // ← baru
+
      netAmount: number
   withdrawFeePercent: number
   withdrawFeeFlat: number
@@ -50,6 +56,8 @@ export default function WithdrawPage() {
   const [balance, setBalance] = useState(0)
   const [pending, setPending] = useState(0)
   const [pageError, setPageError] = useState('')
+const [dateRange, setDateRange] = useState<[Date|null, Date|null]>([null, null])
+const [startDate, endDate] = dateRange
 
   /* ──────────────── Withdrawals list ──────────────── */
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
@@ -182,21 +190,41 @@ useEffect(() => {
     }
   }
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!isValid || error) return
-    setBusy(b => ({ ...b, submitting: true }))
-    try {
-await apiClient.post('/client/withdrawals', {
-  subMerchantId:    selectedSub,
-  sourceProvider:   subs.find(s => s.id === selectedSub)?.provider,
-  account_number:   form.accountNumber,
-  bank_code:        form.bankCode,
-  account_name_alias: form.accountNameAlias,
-  amount:           +form.amount,
-  otp:              form.otp,
+const submit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!isValid || error) return;
+  setBusy(b => ({ ...b, submitting: true }));
 
-})
+  try {
+    // Ambil provider dari sub-merchant terpilih
+    const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy'
+
+    // Translate bank_code untuk OY, tetap pakai form.bankCode untuk Hilogate
+    const payloadBankCode = provider === 'oy'
+      ? oyCodeMap[form.bankCode.toLowerCase()]
+      : form.bankCode;
+
+    // Bangun body request
+    const body: any = {
+      subMerchantId:      selectedSub,
+      sourceProvider:     provider,
+      account_number:     form.accountNumber,
+      bank_code:          payloadBankCode,
+      account_name_alias: form.accountNameAlias,
+      amount:             +form.amount,
+      otp:                form.otp,
+    };
+
+    // Sertakan bank_name hanya untuk OY
+    if (provider === 'oy') {
+      body.bank_name = form.bankName;
+     body.account_name  = form.accountName;    // ← tambahkan full nama di payload OY
+
+    }
+
+    // Kirim request
+    await apiClient.post('/client/withdrawals', body);
+
 
       const [d, h] = await Promise.all([
         apiClient.get('/client/dashboard'),
@@ -220,7 +248,7 @@ await apiClient.post('/client/withdrawals', {
 
   const exportToExcel = () => {
     const rows = [
-      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Fee', 'Net Amount', 'Status'],
+      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Amount', 'Fee', 'Net Amount', 'Status'],
       ...withdrawals.map(w => [
         new Date(w.createdAt).toLocaleDateString(),
                 w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-',
@@ -228,6 +256,8 @@ await apiClient.post('/client/withdrawals', {
         w.refId,
         w.bankName,
         w.accountNumber,
+        w.accountName,      // ← baru
+
         w.amount,
         w.amount - w.netAmount,
         w.netAmount,
@@ -245,8 +275,9 @@ await apiClient.post('/client/withdrawals', {
     const d = new Date(w.createdAt)
     if (searchRef && !w.refId.includes(searchRef)) return false
     if (statusFilter && w.status !== statusFilter) return false
-    if (dateFrom && d < new Date(dateFrom)) return false
-    if (dateTo && d > new Date(`${dateTo}T23:59:59`)) return false
+if (startDate && d < startDate) return false
+if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
+
     return true
   })
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
@@ -323,49 +354,45 @@ await apiClient.post('/client/withdrawals', {
           </button>
         </div>
 
-        {/* filters */}
-        <div className={styles.filters}>
-          <input
-            className={styles.input}
-            placeholder="Search Ref"
-            value={searchRef}
-            onChange={e => {
-              setSearchRef(e.target.value)
-              setPage(1)
-            }}
-          />
-          <select
-            className={styles.select}
-            value={statusFilter}
-            onChange={e => {
-              setStatusFilter(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="">All Status</option>
-            <option>PENDING</option>
-            <option>COMPLETED</option>
-            <option>FAILED</option>
-          </select>
-          <input
-            type="date"
-            className={styles.input}
-            value={dateFrom}
-            onChange={e => {
-              setDateFrom(e.target.value)
-              setPage(1)
-            }}
-          />
-          <input
-            type="date"
-            className={styles.input}
-            value={dateTo}
-            onChange={e => {
-              setDateTo(e.target.value)
-              setPage(1)
-            }}
-          />
-        </div>
+     <div className={styles.filters}>
+  <input
+    className={styles.input}
+    placeholder="Search Ref"
+    value={searchRef}
+    onChange={e => { setSearchRef(e.target.value); setPage(1) }}
+  />
+  <select
+    className={styles.select}
+    value={statusFilter}
+    onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+  >
+    <option value="">All Status</option>
+    <option>PENDING</option>
+    <option>COMPLETED</option>
+    <option>FAILED</option>
+  </select>
+
+  {/* Date range picker */}
+  <DatePicker
+    selectsRange
+    startDate={startDate}
+    endDate={endDate}
+    onChange={(update: [Date|null,Date|null]) => {
+      setDateRange(update)
+      // kalau langsung ingin apply:
+      if (update[0] && update[1]) {
+        setDateFrom(update[0].toISOString().slice(0,10))
+        setDateTo(update[1].toISOString().slice(0,10))
+        setPage(1)
+      }
+    }}
+    isClearable
+    placeholderText="Pilih rentang tanggal..."
+    maxDate={new Date()}
+    dateFormat="dd-MM-yyyy"
+    className={styles.input}
+  />
+</div>
 
         {/* table */}
         <div className={styles.tableWrap}>
@@ -375,7 +402,7 @@ await apiClient.post('/client/withdrawals', {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Fee', 'Net Amount', 'Status'].map(
+                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name','Amount', 'Fee', 'Net Amount', 'Status'].map(
                     h => (
                       <th key={h}>
                         {h}
@@ -394,7 +421,9 @@ await apiClient.post('/client/withdrawals', {
 
                       <td>{w.refId}</td>
                       <td>{w.bankName}</td>
-                      <td>{w.accountNumber}</td>
+                            <td>{w.accountNumber}</td>     {/* ← tambahkan ini */}
+
+      <td>{w.accountName}</td>       
                       <td>Rp {w.amount.toLocaleString()}</td>
                                             <td>Rp {(w.amount - w.netAmount).toLocaleString()}</td>
                       <td>Rp {w.netAmount.toLocaleString()}</td>
@@ -407,7 +436,7 @@ await apiClient.post('/client/withdrawals', {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className={styles.noData}>
+                    <td colSpan={10} className={styles.noData}>
                       No data
                     </td>
                   </tr>

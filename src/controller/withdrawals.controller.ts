@@ -131,6 +131,8 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
       select: {
         refId:         true,
         bankName:      true,
+       accountName:     true,   // ← tambahkan ini
+
         accountNumber: true,
         amount:        true,
         netAmount:     true,
@@ -148,6 +150,8 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
   const data = rows.map(w => ({
     refId:         w.refId,
     bankName:      w.bankName,
+   accountName:   w.accountName,  // ← dan ini
+
     accountNumber: w.accountNumber,
     amount:        w.amount,
         netAmount:     w.netAmount,
@@ -406,9 +410,9 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       bankName = b.name
     } else {
       // OY: skip lookup, gunakan alias atau kode sebagai label
-      acctHolder = account_name_alias || ''
-      alias = acctHolder
-      bankName = bank_code
+  acctHolder = req.body.account_name || '';
+  alias      = account_name_alias || acctHolder;
+  bankName = req.body.bank_name;
     }
 
     // 5) Atomic transaction: hitung balance, fee, buat record, hold saldo
@@ -501,7 +505,8 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     amount:             wr.netAmount,                // ← netAmt
     note:               `Withdraw Rp ${wr.netAmount}`, // ← catatan juga netAmt
           partner_trx_id:     wr.refId,
-          email:              acctHolder
+    email:             'client@launcx.com',  // ← hardcode di sini'
+
         }
         resp = await (pgClient as OyClient).disburse(disburseReq)
       }
