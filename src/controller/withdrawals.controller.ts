@@ -484,7 +484,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       if (sourceProvider === 'hilogate') {
         resp = await (pgClient as HilogateClient).createWithdrawal({
           ref_id:             wr.refId,
-          amount,
+          amount:             wr.netAmount,                // ← netAmt
           currency:           'IDR',
           account_number,
           account_name:       wr.accountName,
@@ -492,14 +492,14 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           bank_code,
           bank_name:          wr.bankName,
           branch_name:        '',
-          description:        `Withdraw Rp ${amount}`
+          description:        `Withdraw Rp ${wr.netAmount}` // ← catatan juga netAmt
         })
       } else {
         const disburseReq = {
           recipient_bank:     bank_code,
           recipient_account:  account_number,
-          amount,
-          note:               `Withdraw Rp ${amount}`,
+    amount:             wr.netAmount,                // ← netAmt
+    note:               `Withdraw Rp ${wr.netAmount}`, // ← catatan juga netAmt
           partner_trx_id:     wr.refId,
           email:              acctHolder
         }
