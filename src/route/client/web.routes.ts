@@ -12,6 +12,8 @@ import {
   updateClientCallbackUrl
 } from '../../controller/clientDashboard.controller'
 import withdrawalRoutes from '../withdrawals.routes'
+import { setupTOTP, enableTOTP } from '../../controller/totp.controller'
+
 
 const r = Router()
 
@@ -21,6 +23,9 @@ r.post('/login',    clientLogin)
 
 // 2) Protected: semua route berikut butuh token PARTNER_CLIENT
 r.use(requireClientAuth)
+// 2FA setup
+r.post('/2fa/setup', setupTOTP)
+r.post('/2fa/enable', express.json(), enableTOTP)
 
 // Callback settings
 r.get('/callback-url', getClientCallbackUrl)

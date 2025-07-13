@@ -73,6 +73,8 @@ const [selectedSub, setSelectedSub] = useState<string>(selectedChild)
     bankName: '',
     branchName: '',
     amount: '',
+    otp: '',
+
   })
   const [isValid, setIsValid] = useState(false)
   const [busy, setBusy] = useState({ validating: false, submitting: false })
@@ -192,6 +194,8 @@ await apiClient.post('/client/withdrawals', {
   bank_code:        form.bankCode,
   account_name_alias: form.accountNameAlias,
   amount:           +form.amount,
+  otp:              form.otp,
+
 })
 
       const [d, h] = await Promise.all([
@@ -203,7 +207,7 @@ await apiClient.post('/client/withdrawals', {
       setBalance(d.data.balance)
       setPending(d.data.totalPending ?? 0)
       setWithdrawals(h.data.data)
-      setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '' }))
+      setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '', otp: '' }))
       setIsValid(false)
       setOpen(false)
     } catch (err: any) {
@@ -534,7 +538,16 @@ await apiClient.post('/client/withdrawals', {
                   required
                 />
               </div>
-
+              {/* otp */}
+              <div className={styles.field}>
+                <label>OTP</label>
+                <input
+                  name="otp"
+                  value={form.otp}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
               {/* actions */}
               <div className={styles.modalActions}>
                 <button

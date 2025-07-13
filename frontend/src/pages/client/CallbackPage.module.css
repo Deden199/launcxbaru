@@ -123,3 +123,23 @@
   color: #6b7280;
   margin-bottom: 1rem;
 }
+.qrImage {
+  display: block;
+  margin: 1rem auto;
+  max-width: 200px;
+}
+/* styling khusus untuk 2FA input + tombol */
+.twoFaField {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem; /* samakan dengan .field lain */
+}
+.twoFaField .input {
+  flex: 1;   /* biar input melebar */
+  width: auto; /* override width:100% dari .input */
+}
+.twoFaField .button {
+  flex-shrink: 0;
+  width: auto; /* biar tombol hanya selebar kontennya */
+}

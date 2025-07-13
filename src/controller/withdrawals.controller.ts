@@ -9,6 +9,7 @@ import logger from '../logger'
 import { DisbursementStatus } from '@prisma/client'
 import { getActiveProviders } from '../service/provider';
 import {OyClient,OyConfig}          from '../service/oyClient'    // sesuaikan path
+import { authenticator } from 'otplib'
 
 
 
@@ -330,24 +331,33 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     account_number,
     bank_code,
     account_name_alias,
-    amount
-  } = req.body as {
+    amount,
+    otp 
+   } = req.body as {
     subMerchantId: string
     sourceProvider: 'hilogate' | 'oy'
     account_number: string
     bank_code: string
     account_name_alias?: string
     amount: number
+    otp?: string
+
   }
   const clientUserId = req.clientUserId!
 
   // 0) Cari partnerClientId dari clientUser
   const user = await prisma.clientUser.findUnique({
     where: { id: clientUserId },
-    select: { partnerClientId: true }
+    select: { partnerClientId: true, totpEnabled: true, totpSecret: true }
   })
   if (!user) return res.status(404).json({ error: 'User tidak ditemukan' })
   const partnerClientId = user.partnerClientId
+  if (user.totpEnabled) {
+    if (!otp) return res.status(400).json({ error: 'OTP wajib diisi' })
+    if (!user.totpSecret || !authenticator.check(String(otp), user.totpSecret)) {
+      return res.status(401).json({ error: 'OTP tidak valid' })
+    }
+  }
 
   try {
     const sub = await prisma.sub_merchant.findUnique({

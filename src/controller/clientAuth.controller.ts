@@ -5,6 +5,8 @@ import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { config } from '../config'
 import { ClientAuthRequest } from '../middleware/clientAuth'
+import { authenticator } from 'otplib'
+
 
 export async function clientRegister(req: Request, res: Response) {
   const { partnerClientId, email, password } = req.body
@@ -25,14 +27,24 @@ export async function clientRegister(req: Request, res: Response) {
 }
 
 export async function clientLogin(req: Request, res: Response) {
-  const { email, password } = req.body
-  if (!email || !password) {
+  const { email, password, otp } = req.body as {
+    email?: string
+    password?: string
+    otp?: string
+  }
+    if (!email || !password) {
     return res.status(400).json({ error: 'Email dan password wajib diisi' })
   }
 
   const user = await prisma.clientUser.findUnique({ where: { email } })
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' })
+  }
+  if (user.totpEnabled) {
+    if (!otp) return res.status(400).json({ error: 'OTP wajib diisi' })
+    if (!user.totpSecret || !authenticator.check(String(otp), user.totpSecret)) {
+      return res.status(401).json({ error: 'OTP tidak valid' })
+    }
   }
 
   const token = jwt.sign(
