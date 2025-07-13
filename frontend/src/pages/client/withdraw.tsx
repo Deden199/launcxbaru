@@ -371,7 +371,7 @@ await apiClient.post('/client/withdrawals', {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Status'].map(
+                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Amount', 'Fee', 'Net Amount', 'Status'].map(
                     h => (
                       <th key={h}>
                         {h}
