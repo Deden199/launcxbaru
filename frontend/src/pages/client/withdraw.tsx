@@ -5,6 +5,8 @@ import apiClient from '@/lib/apiClient'
 import axios from 'axios'
 import { oyCodeMap } from '../../utils/oyCodeMap'
 import DatePicker from 'react-datepicker'
+import Select from 'react-select'
+
 import 'react-datepicker/dist/react-datepicker.css'
 import {
   Plus,
@@ -51,6 +53,9 @@ function deriveAlias(fullName: string) {
   return `${parts[0]} ${parts[parts.length - 1][0]}.`
 }
 
+
+
+
 export default function WithdrawPage() {
   /* ──────────────── Dashboard data ──────────────── */
   const [balance, setBalance] = useState(0)
@@ -96,7 +101,10 @@ const [selectedSub, setSelectedSub] = useState<string>(selectedChild)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
   const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
-
+const bankOptions = banks.map(b => ({
+  value: b.code,
+  label: b.name
+}));
   /* ──────────────── Initial fetch ──────────────── */
   useEffect(() => {
     apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
@@ -519,16 +527,26 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
 </div>
 
               {/* bank */}
-              <div className={styles.field}>
-                <label>Bank</label>
-<select name="bankCode" value={form.bankCode} onChange={handleChange} required>
-  <option value="">— Pilih Bank —</option>
-  {banks.map(b => (
-    <option key={b.code} value={b.code}>{b.name}</option>
-  ))}
-</select>
+<div className={styles.field}>
+  <label>Bank</label>
+  <Select
+    options={bankOptions}
+    value={bankOptions.find(o => o.value === form.bankCode) || null}
+    onChange={opt => {
+      const code = opt?.value || ''
+      handleChange({ // pakai handleChange agar reset state form otomatis
+        target: { name: 'bankCode', value: code }
+      } as any)
+    }}
+    placeholder="Cari atau pilih bank…"
+    isSearchable
+    styles={{
+      container: base => ({ ...base, width: '100%' }),
+      control:   base => ({ ...base, minHeight: '2.5rem' }),
+    }}
+  />
+</div>
 
-              </div>
 
               {/* account number */}
               <div className={styles.field}>

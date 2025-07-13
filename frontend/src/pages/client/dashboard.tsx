@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/apiClient'
 import styles from './ClientDashboard.module.css'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+
 import {
   ClipboardCopy,
   Wallet,
@@ -36,6 +39,8 @@ export default function ClientDashboardPage() {
   // Parent–Child
   const [children, setChildren]               = useState<ClientOption[]>([])
   const [selectedChild, setSelectedChild]     = useState<'all' | string>('all')
+const [dateRange, setDateRange] = useState<[Date|null,Date|null]>([null,null])
+const [startDate, endDate]     = dateRange
 
   // Summary
   const [balance, setBalance]                 = useState(0)
@@ -58,15 +63,15 @@ export default function ClientDashboardPage() {
 
   const buildParams = () => {
     const params: any = {}
-    if (range === 'today') {
-      params.date_from = new Date().toISOString().slice(0,10)
-    } else if (range === 'week') {
-      const d = new Date(); d.setDate(d.getDate() - 6)
-      params.date_from = d.toISOString().slice(0,10)
-    } else {
-      params.date_from = from
-      params.date_to   = to
-    }
+  if (range === 'today') {
+    params.date_from = new Date().toISOString().slice(0,10)
+  } else if (range === 'week') {
+    const d = new Date(); d.setDate(d.getDate() - 6)
+    params.date_from = d.toISOString().slice(0,10)
+  } else if (startDate && endDate) {
+    params.date_from = startDate.toISOString().slice(0,10)
+    params.date_to   = endDate.toISOString().slice(0,10)
+  }
     if (selectedChild !== 'all') {
       params.clientId = selectedChild
     }
@@ -202,18 +207,47 @@ export default function ClientDashboardPage() {
       <main className={styles.content}>
         <section className={styles.filters}>
           <div className={styles.rangeControls}>
-            <select value={range} onChange={e => setRange(e.target.value as any)}>
-              <option value="today">Hari ini</option>
-              <option value="week">7 Hari Terakhir</option>
-              <option value="custom">Custom</option>
-            </select>
-            {range === 'custom' && (
-              <>
-                <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} />
-                <input type="date" value={to}   min={from} onChange={e => setTo(e.target.value)} />
-                <button onClick={fetchTransactions}>Terapkan</button>
-              </>
-            )}
+           <select value={range} onChange={e => setRange(e.target.value as any)}>
+  <option value="today">Hari ini</option>
+  <option value="week">7 Hari Terakhir</option>
+  <option value="custom">Custom</option>
+</select>
+
+{range === 'custom' && (
+  <div className={styles.customDatePicker}>
+    <DatePicker
+      selectsRange
+      startDate={startDate}
+      endDate={endDate}
+      onChange={(upd) => setDateRange(upd)}
+      isClearable={false}           // <-- matikan clear bawaan
+      placeholderText="Pilih rentang tanggal…"
+      maxDate={new Date()}
+      dateFormat="dd-MM-yyyy"
+      className={styles.dateInput}
+    />
+    {/* tombol clear buatan kita */}
+    {(startDate || endDate) && (
+      <button
+        type="button"
+        className={styles.clearRangeBtn}
+        onClick={() => setDateRange([null, null])}
+      >
+        Clear
+      </button>
+    )}
+    <button
+      type="button"
+      className={styles.applyBtn}
+      onClick={fetchTransactions}
+      disabled={!startDate || !endDate}
+    >
+      Terapkan
+    </button>
+  </div>
+)}
+
+
             <button className={styles.exportBtn} onClick={handleExport}>
               <FileText size={16} /> Export Excel
             </button>
@@ -284,5 +318,6 @@ export default function ClientDashboardPage() {
         </section>
       </main>
     </div>
+    
   )
 }
