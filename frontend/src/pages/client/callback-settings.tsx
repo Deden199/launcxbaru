@@ -19,6 +19,7 @@ export default function CallbackPage() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMessage, setPwMessage] = useState('')
   const [pwError, setPwError] = useState(false)
+  const [is2FAEnabled, setIs2FAEnabled] = useState(false)
 
   const [qr, setQr] = useState('')
   const [otp, setOtp] = useState('')
@@ -36,6 +37,9 @@ export default function CallbackPage() {
         setIsError(true)
       })
   }, [])
+    apiClient.get('/client/2fa/status')
+      .then(res => setIs2FAEnabled(res.data.totpEnabled))
+      .catch(() => {})
 
   const handleSave = async () => {
     setSaving(true)
@@ -100,6 +104,8 @@ export default function CallbackPage() {
     try {
       await apiClient.post('/client/2fa/enable', { code: otp })
       setFaMsg('2FA berhasil diaktifkan')
+      setIs2FAEnabled(true)
+
     } catch {
       setFaMsg('Invalid OTP')
     }
@@ -171,9 +177,8 @@ export default function CallbackPage() {
     placeholder="Masukkan OTP"
     className={styles.input}
   />
-  <button onClick={enable2FA} className={styles.button}>
-    Enable 2FA
-  </button>
+          <button onClick={setup2FA} className={styles.button}>{is2FAEnabled ? 'Ganti 2FA' : 'Setup 2FA'}</button>
+
 </div>
 
             {faMsg && <p className={styles.message}>{faMsg}</p>}

@@ -12,7 +12,7 @@ import {
   updateClientCallbackUrl
 } from '../../controller/clientDashboard.controller'
 import withdrawalRoutes from '../withdrawals.routes'
-import { setupTOTP, enableTOTP } from '../../controller/totp.controller'
+import { setupTOTP, enableTOTP, getTOTPStatus } from '../../controller/totp.controller'
 
 
 const r = Router()
@@ -26,6 +26,7 @@ r.use(requireClientAuth)
 // 2FA setup
 r.post('/2fa/setup', setupTOTP)
 r.post('/2fa/enable', express.json(), enableTOTP)
+r.get('/2fa/status', getTOTPStatus)
 
 // Callback settings
 r.get('/callback-url', getClientCallbackUrl)
