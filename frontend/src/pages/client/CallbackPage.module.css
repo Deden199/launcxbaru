@@ -1,63 +1,85 @@
+/* CallbackPage.module.css */
+
 .wrapper {
   display: flex;
   justify-content: center;
-  align-items: start;
+  align-items: flex-start;
   padding: 4rem 1rem;
   background: #f3f4f6;
+  min-height: 100vh;
+  animation: fadeIn 0.5s ease;
 }
+
 .card {
   width: 100%;
   max-width: 480px;
   background: #ffffff;
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  padding: 2rem;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+  padding: 2.5rem;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
+.card:hover {
+  transform: translateY(-4px) scale(1.005);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
 .header {
   display: flex;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 1rem;
 }
+
 .icon {
   color: #4f46e5;
   margin-right: 0.75rem;
+  font-size: 1.75rem;
 }
+
 .title {
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.625rem;
+  font-weight: 700;
   color: #1e293b;
 }
+
 .field {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
+
 .label {
   display: block;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #475569;
+  color: #6b7280;
   margin-bottom: 0.5rem;
 }
+
 .input {
   width: 100%;
   padding: 0.75rem 1rem;
   font-size: 1rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .input:focus {
   outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+  border-color: #4338ca;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
 }
+
 .secretWrapper {
   display: flex;
   align-items: center;
 }
+
 .secretInput {
   flex: 1;
   margin-right: 0.5rem;
 }
+
 .copyButton {
   background: #4f46e5;
   border: none;
@@ -67,14 +89,16 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.2s;
 }
 .copyButton:hover {
   background: #4338ca;
+  transform: scale(1.1);
 }
+
 .button {
   width: 100%;
-  background: #4f46e5;
+  background-image: linear-gradient(135deg, #4f46e5, #4338ca);
   color: #ffffff;
   font-size: 1rem;
   font-weight: 600;
@@ -82,27 +106,35 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: filter 0.2s, transform 0.2s;
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.2);
 }
 .button:disabled {
   background: #9ca3af;
+  background-image: none;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .button:not(:disabled):hover {
-  background: #4338ca;
+  filter: brightness(1.05);
+  transform: translateY(-2px);
 }
+
 .messageWrapper {
   display: flex;
   align-items: center;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
 }
+
 .message {
   margin-left: 0.5rem;
   font-size: 0.875rem;
 }
+
 .success {
   color: #059669;
 }
+
 .error {
   color: #dc2626;
 }
@@ -112,34 +144,47 @@
 .errorIcon {
   color: #dc2626;
 }
+
 .sectionDivider {
-  margin: 2rem 0;
+  margin: 2.5rem 0;
   border-top: 1px solid #e5e7eb;
 }
 
 .subtitle {
   font-size: 1rem;
-  font-weight: 500;
+  font-weight: 600;
   color: #6b7280;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
+
 .qrImage {
   display: block;
-  margin: 1rem auto;
-  max-width: 200px;
+  margin: 1.5rem auto;
+  max-width: 220px;
+  transition: transform 0.3s;
 }
-/* styling khusus untuk 2FA input + tombol */
+.qrImage:hover {
+  transform: scale(1.05);
+}
+
 .twoFaField {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem; /* samakan dengan .field lain */
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
 }
 .twoFaField .input {
-  flex: 1;   /* biar input melebar */
-  width: auto; /* override width:100% dari .input */
+  flex: 1;
+  width: auto;
 }
 .twoFaField .button {
   flex-shrink: 0;
-  width: auto; /* biar tombol hanya selebar kontennya */
+  width: auto;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

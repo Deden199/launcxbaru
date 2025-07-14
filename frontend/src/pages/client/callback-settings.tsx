@@ -7,39 +7,52 @@ import QRCode from 'qrcode'
 import styles from './CallbackPage.module.css'
 
 export default function CallbackPage() {
+  // Callback settings
   const [url, setUrl] = useState('')
   const [secret, setSecret] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
 
+  // Password change
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMessage, setPwMessage] = useState('')
   const [pwError, setPwError] = useState(false)
-  const [is2FAEnabled, setIs2FAEnabled] = useState(false)
 
+  // 2FA state
+  const [loading2FA, setLoading2FA] = useState(true)
+  const [is2FAEnabled, setIs2FAEnabled] = useState(false)
   const [qr, setQr] = useState('')
   const [otp, setOtp] = useState('')
   const [faMsg, setFaMsg] = useState('')
 
   useEffect(() => {
-    apiClient
-      .get('/client/callback-url')
+    // Fetch callback settings
+    apiClient.get('/client/callback-url')
       .then(res => {
         setUrl(res.data.callbackUrl || '')
         setSecret(res.data.callbackSecret || '')
       })
       .catch(() => {
-        setMessage('Gagal memuat data callback')
+        setMessage('Failed to load callback data')
         setIsError(true)
       })
+
+    // Fetch 2FA status
+    const fetch2FA = async () => {
+      try {
+        const res = await apiClient.get('/client/2fa/status')
+        setIs2FAEnabled(res.data.totpEnabled)
+      } catch {
+      } finally {
+        setLoading2FA(false)
+      }
+    }
+    fetch2FA()
   }, [])
-    apiClient.get('/client/2fa/status')
-      .then(res => setIs2FAEnabled(res.data.totpEnabled))
-      .catch(() => {})
 
   const handleSave = async () => {
     setSaving(true)
@@ -49,9 +62,9 @@ export default function CallbackPage() {
       const res = await apiClient.post('/client/callback-url', { callbackUrl: url })
       setUrl(res.data.callbackUrl)
       if (res.data.callbackSecret) setSecret(res.data.callbackSecret)
-      setMessage('Callback URL & Secret berhasil disimpan!')
+      setMessage('Callback URL & Secret saved successfully!')
     } catch {
-      setMessage('Gagal menyimpan callback URL')
+      setMessage('Failed to save callback URL')
       setIsError(true)
     } finally {
       setSaving(false)
@@ -61,14 +74,14 @@ export default function CallbackPage() {
   const copySecret = () => {
     if (secret) {
       navigator.clipboard.writeText(secret)
-      setMessage('Secret berhasil disalin!')
+      setMessage('Secret copied to clipboard!')
       setIsError(false)
     }
   }
 
   const handleChangePassword = async () => {
     if (newPassword !== confirmPassword) {
-      setPwMessage('Konfirmasi password tidak cocok')
+      setPwMessage('Password confirmation does not match')
       setPwError(true)
       return
     }
@@ -77,12 +90,12 @@ export default function CallbackPage() {
     setPwError(false)
     try {
       await apiClient.post('/client/change-password', { oldPassword, newPassword })
-      setPwMessage('Password berhasil diubah!')
+      setPwMessage('Password changed successfully!')
       setOldPassword('')
       setNewPassword('')
       setConfirmPassword('')
     } catch {
-      setPwMessage('Gagal mengubah password')
+      setPwMessage('Failed to change password')
       setPwError(true)
     } finally {
       setPwSaving(false)
@@ -94,21 +107,28 @@ export default function CallbackPage() {
       const { data } = await apiClient.post('/client/2fa/setup')
       const svg = await QRCode.toDataURL(data.otpauthUrl)
       setQr(svg)
-      setFaMsg('Scan QR dan masukkan kode OTP berikutnya')
+      setFaMsg('Scan the QR code and enter the next OTP')
     } catch {
-      setFaMsg('Gagal setup 2FA')
+      setFaMsg('Failed to set up 2FA')
     }
   }
 
   const enable2FA = async () => {
     try {
       await apiClient.post('/client/2fa/enable', { code: otp })
-      setFaMsg('2FA berhasil diaktifkan')
+      setFaMsg('2FA enabled successfully')
       setIs2FAEnabled(true)
-
+      // clear old QR once enabled
+      setQr('')
+      setOtp('')
     } catch {
       setFaMsg('Invalid OTP')
     }
+  }
+
+  const regenerate2FA = async () => {
+    await setup2FA()
+    setFaMsg('New 2FA secret generated, please scan the QR again')
   }
 
   return (
@@ -119,6 +139,7 @@ export default function CallbackPage() {
           <h1 className={styles.title}>Callback & 2FA Settings</h1>
         </div>
 
+        {/* Callback URL Section */}
         <div className={styles.field}>
           <label htmlFor="cbUrl" className={styles.label}>Transactions Callback URL</label>
           <input
@@ -131,7 +152,6 @@ export default function CallbackPage() {
             disabled={saving}
           />
         </div>
-
         <div className={styles.field}>
           <label className={styles.label}>Callback Secret</label>
           <div className={styles.secretWrapper}>
@@ -146,41 +166,46 @@ export default function CallbackPage() {
             </button>
           </div>
         </div>
-
         <button
           className={styles.button}
           onClick={handleSave}
           disabled={saving || !url.trim()}
         >
-          {saving ? 'Menyimpan…' : 'Simpan Callback'}
+          {saving ? 'Saving…' : 'Save Callback'}
         </button>
-
         {message && (
           <div className={styles.messageWrapper}>
-            {isError ? <AlertCircle size={20} className={styles.errorIcon} /> : <CheckCircle size={20} className={styles.successIcon} />}
-            <span className={`${styles.message} ${isError ? styles.error : styles.success}`}>{message}</span>
+            {isError
+              ? <AlertCircle size={20} className={styles.errorIcon} />
+              : <CheckCircle size={20} className={styles.successIcon} />}
+            <span className={`${styles.message} ${isError ? styles.error : styles.success}`}>
+              {message}
+            </span>
           </div>
         )}
 
         <div className={styles.sectionDivider} />
 
+        {/* Two-Factor Authentication Section */}
         <h2 className={styles.subtitle}>Two-Factor Authentication</h2>
-        {qr ? (
+        {loading2FA ? (
+          <p>Loading 2FA status…</p>
+        ) : is2FAEnabled ? (
+          <button onClick={regenerate2FA} className={styles.button}>Regenerate 2FA</button>
+        ) : qr ? (
           <>
             <img src={qr} alt="QR Code" className={styles.qrImage} />
-<div className={`${styles.field} ${styles.twoFaField}`}>
-  <input
-    type="number"
-    value={otp}
-    autoComplete="off"
-    onChange={e => setOtp(e.target.value)}
-    placeholder="Masukkan OTP"
-    className={styles.input}
-  />
-          <button onClick={setup2FA} className={styles.button}>{is2FAEnabled ? 'Ganti 2FA' : 'Setup 2FA'}</button>
-
-</div>
-
+            <div className={`${styles.field} ${styles.twoFaField}`}>  
+              <input
+                type="text"
+                value={otp}
+                autoComplete="off"
+                onChange={e => setOtp(e.target.value)}
+                placeholder="Enter OTP"
+                className={styles.input}
+              />
+              <button onClick={enable2FA} className={styles.button}>Verify OTP</button>
+            </div>
             {faMsg && <p className={styles.message}>{faMsg}</p>}
           </>
         ) : (
@@ -189,6 +214,7 @@ export default function CallbackPage() {
 
         <div className={styles.sectionDivider} />
 
+        {/* Change Password Section */}
         <h2 className={styles.subtitle}>Change Password</h2>
         <div className={styles.field}>
           <label className={styles.label}>Old Password</label>
@@ -200,7 +226,6 @@ export default function CallbackPage() {
             disabled={pwSaving}
           />
         </div>
-
         <div className={styles.field}>
           <label className={styles.label}>New Password</label>
           <input
@@ -211,7 +236,6 @@ export default function CallbackPage() {
             disabled={pwSaving}
           />
         </div>
-
         <div className={styles.field}>
           <label className={styles.label}>Confirm New Password</label>
           <input
@@ -222,19 +246,21 @@ export default function CallbackPage() {
             disabled={pwSaving}
           />
         </div>
-
         <button
           className={styles.button}
           onClick={handleChangePassword}
           disabled={pwSaving || !oldPassword || !newPassword}
         >
-          {pwSaving ? 'Menyimpan…' : 'Change Password'}
+          {pwSaving ? 'Saving…' : 'Change Password'}
         </button>
-
         {pwMessage && (
           <div className={styles.messageWrapper}>
-            {pwError ? <AlertCircle size={20} className={styles.errorIcon} /> : <CheckCircle size={20} className={styles.successIcon} />}
-            <span className={`${styles.message} ${pwError ? styles.error : styles.success}`}>{pwMessage}</span>
+            {pwError
+              ? <AlertCircle size={20} className={styles.errorIcon} />
+              : <CheckCircle size={20} className={styles.successIcon} />}
+            <span className={`${styles.message} ${pwError ? styles.error : styles.success}`}>
+              {pwMessage}
+            </span>
           </div>
         )}
       </div>

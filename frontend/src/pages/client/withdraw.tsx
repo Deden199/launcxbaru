@@ -395,7 +395,7 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
       }
     }}
     isClearable
-    placeholderText="Pilih rentang tanggal..."
+    placeholderText="Select Date Range..."
     maxDate={new Date()}
     dateFormat="dd-MM-yyyy"
     className={styles.input}

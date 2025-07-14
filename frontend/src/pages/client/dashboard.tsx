@@ -180,7 +180,7 @@ const [startDate, endDate]     = dateRange
           <div className={`${styles.card} ${styles.activeBalance}`}>
             <Wallet className={styles.cardIcon} />
             <h2>
-  Saldo Aktif
+  Active Balance
   {children.length > 0 && (
     <>
       {' '}
@@ -194,7 +194,7 @@ const [startDate, endDate]     = dateRange
             <p>{balance.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
           </div>
           <div className={styles.card}>
-            <ListChecks className={styles.cardIcon} /><h2>Jumlah Transaksi</h2>
+            <ListChecks className={styles.cardIcon} /><h2>Transactions</h2>
             <p>{totalTrans}</p>
           </div>
           <div className={`${styles.card} ${styles.pendingBalance}`}>
@@ -208,8 +208,8 @@ const [startDate, endDate]     = dateRange
         <section className={styles.filters}>
           <div className={styles.rangeControls}>
            <select value={range} onChange={e => setRange(e.target.value as any)}>
-  <option value="today">Hari ini</option>
-  <option value="week">7 Hari Terakhir</option>
+  <option value="today">Today</option>
+  <option value="week">7 Day</option>
   <option value="custom">Custom</option>
 </select>
 
@@ -221,7 +221,7 @@ const [startDate, endDate]     = dateRange
       endDate={endDate}
       onChange={(upd) => setDateRange(upd)}
       isClearable={false}           // <-- matikan clear bawaan
-      placeholderText="Pilih rentang tanggal…"
+      placeholderText="Select Date Range…"
       maxDate={new Date()}
       dateFormat="dd-MM-yyyy"
       className={styles.dateInput}
@@ -255,16 +255,16 @@ const [startDate, endDate]     = dateRange
           <input
             type="text"
             className={styles.searchInput}
-            placeholder="Cari TRX ID, RRN, atau Player ID…"
+            placeholder="Search TRX ID, RRN, atau Player ID…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </section>
 
         <section className={styles.tableSection}>
-          <h2>Daftar Transaksi &amp; Settlement</h2>
+          <h2>Transaction List &amp; Settlement</h2>
           {loadingTx ? (
-            <div className={styles.loader}>Loading transaksi…</div>
+            <div className={styles.loader}>Loading transactions…</div>
           ) : (
             <div className={styles.tableWrapper}>
               <table className={styles.table}>
