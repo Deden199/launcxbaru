@@ -257,7 +257,6 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
         where: { refId: ref_id, status: DisbursementStatus.PENDING },
         data: {
           status:      newStatus,
-          netAmount:   net_amount,
           completedAt: completed_at ? new Date(completed_at) : undefined,
         },
       })
