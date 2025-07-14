@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, FormEvent } from 'react'
 import { Bell, Copy, CheckCircle, AlertCircle } from 'lucide-react'
 import apiClient from '@/lib/apiClient'
 import QRCode from 'qrcode'
@@ -131,10 +131,7 @@ export default function CallbackPage() {
   }
 
   // Prevent autofill by handling OTP in a form
-  const handleVerify = async (e) => {
-    e.preventDefault()
-    await enable2FA()
-  }
+  const handleVerify = async (e: FormEvent<HTMLFormElement>) => {
 
   return (
     <div className={styles.wrapper}>
