@@ -132,7 +132,9 @@ export default function CallbackPage() {
 
   // Prevent autofill by handling OTP in a form
   const handleVerify = async (e: FormEvent<HTMLFormElement>) => {
-
+    e.preventDefault()
+    await enable2FA()
+  }
   return (
     <div className={styles.wrapper}>
       <div className={styles.card}>
