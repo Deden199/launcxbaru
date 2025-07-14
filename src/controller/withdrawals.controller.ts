@@ -224,40 +224,64 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
 
     // 2) Verifikasi signature
     const gotSig = (req.header('X-Signature') || '').trim()
-    if (gotSig !== full.merchant_signature) {
+    if (full.merchant_signature && gotSig !== full.merchant_signature) {
       return res.status(400).json({ error: 'Invalid signature' })
     }
 
     // 3) Ambil payload
     const data = full.data ?? full
-    const { ref_id, status, net_amount, completed_at } = data
-    if (!ref_id || net_amount == null) {
+
+    // Deteksi format OY atau Hilogate
+    const isOy =
+      typeof data.status === 'object' &&
+      data.status !== null &&
+      'code' in data.status
+
+    const refId = isOy ? data.partner_trx_id : data.ref_id
+    if (!refId) {
       return res.status(400).json({ error: 'Invalid payload' })
     }
 
     // 4) Fetch record awal untuk cek refund
     const wr = await prisma.withdrawRequest.findUnique({
-      where: { refId: ref_id },
+      where: { refId },
       select: { amount: true, partnerClientId: true, status: true }
     })
     if (!wr) return res.status(404).send('Not found')
 
-    // 5) Tentukan newStatus
-    const up = status.toUpperCase()
-    const newStatus: DisbursementStatus =
-      up === 'COMPLETED' || up === 'SUCCESS'
-        ? DisbursementStatus.COMPLETED
-        : up === 'FAILED' || up === 'ERROR'
-          ? DisbursementStatus.FAILED
-          : DisbursementStatus.PENDING
+    // 5) Tentukan newStatus + completedAt
+    let newStatus: DisbursementStatus
+    let completedAt: Date | undefined
+
+    if (isOy) {
+      const code = String(data.status.code)
+      newStatus =
+        code === '000'
+          ? DisbursementStatus.COMPLETED
+          : code === '300'
+            ? DisbursementStatus.FAILED
+            : DisbursementStatus.PENDING
+      completedAt = data.last_updated_date
+        ? new Date(data.last_updated_date)
+        : undefined
+    } else {
+      const up = String(data.status).toUpperCase()
+      newStatus =
+        up === 'COMPLETED' || up === 'SUCCESS'
+          ? DisbursementStatus.COMPLETED
+          : up === 'FAILED' || up === 'ERROR'
+            ? DisbursementStatus.FAILED
+            : DisbursementStatus.PENDING
+      completedAt = data.completed_at ? new Date(data.completed_at) : undefined
+    }
 
     // 6) Idempotent update + retry
     const { count } = await retry(() =>
       prisma.withdrawRequest.updateMany({
-        where: { refId: ref_id, status: DisbursementStatus.PENDING },
+        where: { refId, status: DisbursementStatus.PENDING },
         data: {
           status:      newStatus,
-          completedAt: completed_at ? new Date(completed_at) : undefined,
+          completedAt,
         },
       })
     )
