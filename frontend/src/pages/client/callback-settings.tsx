@@ -46,8 +46,8 @@ export default function CallbackPage() {
       try {
         const res = await apiClient.get('/client/2fa/status')
         setIs2FAEnabled(res.data.totpEnabled)
-      } catch {
-      } finally {
+      } catch {}
+      finally {
         setLoading2FA(false)
       }
     }
@@ -118,7 +118,6 @@ export default function CallbackPage() {
       await apiClient.post('/client/2fa/enable', { code: otp })
       setFaMsg('2FA enabled successfully')
       setIs2FAEnabled(true)
-      // clear old QR once enabled
       setQr('')
       setOtp('')
     } catch {
@@ -129,6 +128,12 @@ export default function CallbackPage() {
   const regenerate2FA = async () => {
     await setup2FA()
     setFaMsg('New 2FA secret generated, please scan the QR again')
+  }
+
+  // Prevent autofill by handling OTP in a form
+  const handleVerify = async (e) => {
+    e.preventDefault()
+    await enable2FA()
   }
 
   return (
@@ -193,21 +198,28 @@ export default function CallbackPage() {
         ) : is2FAEnabled ? (
           <button onClick={regenerate2FA} className={styles.button}>Regenerate 2FA</button>
         ) : qr ? (
-          <>
-            <img src={qr} alt="QR Code" className={styles.qrImage} />
-            <div className={`${styles.field} ${styles.twoFaField}`}>  
-              <input
-                type="text"
-                value={otp}
-                autoComplete="off"
-                onChange={e => setOtp(e.target.value)}
-                placeholder="Enter OTP"
-                className={styles.input}
-              />
-              <button onClick={enable2FA} className={styles.button}>Verify OTP</button>
-            </div>
-            {faMsg && <p className={styles.message}>{faMsg}</p>}
-          </>
+         <form autoComplete="off" onSubmit={handleVerify}>
+           {/* dummy fields to absorb browser autofill */}
+           <input type="text" name="username" autoComplete="username" style={{display:'none'}} />
+           <input type="password" name="new-password" autoComplete="new-password" style={{display:'none'}} />
+
+           <img src={qr} alt="QR Code" className={styles.qrImage} />
+           <div className={`${styles.field} ${styles.twoFaField}`}>
+             <input
+               type="text"
+               name="otp"
+               autoComplete="off"
+               placeholder="Enter 2FA code"
+               value={otp}
+               onChange={e => setOtp(e.target.value)}
+               inputMode="numeric"
+               pattern="\d*"
+               className={styles.input}
+             />
+             <button type="submit" className={styles.button}>Verify OTP</button>
+           </div>
+           {faMsg && <p className={styles.message}>{faMsg}</p>}
+         </form>
         ) : (
           <button onClick={setup2FA} className={styles.button}>Setup 2FA</button>
         )}
