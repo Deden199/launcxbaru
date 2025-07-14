@@ -1,8 +1,10 @@
+// app/admin/settings/page.tsx (atau SettingsPage.tsx)
 'use client'
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
+import styles from './SettingsPage.module.css'
 
 export default function SettingsPage() {
   useRequireAuth()
@@ -36,33 +38,49 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>
+  if (loading) {
+    return (
+      <div className={styles.wrapper}>
+        <div className={styles.card}>Loading…</div>
+      </div>
+    )
+  }
 
   return (
-    <div className="p-8 space-y-4">
-      <h1 className="text-2xl font-bold">Settings</h1>
-      {error && <p className="text-red-600">{error}</p>}
-      <div>
-        <label className="block font-medium">Minimum Withdraw</label>
-        <input
-          type="number"
-          className="border rounded p-2 w-60"
-          value={minW}
-          onChange={e => setMinW(e.target.value)}
-        />
+    <div className={styles.wrapper}>
+      <div className={styles.card}>
+        <header className={styles.header}>
+          <h1>Settings</h1>
+        </header>
+        {error && <div className={styles.error}>{error}</div>}
+        <div className={styles.formGroup}>
+          <label className={styles.label}>Minimum Withdraw</label>
+          <input
+            type="number"
+            className={styles.input}
+            value={minW}
+            onChange={e => setMinW(e.target.value)}
+            placeholder="e.g. 10000"
+          />
+        </div>
+        <div className={styles.formGroup}>
+          <label className={styles.label}>Maximum Withdraw</label>
+          <input
+            type="number"
+            className={styles.input}
+            value={maxW}
+            onChange={e => setMaxW(e.target.value)}
+            placeholder="e.g. 500000"
+          />
+        </div>
+        <button
+          onClick={save}
+          className={styles.button}
+          disabled={loading}
+        >
+          {loading ? 'Saving…' : 'Save'}
+        </button>
       </div>
-      <div>
-        <label className="block font-medium">Maximum Withdraw</label>
-        <input
-          type="number"
-          className="border rounded p-2 w-60"
-          value={maxW}
-          onChange={e => setMaxW(e.target.value)}
-        />
-      </div>
-      <button onClick={save} className="px-4 py-2 bg-blue-600 text-white rounded">
-        Save
-      </button>
     </div>
   )
 }
