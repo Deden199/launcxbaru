@@ -15,6 +15,8 @@ const navItems = [
   { label: 'Dashboard',   href: '/dashboard',        Icon: Home },
   { label: 'API Clients', href: '/admin/clients',   Icon: Box },
     { label: 'Merchant Settings', href: '/admin/merchants',   Icon: BoomBox },
+      { label: 'WD Settings', href: '/admin/settings', Icon: Settings },
+
 
 ]
 

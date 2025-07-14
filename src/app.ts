@@ -10,6 +10,8 @@ import subMerchantRoutes from './route/admin/subMerchant.routes';
 import pgProviderRoutes from './route/admin/pgProvider.routes';
 import adminMerchantRoutes from './route/admin/merchant.routes';
 import adminClientRoutes from './route/admin/client.routes';
+import settingsRoutes   from './route/settings.routes';
+
 import { withdrawalCallback } from './controller/withdrawals.controller'
 import webRoutes from './route/web.routes';
 import simulateRoutes from './route/simulate.routes';
@@ -108,6 +110,7 @@ app.use('/api/v1/admin/merchants', authMiddleware, adminMerchantRoutes);
 app.use('/api/v1/admin/merchants/:id/pg', authMiddleware, subMerchantRoutes);
 app.use('/api/v1/admin/pg-providers', authMiddleware, pgProviderRoutes);
 app.use('/api/v1/admin/clients', authMiddleware, adminClientRoutes);
+app.use('/api/v1/admin/settings', authMiddleware, settingsRoutes);
 
 /* ========== 4. PARTNER-CLIENT (login/register + dashboard + withdraw) ========== */
 app.use('/api/v1/client', clientWebRoutes);

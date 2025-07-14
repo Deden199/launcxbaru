@@ -37,6 +37,7 @@ interface Withdrawal {
   bankName: string
   branchName?: string
   amount: number
+ 
   netAmount?: number
   paymentGatewayId?: string
   isTransferProcess: boolean

@@ -363,6 +363,20 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     }
   }
 
+    // 0a) Validate against global withdraw limits
+  const [minSet, maxSet] = await Promise.all([
+    prisma.setting.findUnique({ where: { key: 'withdraw_min' } }),
+    prisma.setting.findUnique({ where: { key: 'withdraw_max' } })
+  ])
+  const minVal = parseFloat(minSet?.value ?? '0')
+  const maxVal = parseFloat(maxSet?.value ?? '0')
+  if (!isNaN(minVal) && minVal > 0 && amount < minVal) {
+    return res.status(400).json({ error: `Minimum withdraw Rp ${minVal}` })
+  }
+  if (!isNaN(maxVal) && maxVal > 0 && amount > maxVal) {
+    return res.status(400).json({ error: `Maximum withdraw Rp ${maxVal}` })
+  }
+
   try {
     const sub = await prisma.sub_merchant.findUnique({
       where: { id: subMerchantId },
