@@ -15,3 +15,9 @@ export function isJakartaWeekend(date: Date = new Date()): boolean {
   const day = parts.find(p => p.type === 'weekday')!.value;
   return day === 'Sat' || day === 'Sun';
 }
+
+export function parseDateSafely(raw: any): Date | undefined {
+  if (!raw) return undefined
+  const d = new Date(raw)
+  return isNaN(d.getTime()) ? undefined : d
+  }

@@ -10,6 +10,7 @@ import { DisbursementStatus } from '@prisma/client'
 import { getActiveProviders } from '../service/provider';
 import {OyClient,OyConfig}          from '../service/oyClient'    // sesuaikan path
 import { authenticator } from 'otplib'
+import { parseDateSafely } from '../util/time'
 
 
 
@@ -261,9 +262,8 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
           : code === '300'
             ? DisbursementStatus.FAILED
             : DisbursementStatus.PENDING
-      completedAt = data.last_updated_date
-        ? new Date(data.last_updated_date)
-        : undefined
+      completedAt = parseDateSafely(data.last_updated_date)
+
     } else {
       const up = String(data.status).toUpperCase()
       newStatus =
@@ -272,7 +272,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
           : up === 'FAILED' || up === 'ERROR'
             ? DisbursementStatus.FAILED
             : DisbursementStatus.PENDING
-      completedAt = data.completed_at ? new Date(data.completed_at) : undefined
+      completedAt = parseDateSafely(data.last_updated_date)
     }
 
     // 6) Idempotent update + retry
