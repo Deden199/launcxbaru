@@ -98,6 +98,8 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
 
   // 2) Baca query.clientId (optional) untuk override single-child
   const { clientId: qClientId, status, date_from, date_to, page = '1', limit = '20' } = req.query;
+    const fromDate = parseDateSafely(date_from);
+  const toDate   = parseDateSafely(date_to);
   let clientIds: string[];
   if (typeof qClientId === 'string' && qClientId !== 'all') {
     // child-only view
@@ -112,10 +114,10 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     partnerClientId: { in: clientIds }
   };
   if (status) where.status = status as string;
-  if (date_from || date_to) {
+  if (fromDate || toDate) {
     where.createdAt = {};
-    if (date_from) where.createdAt.gte = new Date(String(date_from));
-    if (date_to)   where.createdAt.lte = new Date(String(date_to));
+    if (fromDate) where.createdAt.gte = fromDate;
+    if (toDate)   where.createdAt.lte = toDate;
   }
 
   // 4) Pagination

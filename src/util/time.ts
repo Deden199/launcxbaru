@@ -18,6 +18,22 @@ export function isJakartaWeekend(date: Date = new Date()): boolean {
 
 export function parseDateSafely(raw: any): Date | undefined {
   if (!raw) return undefined
+    if (typeof raw === 'string') {
+    const m = raw.trim().match(/^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})$/)
+    if (m) {
+      const [, dd, MM, yyyy, hh, mm, ss] = m
+      return new Date(
+        Date.UTC(
+          Number(yyyy),
+          Number(MM) - 1,
+          Number(dd),
+          Number(hh),
+          Number(mm),
+          Number(ss)
+        )
+      )
+    }
+  }
   const d = new Date(raw)
   return isNaN(d.getTime()) ? undefined : d
-  }
+}

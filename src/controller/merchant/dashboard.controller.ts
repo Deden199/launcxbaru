@@ -3,6 +3,7 @@ import { Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import ExcelJS from 'exceljs'
 import { AuthRequest } from '../../middleware/auth'
+import { parseDateSafely } from '../../util/time'
 
 const prisma = new PrismaClient()
 
@@ -13,10 +14,8 @@ function resolveMerchantId(req: AuthRequest): string | undefined {
   }
   return req.userId!
 }
-function parseDate(s?: unknown): Date|undefined {
-  if (!s) return undefined
-  const d = new Date(String(s))
-  return isNaN(d.getTime()) ? undefined : d
+function parseDate(s?: unknown): Date | undefined {
+  return parseDateSafely(s)
 }
 
 /* ─── shared fetch ─── */
