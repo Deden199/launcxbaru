@@ -89,6 +89,7 @@ const [balanceOy,     setBalanceOy]     = useState(0)
   const [from, setFrom]   = useState(() => new Date().toISOString().slice(0,10))
   const [to, setTo]       = useState(() => new Date().toISOString().slice(0,10))
   const [search, setSearch] = useState('')
+const [statusFilter, setStatusFilter] = useState<'all' | string>('all')
 
   // Summary cards state
   const [loadingSummary, setLoadingSummary] = useState(true)
@@ -222,12 +223,17 @@ async function fetchWithdrawals() {
         
 
       }))
+const filtered = mapped.filter(t => {
+  // kalau filter = 'all', return semua
+  if (statusFilter === 'all') return true
 
-      const filtered = mapped.filter(t =>
-        t.id.toLowerCase().includes(search.toLowerCase()) ||
-        t.rrn.toLowerCase().includes(search.toLowerCase()) ||
-        t.playerId.toLowerCase().includes(search.toLowerCase())
-      )
+  return t.settlementStatus === statusFilter
+    && (
+      t.id.toLowerCase().includes(search.toLowerCase()) ||
+      t.rrn.toLowerCase().includes(search.toLowerCase()) ||
+      t.playerId.toLowerCase().includes(search.toLowerCase())
+        )
+     } )
 
       setTxs(filtered)
       setTotalTrans(filtered.length)
@@ -246,7 +252,7 @@ async function fetchWithdrawals() {
   }, [range, from, to, selectedMerchant])
   useEffect(() => {
     fetchTransactions()
-  }, [range, from, to, selectedMerchant, search])
+  }, [range, from, to, selectedMerchant, search, statusFilter])
 
   if (loadingSummary) {
     return <div className={styles.loader}>Loading summary…</div>
@@ -347,11 +353,20 @@ async function fetchWithdrawals() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-<button
-  onClick={() => {
-    api.get('/admin/merchants/dashboard/export-all', {
-      params: buildParams(),
-      responseType: 'blob'
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
+            <option value="PENDING">PENDING</option>
+            <option value="EXPIRED">EXPIRED</option>
+          </select>
+          <button
+            onClick={() => {
+              api.get('/admin/merchants/dashboard/export-all', {
+                params: buildParams(),
+                responseType: 'blob'
     }).then(r => {
       const url = URL.createObjectURL(new Blob([r.data]))
       const a = document.createElement('a')

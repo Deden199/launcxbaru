@@ -15,11 +15,16 @@ export function isJakartaWeekend(date: Date = new Date()): boolean {
   const day = parts.find(p => p.type === 'weekday')!.value;
   return day === 'Sat' || day === 'Sun';
 }
+import moment from 'moment-timezone'
 
 export function parseDateSafely(raw: any): Date | undefined {
   if (!raw) return undefined
-    if (typeof raw === 'string') {
-    const m = raw.trim().match(/^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})$/)
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+
+    // dd-MM-yyyy HH:mm:ss (legacy format)
+    let m = trimmed.match(/^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})$/)
     if (m) {
       const [, dd, MM, yyyy, hh, mm, ss] = m
       return new Date(
@@ -33,7 +38,19 @@ export function parseDateSafely(raw: any): Date | undefined {
         )
       )
     }
+        // Common provider formats
+    const formats = [
+      'YYYY-MM-DD HH:mm:ss',
+      'YYYY-MM-DDTHH:mm:ssZ',
+      'YYYY-MM-DDTHH:mm:ss.SSSZ'
+    ]
+    for (const fmt of formats) {
+      const mo = moment(trimmed, fmt, true)
+      if (mo.isValid()) return mo.toDate()
+    }
   }
+  
   const d = new Date(raw)
   return isNaN(d.getTime()) ? undefined : d
-}
+
+  }

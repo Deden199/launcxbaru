@@ -278,13 +278,19 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
     }
 
     // 6) Idempotent update + retry
+        // 6) Idempotent update + retry
+    const updateData: any = { status: newStatus }
+    if (completedAt) {
+      updateData.completedAt = completedAt
+    } else if (data.last_updated_date) {
+      logger.warn(`Failed to parse last_updated_date: ${data.last_updated_date}`)
+    }
+
     const { count } = await retry(() =>
       prisma.withdrawRequest.updateMany({
         where: { refId, status: DisbursementStatus.PENDING },
-        data: {
-          status:      newStatus,
-          completedAt,
-        },
+        data: updateData,
+
       })
     )
 
@@ -384,7 +390,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
   if (user.totpEnabled) {
     if (!otp) return res.status(400).json({ error: 'OTP wajib diisi' })
     if (!user.totpSecret || !authenticator.check(String(otp), user.totpSecret)) {
-      return res.status(401).json({ error: 'OTP tidak valid' })
+      return res.status(400).json({ error: 'OTP tidak valid' })
     }
   }
 

@@ -57,6 +57,7 @@ const [startDate, endDate]     = dateRange
   const [range, setRange]                     = useState<'today'|'week'|'custom'>('today')
   const [from, setFrom]                       = useState(() => new Date().toISOString().slice(0,10))
   const [to, setTo]                           = useState(() => new Date().toISOString().slice(0,10))
+  const [statusFilter, setStatusFilter]       = useState('')
 
   // Search
   const [search, setSearch]                   = useState('')
@@ -150,9 +151,12 @@ const [startDate, endDate]     = dateRange
   useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to])
 
   const filtered = txs.filter(t =>
-    t.id.toLowerCase().includes(search.toLowerCase()) ||
-    t.rrn.toLowerCase().includes(search.toLowerCase()) ||
-    t.playerId.toLowerCase().includes(search.toLowerCase())
+    (statusFilter === '' || t.settlementStatus === statusFilter) &&
+    (
+      t.id.toLowerCase().includes(search.toLowerCase()) ||
+      t.rrn.toLowerCase().includes(search.toLowerCase()) ||
+      t.playerId.toLowerCase().includes(search.toLowerCase())
+    )
   )
 
   if (loadingSummary) return <div className={styles.loader}>Loading summary…</div>
@@ -252,6 +256,15 @@ const [startDate, endDate]     = dateRange
               <FileText size={16} /> Export Excel
             </button>
           </div>
+                    <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+          >
+            <option value="">All Status</option>
+            <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
+            <option value="PENDING">PENDING</option>
+            <option value="EXPIRED">EXPIRED</option>
+          </select>
           <input
             type="text"
             className={styles.searchInput}

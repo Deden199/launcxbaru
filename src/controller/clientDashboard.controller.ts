@@ -162,7 +162,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     const orders = await prisma.order.findMany({
       where: {
         partnerClientId: { in: clientIds },
-        status: { in: ['SUCCESS','DONE','SETTLED','PENDING_SETTLEMENT'] },
+        status: { in: ['SUCCESS','DONE','SETTLED','PENDING_SETTLEMENT','PENDING','EXPIRED'] },
         ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
       },
       orderBy: { createdAt: 'desc' },
