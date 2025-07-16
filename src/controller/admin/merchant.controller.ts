@@ -245,8 +245,16 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 
     // (2) build where untuk orders
     const whereOrders: any = {
-      status: { in: ['SUCCESS', 'DONE', 'SETTLED', 'PENDING_SETTLEMENT'] },
-      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {}),
+      status: {
+        in: [
+          'SUCCESS',
+          'DONE',
+          'SETTLED',
+          'PAID',
+          'PENDING',
+          'EXPIRED'
+        ],
+      },      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {}),
     }
     if (partnerClientId && partnerClientId !== 'all') {
       whereOrders.partnerClientId = partnerClientId
@@ -255,7 +263,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     // (3) total pending
     const pendingAgg = await prisma.order.aggregate({
       _sum: { pendingAmount: true },
-      where: { ...whereOrders, status: 'PENDING_SETTLEMENT' }
+      where: { ...whereOrders, status: 'PAID' }
     })
     const totalPending = pendingAgg._sum.pendingAmount ?? 0
 
@@ -294,6 +302,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         pendingAmount:        true,
         settlementAmount:     true,
         status:               true,
+        settlementStatus:     true,
         channel:              true,
         paymentReceivedTime:  true,  // ← baru
         settlementTime:       true,  // ← baru
@@ -305,7 +314,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     const transactions = orders.map(o => {
       const pend = o.pendingAmount    ?? 0
       const sett = o.settlementAmount ?? 0
-      const netSettle = o.status === 'PENDING_SETTLEMENT' ? pend : sett
+      const netSettle = o.status === 'PAID' ? pend : sett
 
       return {
         id:                   o.id,
@@ -318,7 +327,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         feePg:                o.fee3rdParty ?? 0,
         netSettle,
         status:               o.status === 'DONE' ? 'DONE' : 'SUCCESS',
-        settlementStatus:     o.status,
+        settlementStatus:     o.settlementStatus ?? '',
         channel:              o.channel     ?? '',
         // tiga timestamp baru:
         paymentReceivedTime:  o.paymentReceivedTime
@@ -528,7 +537,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
 
     // Build order filter
     const whereOrders: any = {
-      status: { in: ['SUCCESS','DONE','SETTLED','PENDING_SETTLEMENT'] },
+      status: { in: ['SUCCESS','DONE','SETTLED','PAID'] },
       ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
     }
     if (partnerClientId && partnerClientId !== 'all') {
@@ -568,7 +577,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
     const txSheet = wb.addWorksheet('Transactions')
     txSheet.addRow(['Date','TRX ID','RRN','Player ID','Channel','Amount','Fee Launcx','Fee PG','Net Amount','Status'])
     orders.forEach(o => {
-      const net = o.status === 'PENDING_SETTLEMENT' ? o.pendingAmount : o.settlementAmount
+      const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
       txSheet.addRow([
         o.createdAt.toISOString(), o.id, o.rrn, o.playerId, o.channel,
         o.amount, o.feeLauncx, o.fee3rdParty, net, o.status

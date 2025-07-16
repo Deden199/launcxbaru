@@ -330,7 +330,7 @@ export async function processHilogatePayload(payload: {
   // 2) Hitung status internal
   const upStatus  = pgStatus.toUpperCase();
   const isSuccess = ['SUCCESS','DONE'].includes(upStatus);
-  const newStatus = isSuccess ? 'PENDING_SETTLEMENT' : upStatus;
+  const newStatus = isSuccess ? 'PAID' : upStatus;
   const newSetSt  = settlement_status?.toUpperCase() ?? (isSuccess ? 'PENDING' : null);
 
   // 3) Update order di DB

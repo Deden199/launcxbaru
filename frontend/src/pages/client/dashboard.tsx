@@ -261,6 +261,7 @@ const [startDate, endDate]     = dateRange
             onChange={e => setStatusFilter(e.target.value)}
           >
             <option value="">All Status</option>
+            <option value="SETTLED">SETTLED</option>
             <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
             <option value="PENDING">PENDING</option>
             <option value="EXPIRED">EXPIRED</option>

@@ -161,7 +161,7 @@ Body:
       </p>
       <pre className={styles.codeBlock}><code>{`{
   "orderId": "685d4578f2745f068c635f17",
-  "status": "PENDING_SETTLEMENT",
+  "status": "PAID",
   "settlementStatus": "PENDING",
   "grossAmount": 50000,
   "feeLauncx": 2500,

@@ -274,7 +274,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
           : up === 'FAILED' || up === 'ERROR'
             ? DisbursementStatus.FAILED
             : DisbursementStatus.PENDING
-      completedAt = parseDateSafely(data.last_updated_date)
+      completedAt = parseDateSafely(data.completed_at)
     }
 
     // 6) Idempotent update + retry

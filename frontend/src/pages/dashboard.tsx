@@ -358,6 +358,7 @@ const filtered = mapped.filter(t => {
             onChange={e => setStatusFilter(e.target.value)}
           >
             <option value="all">All Status</option>
+            <option value="SETTLED">SETTLED</option>
             <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
             <option value="PENDING">PENDING</option>
             <option value="EXPIRED">EXPIRED</option>

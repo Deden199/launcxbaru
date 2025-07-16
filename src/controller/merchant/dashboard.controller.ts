@@ -53,7 +53,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
   const orders = await fetchOrders({ merchantId, dateFrom, dateTo })
 
   const SUC  = ['SUCCESS','DONE','SETTLED']
-  const PEND = ['WAIT_FOR_SETTLEMENT','PENDING_SETTLEMENT']
+  const PEND = ['WAIT_FOR_SETTLEMENT','PAID']
 
   const summary = {
     totalTransaksi: orders

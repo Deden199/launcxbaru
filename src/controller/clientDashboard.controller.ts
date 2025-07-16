@@ -141,7 +141,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
       _sum: { pendingAmount: true },
       where: {
         partnerClientId: { in: clientIds },
-        status: 'PENDING_SETTLEMENT',
+        status: 'PAID',
         ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       }
     });
@@ -162,14 +162,14 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     const orders = await prisma.order.findMany({
       where: {
         partnerClientId: { in: clientIds },
-        status: { in: ['SUCCESS','DONE','SETTLED','PENDING_SETTLEMENT','PENDING','EXPIRED'] },
+        status: { in: ['SUCCESS','DONE','SETTLED','PAID','PENDING','EXPIRED'] },
         ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
       },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, qrPayload: true, rrn: true, playerId: true,
         amount: true, feeLauncx: true, settlementAmount: true,
-        pendingAmount: true, status: true, createdAt: true,       
+        pendingAmount: true, status: true, settlementStatus: true, createdAt: true,
         paymentReceivedTime: true,
         settlementTime:      true,
         trxExpirationTime:   true,
@@ -179,13 +179,13 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
 
     // (5) hitung totalTransaksi
     const totalTransaksi = orders
-      .filter(o => o.status !== 'PENDING_SETTLEMENT')
+      .filter(o => o.status !== 'PAID')
       .reduce((sum, o) => sum + o.amount, 0);
     console.log('totalTransaksi:', totalTransaksi);
 
     // (6) map ke response
     const transactions = orders.map(o => {
-      const netSettle = o.status === 'PENDING_SETTLEMENT'
+      const netSettle = o.status === 'PAID'
         ? (o.pendingAmount ?? 0)
         : (o.settlementAmount ?? 0);
       return {
@@ -197,7 +197,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
         amount: o.amount,
         feeLauncx: o.feeLauncx ?? 0,
         netSettle,
-        settlementStatus: o.status,
+        settlementStatus: o.settlementStatus ?? '',
         status: o.status === 'DONE' ? 'DONE' : 'SUCCESS',
        // tambahkan ISO-string dari tiga timestamp:
         paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
@@ -253,7 +253,7 @@ console.log('export clientIds:', clientIds)
   const orders = await prisma.order.findMany({
     where: {
       partnerClientId: { in: clientIds },
-      status: { in: ['SUCCESS','DONE','SETTLED','PENDING_SETTLEMENT'] },
+      status: { in: ['SUCCESS','DONE','SETTLED','PAID'] },
       ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
     },
     orderBy: { createdAt: 'desc' },

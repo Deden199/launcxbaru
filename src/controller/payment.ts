@@ -213,7 +213,7 @@ const trxExpirationTime = full.expires_at?.value
     // 5) Hitung status internal
     const upStatus  = pgStatus.toUpperCase()
     const isSuccess = ['SUCCESS', 'DONE'].includes(upStatus)
-    const newStatus = isSuccess ? 'PENDING_SETTLEMENT' : upStatus
+    const newStatus = isSuccess ? 'PAID' : upStatus
     const newSetSt  = settlement_status?.toUpperCase() ?? (isSuccess ? 'PENDING' : null)
 
     // 6) Ambil merchantId
@@ -391,7 +391,7 @@ if (cb) {
 
     // 4) Hitung status internal
     const isSuccess  = pgStatusRaw === 'COMPLETE'
-    const newStatus  = isSuccess ? 'PENDING_SETTLEMENT' : pgStatusRaw
+    const newStatus  = isSuccess ? 'PAID' : pgStatusRaw
     const newSetSt   = settlementSt ?? (isSuccess ? 'PENDING' : pgStatusRaw)
 
     // 5) Ambil partner fee config

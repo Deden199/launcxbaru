@@ -19,10 +19,10 @@ export function scheduleSettlementChecker() {
   cron.schedule(
     '* * * *',
     async () => {
-      // (1) ambil semua order PENDING_SETTLEMENT
+      // (1) ambil semua order PAID
       const pendingOrders = await prisma.order.findMany({
         where: {
-          status: 'PENDING_SETTLEMENT',
+          status: 'PAID',
           partnerClientId: { not: null }
         },
         select: {
@@ -148,7 +148,7 @@ export function scheduleSettlementChecker() {
 
             // update order & partner balance
             const upd = await prisma.order.updateMany({
-              where: { id: o.id, status: 'PENDING_SETTLEMENT' },
+              where: { id: o.id, status: 'PAID' },
               data: {
                 status: 'SETTLED',
                 settlementAmount: netAmt,
