@@ -226,8 +226,10 @@ const submit = async (e: React.FormEvent) => {
   try {
     // 1) Tentukan provider & kode bank payload
     const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy'
+     const bankObj = banks.find(b => b.code === form.bankCode);
+
     const payloadBankCode = provider === 'oy'
-      ? oyCodeMap[form.bankCode.toLowerCase()]
+      ? oyCodeMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
       : form.bankCode;
 
     // 2) Siapkan body
