@@ -15,6 +15,30 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
+
+/* Info banner (blue) */
+.info {
+  background-color: #e6f0ff;    /* light blue background */
+  color: #0275d8;               /* deeper blue text */
+  border: 1px solid #b8daff;    /* soft blue border */
+  padding: 0.75rem 1rem;        /* cukup ruang di dalam */
+  border-radius: 0.375rem;      /* sedikit melengkung */
+  margin-bottom: 1rem;          /* jarak ke form */
+  font-size: 0.95rem;           /* ukuran nyaman dibaca */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Tombol close di dalam info */
+.closeButton {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-left: 0.5rem;
+  color: inherit;
+}
+
 .title {
   font-size: 1.5rem;
   font-weight: 600;

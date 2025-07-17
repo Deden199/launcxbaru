@@ -28,9 +28,9 @@ interface Withdrawal {
 
   bankName: string
   accountNumber: string
-    accountName: string      // ← baru
-
-     netAmount: number
+  accountName: string      // ← baru
+  wallet: string
+  netAmount: number
   withdrawFeePercent: number
   withdrawFeeFlat: number
   amount: number
@@ -107,13 +107,10 @@ const bankOptions = banks.map(b => ({
 }));
   /* ──────────────── Initial fetch ──────────────── */
   useEffect(() => {
-    const sub = subs.find(s => s.id === selectedSub)
-    const provider = sub?.provider || 'hilogate'
-    apiClient
-      .get<{ banks: { code: string; name: string }[] }>('/banks', { params: { provider } })
-            .then(res => setBanks(res.data.banks))
+    apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
+      .then(res => setBanks(res.data.banks))
       .catch(console.error)
-  }, [selectedSub, subs])
+  }, [])
 
 useEffect(() => {
   apiClient
@@ -177,19 +174,12 @@ useEffect(() => {
   setBusy(b => ({ ...b, validating: true }))
   setError('')
   try {
-
-      const provider = subs.find(s => s.id === selectedSub)!.provider
-      const payloadBankCode = provider === 'oy'
-        ? oyCodeMap[form.bankCode.toLowerCase()]
-        : form.bankCode
     // 1) Override validateStatus supaya axios gak langsung throw
     const res = await apiClient.post(
       '/client/withdrawals/validate-account',
       {
-        bank_code: payloadBankCode,
+        bank_code:      form.bankCode,
         account_number: form.accountNumber,
-        sourceProvider: provider,
-        subMerchantId: selectedSub,
       },
       {
         validateStatus: () => true // semua status dianggap “OK” di level axios
@@ -306,7 +296,7 @@ const submit = async (e: React.FormEvent) => {
 
   const exportToExcel = () => {
     const rows = [
-      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Amount', 'Fee', 'Net Amount', 'Status'],
+      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet', 'Amount', 'Fee', 'Net Amount', 'Status'],
       ...withdrawals.map(w => [
         new Date(w.createdAt).toLocaleDateString(),
                 w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-',
@@ -315,6 +305,7 @@ const submit = async (e: React.FormEvent) => {
         w.bankName,
         w.accountNumber,
         w.accountName,      // ← baru
+        w.wallet,
 
         w.amount,
         w.amount - w.netAmount,
@@ -460,7 +451,7 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
             <table className={styles.table}>
               <thead>
                 <tr>
-                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name','Amount', 'Fee', 'Net Amount', 'Status'].map(
+                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet','Amount', 'Fee', 'Net Amount', 'Status'].map(
                     h => (
                       <th key={h}>
                         {h}
@@ -481,8 +472,9 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
                       <td>{w.bankName}</td>
                             <td>{w.accountNumber}</td>     {/* ← tambahkan ini */}
 
-      <td>{w.accountName}</td>       
-                      <td>Rp {w.amount.toLocaleString()}</td>
+      <td>{w.accountName}</td>
+      <td>{w.wallet}</td>
+                            <td>Rp {w.amount.toLocaleString()}</td>
                                             <td>Rp {(w.amount - w.netAmount).toLocaleString()}</td>
                       <td>Rp {w.netAmount.toLocaleString()}</td>
                       <td>
@@ -494,7 +486,7 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10} className={styles.noData}>
+                    <td colSpan={11} className={styles.noData}>
                       No data
                     </td>
                   </tr>
