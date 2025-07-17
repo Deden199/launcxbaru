@@ -37,13 +37,16 @@ interface Withdrawal {
   bankName: string
   branchName?: string
   amount: number
- 
+  withdrawFeePercent: number
+  withdrawFeeFlat: number
   netAmount?: number
   paymentGatewayId?: string
   isTransferProcess: boolean
   status: string
   createdAt: string
   completedAt?: string
+  wallet: string
+
 }
 
 type Tx = {
@@ -65,6 +68,7 @@ type Tx = {
 }
 
 type Merchant = { id: string; name: string }
+type SubBalance = { id: string; name: string; provider: string; balance: number }
 
 type TransactionsResponse = {
   transactions: RawTx[]
@@ -81,25 +85,29 @@ export default function DashboardPage() {
   // Merchant dropdown
   const [merchants, setMerchants] = useState<Merchant[]>([])
   const [selectedMerchant, setSelectedMerchant] = useState<'all' | string>('all')
-const [balanceSource, setBalanceSource] = useState<'hilogate'|'oy'>('hilogate')
-const [balanceOy,     setBalanceOy]     = useState(0)
-  
+const [subBalances, setSubBalances] = useState<SubBalance[]>([])
+const [selectedSub, setSelectedSub] = useState<string>('')
+const [currentBalance, setCurrentBalance] = useState(0)
   // Filters
   
   const [range, setRange] = useState<'today'|'week'|'custom'>('today')
   const [from, setFrom]   = useState(() => toJakartaDate(new Date()))
   const [to, setTo]       = useState(() => toJakartaDate(new Date()))
   const [search, setSearch] = useState('')
-const [statusFilter, setStatusFilter] = useState<'all' | string>('all')
+const [statusFilter, setStatusFilter] = useState<'PAID' | string>('PAID')
 
   // Summary cards state
   const [loadingSummary, setLoadingSummary] = useState(true)
-  const [balanceHilogate, setBalanceHilogate] = useState(0)
   const [activeBalance, setActiveBalance]     = useState(0)
   const [totalPending, setTotalPending]       = useState(0)
   const [loadingProfit, setLoadingProfit]     = useState(true)
   const [totalProfit, setTotalProfit]         = useState(0)
-
+  const [loadingProfitSub, setLoadingProfitSub] = useState(true)
+  const [profitSubs, setProfitSubs] = useState<{
+    subMerchantId: string
+    name?: string | null
+    profit: number
+  }[]>([])
   // Transactions table state
   const [loadingTx, setLoadingTx] = useState(true)
   const [txs, setTxs]             = useState<Tx[]>([])
@@ -111,17 +119,61 @@ const [statusFilter, setStatusFilter] = useState<'all' | string>('all')
   }  const today0  = () => { const d = new Date(); d.setHours(0,0,0,0); return d }
   const week0   = () => { const d = new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); return d }
 
-  const buildParams = () => {
-    const p: any = {}
-    if (range === 'today') p.date_from = toJakartaDate(today0())
-    else if (range === 'week') p.date_from = toJakartaDate(week0())
-    else {
-      p.date_from = from
-      p.date_to   = to
-    }
-  if (selectedMerchant !== 'all') p.partnerClientId = selectedMerchant
-    return p
+function buildParams() {
+  const p: any = {}
+  const tz = 'Asia/Jakarta'
+
+  if (range === 'today') {
+    // jam 00:00:00 di Jakarta
+    const startStr = new Date().toLocaleString('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    })
+    // parse ulang ke Date lalu set ke 00:00:00
+    const [m, d, y, H, M, S] = startStr.match(/\d+/g)!.map(Number)
+    const start = new Date(y, m-1, d, 0, 0, 0)
+    // sekarang waktu Jakarta
+    const nowStr = new Date().toLocaleString('en-US', { timeZone: tz, hour12: false })
+    const now = new Date(nowStr)
+
+    p.date_from = start.toISOString()
+    p.date_to   = now.toISOString()
   }
+  else if (range === 'week') {
+    // 7 hari lalu 00:00 Jakarta
+    const weekAgo = new Date()
+    weekAgo.setDate(weekAgo.getDate() - 6)
+    const weekStr = weekAgo.toLocaleString('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    })
+    const [m, d, y] = weekStr.match(/\d+/g)!.slice(0,3).map(Number)
+    const start = new Date(y, m-1, d, 0, 0, 0)
+    // sampai sekarang Jakarta
+    const nowStr = new Date().toLocaleString('en-US', { timeZone: tz, hour12: false })
+    const now = new Date(nowStr)
+
+    p.date_from = start.toISOString()
+    p.date_to   = now.toISOString()
+  }
+  else {
+    // custom — gunakan full‑day juga
+    const [fy, fm, fd] = from.split('-').map(Number)
+    const [ty, tm, td] = to.split('-').map(Number)
+    p.date_from = new Date(fy, fm-1, fd, 0, 0, 0).toISOString()
+    p.date_to   = new Date(ty, tm-1, td, 23, 59, 59).toISOString()
+  }
+
+  if (selectedMerchant !== 'all') {
+    p.partnerClientId = selectedMerchant
+  }
+  console.log('buildParams →', p)
+  return p
+}
+
 
   // Fetch Hilogate summary
 const fetchSummary = async () => {
@@ -137,18 +189,21 @@ const fetchSummary = async () => {
 
     // (2) panggil endpoint summary, termasuk oyBalance
     const { data } = await api.get<{
-      hilogateBalance:    number
+      subBalances:        SubBalance[]
       activeBalance?:     number
       total_withdrawal?:  number
       pending_withdrawal?:number
-      oyBalance?:         number   // ← tambahkan di sini
     }>('/admin/merchants/dashboard/summary', { params })
 
     // (3) set state untuk semua balance
-    setBalanceHilogate(data.hilogateBalance)
-    if (data.activeBalance       !== undefined) setActiveBalance(data.activeBalance)
+    setSubBalances(data.subBalances)
+    const current = data.subBalances.find(s => s.id === selectedSub) || data.subBalances[0]
+    if (current) {
+      setSelectedSub(current.id)
+      setCurrentBalance(current.balance)
+    }
+        if (data.activeBalance       !== undefined) setActiveBalance(data.activeBalance)
     if (data.pending_withdrawal  !== undefined) setTotalPending(data.pending_withdrawal)
-    if (data.oyBalance           !== undefined) setBalanceOy(data.oyBalance)   // ← set OY
 
   } catch (e) {
     console.error('fetchSummary error', e)
@@ -157,7 +212,21 @@ const fetchSummary = async () => {
   }
 }
 
-
+  const fetchProfitSub = async () => {
+    setLoadingProfitSub(true)
+    try {
+      const params = buildParams()
+      const { data } = await api.get<{ data: { subMerchantId: string; name?: string | null; profit: number }[] }>(
+        '/admin/merchants/dashboard/profit-submerchant',
+        { params }
+      )
+      setProfitSubs(data.data)
+    } catch (e) {
+      console.error('fetchProfitSub error', e)
+    } finally {
+      setLoadingProfitSub(false)
+    }
+  }
   // Fetch platform profit
   const fetchProfit = async () => {
     setLoadingProfit(true)
@@ -277,6 +346,8 @@ const filtered = mapped.filter(t => {
   useEffect(() => {
     fetchSummary()
     fetchProfit()
+    fetchProfitSub()
+
     fetchWithdrawals()
   }, [range, from, to, selectedMerchant])
   useEffect(() => {
@@ -306,26 +377,31 @@ const filtered = mapped.filter(t => {
 
 
   <section className={styles.statsGrid}>
-    {/* Kartu pertama: Hilogate atau OY */}
+    {/* Kartu pertama: Balance per Sub Merchant */}
    <div className={`${styles.card} ${styles.activeBalance}`}>
       
       <Wallet className={styles.cardIcon} />
       <h2>
-        Balance {balanceSource === 'hilogate' ? 'Hilogate' : 'OY'}
+        Balance {subBalances.find(s => s.id === selectedSub)?.name || ''}
       </h2>
       <p>
-        {(balanceSource === 'hilogate' ? balanceHilogate : balanceOy)
-          .toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+        {currentBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+
       </p>
-        {/* dropdown untuk PG Balance */}
+        {/* dropdown untuk memilih sub-merchant */}
   <div className={styles.balanceSelector}>
-    <label>PG:  </label>
+    <label>Sub Merchant:  </label>
     <select
-      value={balanceSource}
-      onChange={e => setBalanceSource(e.target.value as any)}
+      value={selectedSub}
+      onChange={e => {
+        setSelectedSub(e.target.value)
+        const sb = subBalances.find(s => s.id === e.target.value)
+        setCurrentBalance(sb?.balance ?? 0)
+      }}
     >
-      <option value="hilogate">Hilogate</option>
-      <option value="oy">OY</option>
+      {subBalances.map(s => (
+        <option key={s.id} value={s.id}>{s.name}</option>
+      ))}
     </select>
   </div>
     </div>
@@ -358,7 +434,39 @@ const filtered = mapped.filter(t => {
   </section>
 </aside>
 
-
+<section className={styles.cardSection} style={{ marginTop: 32 }}>
+  <h2>Profit per Sub Merchant</h2>
+  {loadingProfitSub ? (
+    <div className={styles.loader}>Loading profit…</div>
+  ) : (
+    <div className={styles.statsGrid}>
+      {profitSubs.length > 0 ? (
+        profitSubs.map(p => (
+          <div
+            key={p.subMerchantId}
+            className={`${styles.card} ${styles.activeBalance}`}
+          >
+            <h3 className={styles.cardTitle}>
+              {p.name ?? p.subMerchantId}
+            </h3>
+            <p className={styles.cardValue}>
+              {p.profit.toLocaleString('id-ID', {
+                style: 'currency',
+                currency: 'IDR'
+              })}
+            </p>
+          </div>
+        ))
+      ) : (
+        // render card kosong kalau tidak ada data
+        <div className={`${styles.card} ${styles.noDataCard}`}>
+          <h3 className={styles.cardTitle}>No data</h3>
+          <p className={styles.cardValue}>–</p>
+        </div>
+      )}
+    </div>
+  )}
+</section>
       {/* Filters & Table */}
       <main className={styles.content}>
         <section className={styles.filters}>
@@ -494,6 +602,9 @@ const filtered = mapped.filter(t => {
             </div>
           )}
         </section>
+
+
+
    {/* === WITHDRAWAL HISTORY ===================================================== */}
       <section className={styles.tableSection} style={{ marginTop: 32 }}>
         <h2>Withdrawal History</h2>
@@ -512,6 +623,9 @@ const filtered = mapped.filter(t => {
                   <th>Bank Code</th>
                   <th>Bank Name</th>
                   <th>Branch</th>
+                  <th>Wallet/Submerchant</th>
+                  <th>Withdrawal Fee</th>
+
                   <th>Amount</th>
                   <th>Net Amount</th>
                   <th>PG Trx ID</th>
@@ -537,8 +651,15 @@ const filtered = mapped.filter(t => {
                       <td>{w.bankCode}</td>
                       <td>{w.bankName}</td>
                       <td>{w.branchName ?? '-'}</td>
+                      <td>{w.wallet}</td>
                       <td>
                         {w.amount.toLocaleString('id-ID', {
+                          style: 'currency',
+                          currency: 'IDR'
+                        })}
+                      </td>
+                      <td>
+                        {(w.amount - (w.netAmount ?? 0)).toLocaleString('id-ID', {
                           style: 'currency',
                           currency: 'IDR'
                         })}
@@ -566,7 +687,7 @@ const filtered = mapped.filter(t => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={14} className={styles.noData}>
+                    <td colSpan={16} className={styles.noData}>
                       No withdrawals
                     </td>
                   </tr>

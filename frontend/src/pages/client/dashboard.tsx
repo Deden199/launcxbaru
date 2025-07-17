@@ -65,22 +65,49 @@ const [startDate, endDate]     = dateRange
   // Search
   const [search, setSearch]                   = useState('')
 
-  const buildParams = () => {
-    const params: any = {}
+const buildParams = () => {
+  const tz = 'Asia/Jakarta'
+  const params: any = {}
+
   if (range === 'today') {
-    params.date_from = toJakartaDate(new Date())
-  } else if (range === 'week') {
-    const d = new Date(); d.setDate(d.getDate() - 6)
-    params.date_from = toJakartaDate(d)
-  } else if (startDate && endDate) {
-      params.date_from = toJakartaDate(startDate)
-    params.date_to   = toJakartaDate(endDate)
+    // 00:00:00 → sekarang
+    const start = new Date(); start.setHours(0,0,0,0)
+    const end   = new Date()
+    // konversi ke Jakarta lalu toISOString
+    const startJakarta = new Date(start.toLocaleString('en-US', { timeZone: tz }))
+    const endJakarta   = new Date(end.toLocaleString('en-US',   { timeZone: tz }))
+
+    params.date_from = startJakarta.toISOString()
+    params.date_to   = endJakarta.toISOString()
   }
-    if (selectedChild !== 'all') {
-      params.clientId = selectedChild
-    }
-    return params
+  else if (range === 'week') {
+    const start = new Date(); start.setDate(start.getDate() - 6); start.setHours(0,0,0,0)
+    const end   = new Date()
+
+    const startJakarta = new Date(start.toLocaleString('en-US', { timeZone: tz }))
+    const endJakarta   = new Date(end.toLocaleString('en-US',   { timeZone: tz }))
+
+    params.date_from = startJakarta.toISOString()
+    params.date_to   = endJakarta.toISOString()
   }
+  else if (startDate && endDate) {
+    // custom: hari pertama 00:00, hari terakhir 23:59:59
+    const s = new Date(startDate); s.setHours(0,0,0,0)
+    const e = new Date(endDate);   e.setHours(23,59,59,999)
+    const sJak = new Date(s.toLocaleString('en-US', { timeZone: tz }))
+    const eJak = new Date(e.toLocaleString('en-US', { timeZone: tz }))
+
+    params.date_from = sJak.toISOString()
+    params.date_to   = eJak.toISOString()
+  }
+
+  if (selectedChild !== 'all') {
+    params.clientId = selectedChild
+  }
+  console.log('buildParams →', params)
+  return params
+}
+
 
   // Fetch summary (with children) in one call
   const fetchSummary = async () => {

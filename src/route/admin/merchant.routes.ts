@@ -40,6 +40,8 @@ router.use('/:id/pg', subMerchantRouter)
 router.get('/dashboard/transactions', ctrl.getDashboardTransactions)
 router.get('/dashboard/summary',      ctrl.getDashboardSummary)
 router.get('/dashboard/profit',       ctrl.getPlatformProfit)
+router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
+
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
 router.get('/dashboard/export-all',   exportCtrl.exportDashboardAll)
 

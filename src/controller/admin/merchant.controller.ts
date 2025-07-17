@@ -395,6 +395,9 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
         status:            true,
         createdAt:         true,
         completedAt:       true,
+        withdrawFeePercent: true,
+        withdrawFeeFlat:    true,
+        subMerchant: { select: { name: true, provider: true } },
       },
     });
 
@@ -410,11 +413,15 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
       branchName:        w.branchName ?? null,
       amount:            w.amount,
       netAmount:         w.netAmount ?? null,
+      withdrawFeePercent: w.withdrawFeePercent,
+      withdrawFeeFlat:    w.withdrawFeeFlat,
       paymentGatewayId:  w.paymentGatewayId ?? null,
       isTransferProcess: w.isTransferProcess,
       status:            w.status,
       createdAt:         w.createdAt.toISOString(),
       completedAt:       w.completedAt?.toISOString() ?? null,
+      wallet:            w.subMerchant?.name || w.subMerchant?.provider,
+
     }));
 
     return res.json({ data });
@@ -424,7 +431,60 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
   }
 }
 
+export const getProfitPerSubMerchant = async (req: Request, res: Response) => {
+  try {
+    const { date_from, date_to, merchantId } = req.query as any;
 
+    // 1. Filter dasar: hanya transaksi SETTLED
+    const where: any = { status: 'SETTLED' };
+
+    // 2. Filter tanggal menggunakan createdAt
+    if (date_from) {
+      where.createdAt = { gte: new Date(date_from) };
+    }
+    if (date_to) {
+      where.createdAt = {
+        ...(where.createdAt || {}),
+        lte: new Date(date_to)
+      };
+    }
+
+    // 3. Filter merchant jika diberikan
+    if (merchantId && merchantId !== 'all') {
+      where.merchantId = merchantId;
+    }
+
+    // 4. Group by subMerchantId dan hitung total profit per group
+    const grouped = await prisma.order.groupBy({
+      by: ['subMerchantId'],
+      where,
+      _sum: {
+        feeLauncx: true,
+        fee3rdParty: true
+      }
+    });
+
+    // 5. Ambil nama sub-merchant jika ada
+    const ids = grouped.map(g => g.subMerchantId).filter(Boolean);
+    const subs = await prisma.sub_merchant.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true }
+    });
+    const nameMap: Record<string, string> = {};
+    subs.forEach(s => { nameMap[s.id] = s.name; });
+
+    const data = grouped.map(g => ({
+      subMerchantId: g.subMerchantId,
+      name: nameMap[g.subMerchantId] || null,
+      profit: (g._sum.feeLauncx ?? 0) - (g._sum.fee3rdParty ?? 0)
+    }));
+
+    return res.json({ data });
+  } catch (err: any) {
+    console.error('[getProfitPerSubMerchant]', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
 // src/controller/admin/merchant.controller.ts
 export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
@@ -437,62 +497,55 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       ? { weekday: false, weekend: true }
       : { weekday: true, weekend: false };
 
-    // ─── 2) HILOGATE ────────────────────────────────────
-    let hilogateBalance = 0, total_withdrawal = 0, pending_withdrawal = 0;
-    try {
-      const hgSubs = await prisma.sub_merchant.findMany({
-        where: {
-          merchantId,
-          provider: 'hilogate',
-          schedule: { equals: scheduleFilter },
+    // ─── 2) Sub-Merchant Balances ─────────────────────────────
+    let total_withdrawal = 0, pending_withdrawal = 0
+    const subBalances: { id: string; name: string; provider: string; balance: number }[] = []
+
+    const subs = await prisma.sub_merchant.findMany({
+      where: {
+        merchantId,
+        provider: { in: ['hilogate', 'oy'] },
+      },
+      select: { id: true, name: true, provider: true, credentials: true }
+    })
+
+    for (const s of subs) {
+      let bal = 0
+      try {
+        if (s.provider === 'hilogate') {
+          const raw = s.credentials as any
+          const cfg: HilogateConfig = {
+            merchantId: raw.merchantId,
+            env:        raw.env,
+            secretKey:  raw.secretKey,
+          }
+          const client = new HilogateClient(cfg)
+          const resp   = await client.getBalance()
+          const data   = resp.data
+          bal = data.active_balance ?? 0
+          if (total_withdrawal === 0 && pending_withdrawal === 0) {
+            total_withdrawal   = data.total_withdrawal   ?? 0
+            pending_withdrawal = data.pending_withdrawal ?? 0
+          }
+        } else if (s.provider === 'oy') {
+          const raw = s.credentials as any
+          const cfg: OyConfig = {
+            baseUrl:  config.api.oy.baseUrl,
+            username: raw.merchantId,
+            apiKey:   raw.secretKey,
+          }
+          const client = new OyClient(cfg)
+          const resp   = await client.getBalance()
+          const data   = (resp as any).data ?? resp
+          bal = data.availableBalance ?? data.balance ?? 0
         }
-      });
-      if (hgSubs.length) {
-        const raw = hgSubs[0].credentials as any;
-        const cfg: HilogateConfig = {
-          merchantId: raw.merchantId,
-          env:        raw.env,
-          secretKey:  raw.secretKey,
-        };
-        const client = new HilogateClient(cfg);
-        const resp = await client.getBalance();
-        const data = resp.data;
-        hilogateBalance   = data.active_balance   ?? 0;
-        total_withdrawal   = data.total_withdrawal ?? 0;
-        pending_withdrawal = data.pending_withdrawal ?? 0;
-      }
+    
     } catch (e) {
-      console.error('[HILOGATE] getBalance error', e);
+        console.error(`[${s.provider}] getBalance error`, e)
     }
-
-    // ─── 3) OY ───────────────────────────────────────
-   let oyBalance = 0;
-try {
-  const oySubs = await prisma.sub_merchant.findMany({
-    where: {
-      merchantId,
-      provider: 'oy',
-      schedule: { equals: scheduleFilter },
-    },
-  });
-  if (oySubs.length) {
-    const raw = oySubs[0].credentials as any;
-
-    // Ambil baseUrl dari config, bukan dari raw.env
-    const cfg: OyConfig = {
-      baseUrl:  config.api.oy.baseUrl,  
-      username: raw.merchantId,
-      apiKey:   raw.secretKey,
-    };
-
-    const client = new OyClient(cfg);
-    const resp   = await client.getBalance();
-    const data   = (resp as any).data ?? resp;
-    oyBalance    = data.availableBalance ?? data.balance ?? 0;
+      subBalances.push({ id: s.id, name: s.name, provider: s.provider, balance: bal })
   }
-} catch (e) {
-  console.error('[OY] getBalance error', e);
-}
+ 
     // ─── 4) Total Client Balance ────────────────────────
     let totalClientBalance = 0;
     if (partnerClientId && partnerClientId !== 'all') {
@@ -511,12 +564,11 @@ try {
 
     // ─── 5) Kirim response ───────────────────────────────
     return res.json({
-      hilogateBalance,
+      subBalances,
       total_withdrawal,
       pending_withdrawal,
-      oyBalance,
       totalClientBalance,
-    });
+    })
 
   } catch (err: any) {
     console.error('[getDashboardSummary]', err);

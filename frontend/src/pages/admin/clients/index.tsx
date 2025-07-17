@@ -95,7 +95,7 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
             onChange={e => setNewName(e.target.value)}
           />
           <input
-            placeholder="Partner Email" type="email" value={newEmail}
+            placeholder="Client Email" type="email" value={newEmail}
             onChange={e => setNewEmail(e.target.value)}
           />
           <select
@@ -129,7 +129,7 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
       {creds && (
         <div className="popup">
           <div className="popup-content">
-            <h3>Partner Credentials</h3>
+            <h3>Client Credentials</h3>
             <p><strong>Email:</strong> <code>{creds.defaultUser.email}</code></p>
             <p><strong>Password:</strong> <code>{creds.defaultUser.password}</code></p>
             <button onClick={() => setCreds(null)}>Close</button>
