@@ -300,8 +300,10 @@ const submit = async (e: React.FormEvent) => {
     const rows = [
       ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet', 'Amount', 'Fee', 'Net Amount', 'Status'],
       ...withdrawals.map(w => [
-        new Date(w.createdAt).toLocaleDateString(),
-                w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-',
+        new Date(w.createdAt)
+          .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' }),
+                w.completedAt ? new Date(w.completedAt)
+          .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' }) : '-',
 
         w.refId,
         w.bankName,
@@ -467,8 +469,17 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
                   {pageData.length ? (
                   pageData.map(w => (
                     <tr key={w.id}>
-                      <td>{new Date(w.createdAt).toLocaleDateString()}</td>
-                                            <td>{w.completedAt ? new Date(w.completedAt).toLocaleDateString() : '-'}</td>
+                      <td>{new Date(w.createdAt)
+                        .toLocaleString('id-ID', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </td>
+                                            <td>{w.completedAt ? new Date(w.completedAt)
+                        .toLocaleString('id-ID', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        }) : '-'}</td>
 
                       <td>{w.refId}</td>
                       <td>{w.bankName}</td>

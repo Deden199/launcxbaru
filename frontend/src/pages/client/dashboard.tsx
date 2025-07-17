@@ -54,9 +54,12 @@ const [startDate, endDate]     = dateRange
   const [loadingTx, setLoadingTx]             = useState(true)
 
   // Date filter
+    function toJakartaDate(d: Date): string {
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
+  }
   const [range, setRange]                     = useState<'today'|'week'|'custom'>('today')
-  const [from, setFrom]                       = useState(() => new Date().toISOString().slice(0,10))
-  const [to, setTo]                           = useState(() => new Date().toISOString().slice(0,10))
+  const [from, setFrom]                       = useState(() => toJakartaDate(new Date()))
+  const [to, setTo]                           = useState(() => toJakartaDate(new Date()))
   const [statusFilter, setStatusFilter] = useState('PAID')    // <<< REVISI: default filter PAID
 
   // Search
@@ -65,13 +68,13 @@ const [startDate, endDate]     = dateRange
   const buildParams = () => {
     const params: any = {}
   if (range === 'today') {
-    params.date_from = new Date().toISOString().slice(0,10)
+    params.date_from = toJakartaDate(new Date())
   } else if (range === 'week') {
     const d = new Date(); d.setDate(d.getDate() - 6)
-    params.date_from = d.toISOString().slice(0,10)
+    params.date_from = toJakartaDate(d)
   } else if (startDate && endDate) {
-    params.date_from = startDate.toISOString().slice(0,10)
-    params.date_to   = endDate.toISOString().slice(0,10)
+      params.date_from = toJakartaDate(startDate)
+    params.date_to   = toJakartaDate(endDate)
   }
     if (selectedChild !== 'all') {
       params.clientId = selectedChild

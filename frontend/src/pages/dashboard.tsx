@@ -85,9 +85,10 @@ const [balanceSource, setBalanceSource] = useState<'hilogate'|'oy'>('hilogate')
 const [balanceOy,     setBalanceOy]     = useState(0)
   
   // Filters
+  
   const [range, setRange] = useState<'today'|'week'|'custom'>('today')
-  const [from, setFrom]   = useState(() => new Date().toISOString().slice(0,10))
-  const [to, setTo]       = useState(() => new Date().toISOString().slice(0,10))
+  const [from, setFrom]   = useState(() => toJakartaDate(new Date()))
+  const [to, setTo]       = useState(() => toJakartaDate(new Date()))
   const [search, setSearch] = useState('')
 const [statusFilter, setStatusFilter] = useState<'all' | string>('all')
 
@@ -105,14 +106,15 @@ const [statusFilter, setStatusFilter] = useState<'all' | string>('all')
   const [totalTrans, setTotalTrans] = useState(0)
 
   // Date helpers
-  const isoDate = (d: Date) => d.toISOString().slice(0,10)
-  const today0  = () => { const d = new Date(); d.setHours(0,0,0,0); return d }
+  function toJakartaDate(d: Date): string {
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
+  }  const today0  = () => { const d = new Date(); d.setHours(0,0,0,0); return d }
   const week0   = () => { const d = new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); return d }
 
   const buildParams = () => {
     const p: any = {}
-    if (range === 'today') p.date_from = isoDate(today0())
-    else if (range === 'week') p.date_from = isoDate(week0())
+    if (range === 'today') p.date_from = toJakartaDate(today0())
+    else if (range === 'week') p.date_from = toJakartaDate(week0())
     else {
       p.date_from = from
       p.date_to   = to
