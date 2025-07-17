@@ -24,7 +24,7 @@ type Tx = {
   amount:           number
   feeLauncx:        number
   netSettle:        number
-  status:           '' | 'SUCCESS' | 'DONE'
+  status: '' | 'SUCCESS' | 'DONE' | 'PAID' | 'PENDING' | 'EXPIRED'   // <<< REVISI: tambahkan semua kemungkinan
   settlementStatus?: string
     paymentReceivedTime?: string
   settlementTime?: string
@@ -57,7 +57,7 @@ const [startDate, endDate]     = dateRange
   const [range, setRange]                     = useState<'today'|'week'|'custom'>('today')
   const [from, setFrom]                       = useState(() => new Date().toISOString().slice(0,10))
   const [to, setTo]                           = useState(() => new Date().toISOString().slice(0,10))
-  const [statusFilter, setStatusFilter]       = useState('')
+  const [statusFilter, setStatusFilter] = useState('PAID')    // <<< REVISI: default filter PAID
 
   // Search
   const [search, setSearch]                   = useState('')
@@ -151,7 +151,7 @@ const [startDate, endDate]     = dateRange
   useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to])
 
   const filtered = txs.filter(t =>
-    (statusFilter === '' || t.settlementStatus === statusFilter) &&
+  (statusFilter === '' || t.status === statusFilter) &&         // <<< REVISI: filter berdasarkan status, bukan settlementStatus
     (
       t.id.toLowerCase().includes(search.toLowerCase()) ||
       t.rrn.toLowerCase().includes(search.toLowerCase()) ||
@@ -256,16 +256,17 @@ const [startDate, endDate]     = dateRange
               <FileText size={16} /> Export Excel
             </button>
           </div>
-                    <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-          >
-            <option value="">All Status</option>
-            <option value="SETTLED">SETTLED</option>
-            <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
-            <option value="PENDING">PENDING</option>
-            <option value="EXPIRED">EXPIRED</option>
-          </select>
+<select
+  value={statusFilter}
+  onChange={e => setStatusFilter(e.target.value)}
+>
+  <option value="">All Status</option>
+  <option value="SUCCESS">SUCCESS</option>
+  <option value="PAID">PAID</option>           {/* <<< REVISI: tambahkan PAID */}
+  <option value="PENDING">PENDING</option>
+  <option value="EXPIRED">EXPIRED</option>
+</select>
+
           <input
             type="text"
             className={styles.searchInput}
@@ -321,7 +322,13 @@ const [startDate, endDate]     = dateRange
                       <td>{t.amount.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</td>
                       <td>{t.feeLauncx.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</td>
                       <td className={styles.netSettle}>{t.netSettle.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</td>
-                      <td>{t.status || '-'}</td>
+<td>
+  {t.status === 'SUCCESS'   ? 'SUCCESS'
+    : t.status === 'PAID'    ? 'PAID'          /* <<< REVISI: tampilkan PAID */
+    : t.status === 'PENDING' ? 'PENDING'
+    : t.status === 'EXPIRED' ? 'EXPIRED'
+    : '-'}
+</td>
                       <td>{t.settlementStatus ? t.settlementStatus.replace(/_/g,' ') : '-'}</td>
                     </tr>
                   ))}

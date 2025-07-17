@@ -55,7 +55,7 @@ type Tx = {
   feeLauncx: number
   feePg: number
   netSettle: number
-  status: '' | 'SUCCESS' | 'DONE'
+  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE'  // <<< REVISI: 'PAID' tidak perlu, karena kita map langsung ke SUCCESS
   settlementStatus: string
   channel:          string  // ← baru
     paymentReceivedTime?: string
@@ -214,7 +214,7 @@ async function fetchWithdrawals() {
         feeLauncx:        o.feeLauncx?? 0,
         feePg:            o.feePg    ?? 0,
         netSettle:        o.netSettle,                // ← langsung pakai
-        status:           o.netSettle > 0 ? 'SUCCESS' : 'DONE',
+  status:    o.status ?? '',                             // <<< REVISI: pakai status asli
         settlementStatus: o.settlementStatus.replace(/_/g,' '),
           paymentReceivedTime: o.paymentReceivedTime ?? '',
   settlementTime:      o.settlementTime      ?? '',
@@ -445,8 +445,15 @@ const filtered = mapped.filter(t => {
                       <td>{t.feeLauncx.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
                       <td>{t.feePg.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
                       <td className={styles.netSettle}>{t.netSettle.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
-                      <td>{t.status}</td>
-                      <td>{t.settlementStatus}</td>
+<td>
+  {['SUCCESS', 'DONE', 'SETTLED', 'PAID'].includes(t.status)   // <<< REVISI: tambahkan 'PAID' di sini
+    ? 'SUCCESS'                                               // <<< REVISI: semua ini → SUCCESS
+    : t.status === 'PENDING'                                  // <<< REVISI: hanya PENDING
+      ? 'PENDING'                                             // <<< REVISI
+      : t.status || '-'                                       // <<< REVISI: sisanya tampil apa adanya
+  }
+</td>
+                   <td>{t.settlementStatus}</td>
                     </tr>
                   ))}
                 </tbody>

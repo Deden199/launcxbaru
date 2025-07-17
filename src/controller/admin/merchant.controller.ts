@@ -306,7 +306,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         channel:              true,
         paymentReceivedTime:  true,  // ← baru
         settlementTime:       true,  // ← baru
-        trxExpirationTime:    true,  // ← baru
+        trxExpirationTime:    true,  // ← barus
       }
     })
 
@@ -326,7 +326,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         feeLauncx:            o.feeLauncx   ?? 0,
         feePg:                o.fee3rdParty ?? 0,
         netSettle,
-        status:               o.status === 'DONE' ? 'DONE' : 'SUCCESS',
+        status:               o.status === 'SETTLED' ? 'SUCCESS' : o.status,
         settlementStatus:     o.settlementStatus ?? '',
         channel:              o.channel     ?? '',
         // tiga timestamp baru:

@@ -8,6 +8,15 @@ import ExcelJS from 'exceljs'
 import crypto from 'crypto';
 import { retry } from '../utils/retry';
 
+const DASHBOARD_STATUSES = [
+  'SUCCESS',
+  'DONE',
+  'SETTLED',
+  'PAID',
+  'PENDING',      // <<< REVISI: tambahkan biar order PENDING ikut ter-fetch
+  'EXPIRED',      // <<< REVISI: tambahkan biar order EXPIRED ikut ter-fetch
+  // …tambahkan status lain jika ada…
+];
 
 
 
@@ -162,7 +171,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     const orders = await prisma.order.findMany({
       where: {
         partnerClientId: { in: clientIds },
-        status: { in: ['SUCCESS','DONE','SETTLED','PAID','PENDING','EXPIRED'] },
+        status: { in: DASHBOARD_STATUSES },
         ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
       },
       orderBy: { createdAt: 'desc' },
@@ -178,8 +187,10 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     console.log(`ditemukan ${orders.length} order(s)`);
 
     // (5) hitung totalTransaksi
+const COMPLETED_STATUSES: string[] = ['SUCCESS', 'DONE', 'SETTLED'];
+
     const totalTransaksi = orders
-      .filter(o => o.status !== 'PAID')
+      .filter(o => COMPLETED_STATUSES.includes(o.status))
       .reduce((sum, o) => sum + o.amount, 0);
     console.log('totalTransaksi:', totalTransaksi);
 
@@ -198,7 +209,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
         feeLauncx: o.feeLauncx ?? 0,
         netSettle,
         settlementStatus: o.settlementStatus ?? '',
-        status: o.status === 'DONE' ? 'DONE' : 'SUCCESS',
+        status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
        // tambahkan ISO-string dari tiga timestamp:
         paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
         settlementTime:      o.settlementTime?.toISOString()      ?? '',
@@ -253,7 +264,7 @@ console.log('export clientIds:', clientIds)
   const orders = await prisma.order.findMany({
     where: {
       partnerClientId: { in: clientIds },
-      status: { in: ['SUCCESS','DONE','SETTLED','PAID'] },
+      status: { in: DASHBOARD_STATUSES },
       ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
     },
     orderBy: { createdAt: 'desc' },
