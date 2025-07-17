@@ -125,10 +125,12 @@ export default function CallbackPage() {
     }
   }
 
-  const regenerate2FA = async () => {
-    await setup2FA()
-    setFaMsg('New 2FA secret generated, please scan the QR again')
-  }
+const regenerate2FA = async () => {
+  setIs2FAEnabled(false);        // ← biar masuk ke blok qr
+  await setup2FA();
+  setFaMsg('New 2FA secret generated, please scan the QR again');
+}
+
 
   // Prevent autofill by handling OTP in a form
   const handleVerify = async (e: FormEvent<HTMLFormElement>) => {

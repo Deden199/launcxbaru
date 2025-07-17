@@ -349,12 +349,14 @@ const [startDate, endDate]     = dateRange
 </td>                   
 
                       <td>
-                        <button
-                          className={styles.retryBtn}
-                          onClick={() => retryCallback(t.id)}
-                        >
-                          Retry Callback
-                        </button>
+                        {['PAID', 'DONE', 'SETTLED', 'SUCCESS'].includes(t.status) && (
+                          <button
+                            className={styles.retryBtn}
+                            onClick={() => retryCallback(t.id)}
+                          >
+                            Retry Callback
+                          </button>
+                        )}
                       </td>
  </tr>
                   ))}

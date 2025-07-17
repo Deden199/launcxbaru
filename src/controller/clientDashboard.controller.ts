@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 
 import { retry } from '../utils/retry';
+import { CALLBACK_ALLOWED_STATUSES, isCallbackStatusAllowed } from '../utils/callbackStatus';
 
 const DASHBOARD_STATUSES = [
   'SUCCESS',
@@ -395,7 +396,11 @@ export async function retryTransactionCallback(
   if (!order) {
     return res.status(404).json({ error: 'Order tidak ditemukan' });
   }
-
+  if (!isCallbackStatusAllowed(order.status)) {
+    return res
+      .status(400)
+      .json({ error: `Status ${order.status} tidak bisa retry callback` });
+  }
   // 2) Verifikasi hak akses
   const allowed = [req.partnerClientId!, ...(req.childrenIds ?? [])];
   if (!allowed.includes(order.partnerClientId!)) {

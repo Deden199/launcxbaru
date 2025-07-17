@@ -171,48 +171,66 @@ useEffect(() => {
   }
 
   const validateAccount = async () => {
-    setBusy(b => ({ ...b, validating: true }))
-    setError('')
-    try {
-      const { data } = await apiClient.post('/client/withdrawals/validate-account', {
-        bank_code: form.bankCode,
+  setBusy(b => ({ ...b, validating: true }))
+  setError('')
+  try {
+    // 1) Override validateStatus supaya axios gak langsung throw
+    const res = await apiClient.post(
+      '/client/withdrawals/validate-account',
+      {
+        bank_code:      form.bankCode,
         account_number: form.accountNumber,
-      })
-      if (data.status === 'valid') {
-        const holder = data.account_holder as string
-        const bankObj = banks.find(b => b.code === form.bankCode)
-        setForm(f => ({
-          ...f,
-          accountName:      holder,
-          accountNameAlias: deriveAlias(holder),
-          bankName:         bankObj?.name || '',
-          branchName:       '',
-        }))
-        setIsValid(true)
-      } else throw new Error('Akun tidak valid')
-    } catch (e: any) {
+      },
+      {
+        validateStatus: () => true // semua status dianggap “OK” di level axios
+      }
+    )
+
+    // 2) Tangani berdasarkan HTTP status
+    if (res.status === 200 && res.data.status === 'valid') {
+      // berhasil validasi
+      const holder  = res.data.account_holder as string
+      const bankObj = banks.find(b => b.code === form.bankCode)
+
+      setForm(f => ({
+        ...f,
+        accountName:      holder,
+        accountNameAlias: deriveAlias(holder),
+        bankName:         bankObj?.name || '',
+        branchName:       '',
+      }))
+      setIsValid(true)
+
+    } else {
+      // baik 400 maupun 500 atau status lain, baca pesan backend atau fallback
+      const msg = res.data.error || 'Rekening bank tidak ditemukan'
       setIsValid(false)
-      setError(e.message || 'Akun tidak valid')
-    } finally {
-      setBusy(b => ({ ...b, validating: false }))
+      setError(msg)
     }
+
+  } catch {
+    // benar‑benar gagal koneksi / exception lain
+    setIsValid(false)
+    setError('Gagal koneksi ke server')
+  } finally {
+    setBusy(b => ({ ...b, validating: false }))
   }
+}
 
 const submit = async (e: React.FormEvent) => {
   e.preventDefault();
   if (!isValid || error) return;
   setBusy(b => ({ ...b, submitting: true }));
+  setError('');
 
   try {
-    // Ambil provider dari sub-merchant terpilih
+    // 1) Tentukan provider & kode bank payload
     const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy'
-
-    // Translate bank_code untuk OY, tetap pakai form.bankCode untuk Hilogate
     const payloadBankCode = provider === 'oy'
       ? oyCodeMap[form.bankCode.toLowerCase()]
       : form.bankCode;
 
-    // Bangun body request
+    // 2) Siapkan body
     const body: any = {
       subMerchantId:      selectedSub,
       sourceProvider:     provider,
@@ -222,37 +240,59 @@ const submit = async (e: React.FormEvent) => {
       amount:             +form.amount,
       otp:                form.otp,
     };
-
-    // Sertakan bank_name hanya untuk OY
     if (provider === 'oy') {
-      body.bank_name = form.bankName;
-     body.account_name  = form.accountName;    // ← tambahkan full nama di payload OY
-
+      body.bank_name     = form.bankName;
+      body.account_name  = form.accountName;
     }
 
-    // Kirim request
-    await apiClient.post('/client/withdrawals', body);
+    // 3) Kirim tanpa auto‑throw untuk status ≥400
+    const res = await apiClient.post(
+      '/client/withdrawals',
+      body,
+      { validateStatus: () => true }
+    );
 
-
-      const [d, h] = await Promise.all([
+    // 4) Tangani berdasarkan HTTP status
+    if (res.status === 201) {
+      // sukses: refresh data & tutup modal
+      const [dash, hist] = await Promise.all([
         apiClient.get('/client/dashboard'),
         apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
           params: { clientId: selectedChild }
         }),
-            ])
-      setBalance(d.data.balance)
-      setPending(d.data.totalPending ?? 0)
-      setWithdrawals(h.data.data)
-      setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '', otp: '' }))
-      setIsValid(false)
-      setOpen(false)
-    } catch (err: any) {
-      if (axios.isAxiosError(err)) setError(err.response?.data?.error || 'Submit gagal')
-      else setError('Submit gagal')
-    } finally {
-      setBusy(b => ({ ...b, submitting: false }))
+      ]);
+      setBalance(dash.data.balance);
+      setPending(dash.data.totalPending ?? 0);
+      setWithdrawals(hist.data.data);
+      setForm(f => ({
+        ...f,
+        amount: '',
+        accountName: '',
+        accountNameAlias: '',
+        bankName: '',
+        branchName: '',
+        otp: '',
+      }));
+      setIsValid(false);
+      setOpen(false);
+
+    } else if (res.status === 400) {
+      // validasi gagal: tampilkan pesan backend
+      setError(res.data.error || 'Data tidak valid');
+
+    } else {
+      // server error (>=500) atau status lain
+      setError('Submit gagal: periksa lagi informasi rekening bank');
     }
+
+  } catch {
+    // benar‑benar network / exception lain
+    setError('Gagal koneksi ke server');
+  } finally {
+    setBusy(b => ({ ...b, submitting: false }));
   }
+}
+
 
   const exportToExcel = () => {
     const rows = [
