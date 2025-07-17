@@ -3,59 +3,65 @@
 import { Request, Response } from 'express';
 import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
-
+import { OyClient, OyConfig } from '../service/oyClient';
+import { getActiveProviders } from '../service/provider';
+import type { ResultSub } from '../service/provider';
 export async function getBanks(req: Request, res: Response) {
+  const provider = (req.query.provider as string)?.toLowerCase() || 'hilogate';
+
+
   try {
     // 1) Cari internal merchant Hilogate
-    const merchant = await prisma.merchant.findFirst({
-      where: { name: 'hilogate' }
-    });
+    const merchant = await prisma.merchant.findFirst({ where: { name: provider } });
+
     if (!merchant) {
-      return res.status(500).json({ error: 'Internal Hilogate merchant not found' });
+      return res.status(500).json({ error: `Internal ${provider} merchant not found` });
     }
 
-    // 2) Ambil sub-merchant yang aktif sesuai hari
-    const day = new Date().getDay();
-    const isWeekend = day === 0 || day === 6;
-    const allSubs = await prisma.sub_merchant.findMany({
-      where: {
-        merchantId: merchant.id,
-        provider: 'hilogate',
+    if (provider === 'hilogate') {
+      const subs = (await getActiveProviders(
+        merchant.id,
+        'hilogate'
+      )) as ResultSub<HilogateConfig>[];
+      if (!subs.length) {
+        return res.status(500).json({ error: 'No active Hilogate credentials today' });
       }
-    });
-    const subs = allSubs.filter(s => s.schedule[isWeekend ? 'weekend' : 'weekday']);
-    if (subs.length === 0) {
-      return res.status(500).json({ error: 'No active Hilogate credentials today' });
-    }
-
-    // 3) Parse kredensial
-    const rawCreds = subs[0].credentials;
-    let cfg: HilogateConfig;
-    if (typeof rawCreds === 'string') {
+        const cfg = subs[0].config as HilogateConfig;
+      const client = new HilogateClient(cfg);
+      let banks;
       try {
-        cfg = JSON.parse(rawCreds);
+        banks = await client.getBankCodes();
       } catch {
-        return res.status(500).json({ error: 'Invalid credentials format' });
+        return res.status(500).json({ error: 'Error fetching bank list from Hilogate' });
       }
-    } else {
-      cfg = rawCreds as unknown as HilogateConfig;
+      return res.json({ banks });
+
     }
 
-    // 4) Panggil API untuk daftar bank
-    const client = new HilogateClient(cfg);
-    let banks;
-    try {
-      banks = await client.getBankCodes();
-    } catch {
-      return res.status(500).json({ error: 'Error fetching bank list from Hilogate' });
+    if (provider === 'oy') {
+      const subs = (await getActiveProviders(
+        merchant.id,
+        'oy'
+      )) as ResultSub<OyConfig>[];
+      if (!subs.length) {
+        return res.status(500).json({ error: 'No active OY credentials today' });
+      }
+      const cfg = subs[0].config as OyConfig;
+      const client = new OyClient(cfg);
+      let banks;
+      try {
+        banks = await client.getBankList();
+      } catch {
+        return res.status(500).json({ error: 'Error fetching bank list from OY' });
+      }
+      return res.json({ banks });
     }
 
     // 5) Kembalikan hasil
-    return res.json({ banks });
+    return res.status(400).json({ error: 'Unsupported provider' });
 
   } catch {
-    return res
-      .status(500)
-      .json({ error: 'Gagal mengambil daftar bank dari Hilogate' });
+      return res.status(500).json({ error: 'Gagal mengambil daftar bank' });
+
   }
 }

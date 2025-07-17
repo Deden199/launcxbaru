@@ -107,10 +107,13 @@ const bankOptions = banks.map(b => ({
 }));
   /* ──────────────── Initial fetch ──────────────── */
   useEffect(() => {
-    apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
-      .then(res => setBanks(res.data.banks))
+    const sub = subs.find(s => s.id === selectedSub)
+    const provider = sub?.provider || 'hilogate'
+    apiClient
+      .get<{ banks: { code: string; name: string }[] }>('/banks', { params: { provider } })
+            .then(res => setBanks(res.data.banks))
       .catch(console.error)
-  }, [])
+  }, [selectedSub, subs])
 
 useEffect(() => {
   apiClient
@@ -174,12 +177,19 @@ useEffect(() => {
   setBusy(b => ({ ...b, validating: true }))
   setError('')
   try {
+
+      const provider = subs.find(s => s.id === selectedSub)!.provider
+      const payloadBankCode = provider === 'oy'
+        ? oyCodeMap[form.bankCode.toLowerCase()]
+        : form.bankCode
     // 1) Override validateStatus supaya axios gak langsung throw
     const res = await apiClient.post(
       '/client/withdrawals/validate-account',
       {
-        bank_code:      form.bankCode,
+        bank_code: payloadBankCode,
         account_number: form.accountNumber,
+        sourceProvider: provider,
+        subMerchantId: selectedSub,
       },
       {
         validateStatus: () => true // semua status dianggap “OK” di level axios
