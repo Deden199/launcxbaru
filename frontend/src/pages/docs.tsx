@@ -130,9 +130,21 @@ async function payRedirect() {
   } else {
     console.error('Unexpected response', res.data)
   }
-}`}</code></pre>
-    </section>
+  }`}</code></pre>
+      </section>
 
+      {/* Retry Callback */}
+      <section className={styles.section}>
+        <h3 className={styles.heading3}>5.1 Retry Transaction Callback</h3>
+        <p className={styles.bodyText}>
+          Jika callback terakhir gagal, kirim ulang dengan:
+        </p>
+        <pre className={styles.codeBlock}><code>{`POST /client/callbacks/{orderId}/retry`}</code></pre>
+        <p className={styles.bodyText}>
+          Server akan memuat payload callback terakhir, menghitung signature baru,
+          lalu POST kembali ke <code>callbackUrl</code> Anda.
+        </p>
+      </section>
     {/* Register Callback URL */}
     <section className={styles.section}>
       <h2 className={styles.heading2}>3. Register Callback URL</h2>

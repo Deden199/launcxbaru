@@ -146,6 +146,15 @@ const [startDate, endDate]     = dateRange
       .catch(() => alert('Gagal menyalin'))
   }
 
+    const retryCallback = async (id: string) => {
+    try {
+      await api.post(`/client/callbacks/${id}/retry`)
+      alert('Callback terkirim')
+    } catch {
+      alert('Gagal retry callback')
+    }
+  }
+
   // Trigger fetches when filters change
   useEffect(() => { fetchSummary() }, [range, selectedChild, from, to])
   useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to])
@@ -296,6 +305,8 @@ const [startDate, endDate]     = dateRange
                     <th>Net Amount</th>
                     <th>Status</th>
                     <th>Settlement Status</th>
+                    <th>Action</th>
+
                   </tr>
                 </thead>
                 <tbody>
@@ -329,8 +340,23 @@ const [startDate, endDate]     = dateRange
     : t.status === 'EXPIRED' ? 'EXPIRED'
     : '-'}
 </td>
-                      <td>{t.settlementStatus ? t.settlementStatus.replace(/_/g,' ') : '-'}</td>
-                    </tr>
+<td>
+  {t.settlementStatus === 'WAITING'
+    ? 'PENDING'
+    : t.settlementStatus === 'UNSUCCESSFUL'
+      ? 'FAILED'
+      : (t.settlementStatus || '-')}
+</td>                   
+
+                      <td>
+                        <button
+                          className={styles.retryBtn}
+                          onClick={() => retryCallback(t.id)}
+                        >
+                          Retry Callback
+                        </button>
+                      </td>
+ </tr>
                   ))}
                 </tbody>
               </table>

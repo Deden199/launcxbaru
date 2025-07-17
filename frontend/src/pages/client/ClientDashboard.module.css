@@ -13,6 +13,18 @@
   color: #4b5563;
   font-size: 1.25rem;
 }
+.retryBtn {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: .25rem .5rem;
+  border-radius: 4px;
+  font-size: .75rem;
+  cursor: pointer;
+}
+.retryBtn:hover {
+  background: #b91c1c;
+}
 
 /* ==== FILTER BAR ====================================================== */
 .filters {

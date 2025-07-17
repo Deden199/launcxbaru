@@ -160,7 +160,7 @@ const apiResp = await hilClient.createTransaction({
         qrPayload: qrString,
         checkoutUrl,
         fee3rdParty: 0,
-        settlementAmount: amount,
+        settlementAmount: null,
       },
     });
 
@@ -238,7 +238,7 @@ const qrResp = await oyClient.createQRISTransaction({
       qrPayload:     proxyUrl,
       checkoutUrl,
       fee3rdParty:   0,
-      settlementAmount: amount,
+      settlementAmount: null,
     },
   })
 

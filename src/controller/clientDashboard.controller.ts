@@ -6,6 +6,8 @@ import { DisbursementStatus } from '@prisma/client'
 import { ClientAuthRequest } from '../middleware/clientAuth'
 import ExcelJS from 'exceljs'
 import crypto from 'crypto';
+import axios from 'axios';
+
 import { retry } from '../utils/retry';
 
 const DASHBOARD_STATUSES = [
@@ -369,3 +371,79 @@ console.log('export clientIds:', clientIds)
   res.end()
 }
 
+export async function retryTransactionCallback(
+  req: ClientAuthRequest,
+  res: Response
+) {
+  const orderId = req.params.id;
+  if (!orderId) {
+    return res.status(400).json({ error: 'Missing orderId' });
+  }
+
+  // 1) Load Order sebagai source of truth, termasuk status dan settlementStatus
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      partnerClientId: true,
+      amount: true,
+      feeLauncx: true,
+      qrPayload: true,
+      status: true,            // ← ambil status final
+      settlementStatus: true   // ← ambil settlementStatus final
+    }
+  });
+  if (!order) {
+    return res.status(404).json({ error: 'Order tidak ditemukan' });
+  }
+
+  // 2) Verifikasi hak akses
+  const allowed = [req.partnerClientId!, ...(req.childrenIds ?? [])];
+  if (!allowed.includes(order.partnerClientId!)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // 3) Load konfigurasi callback partner
+  const partner = await prisma.partnerClient.findUnique({
+    where: { id: order.partnerClientId },
+    select: { callbackUrl: true, callbackSecret: true }
+  });
+  if (!partner?.callbackUrl || !partner.callbackSecret) {
+    return res.status(400).json({ error: 'Callback belum diset' });
+  }
+
+  // 4) Bangun payload dari Order
+  const timestamp = new Date().toISOString();
+  const nonce = crypto.randomUUID();
+
+  const clientPayload = {
+    orderId,
+    status: order.status,                     // pakai value dari Order
+    settlementStatus: order.settlementStatus, // pakai value dari Order
+    grossAmount: order.amount,
+    feeLauncx: order.feeLauncx ?? 0,
+    netAmount: order.amount - (order.feeLauncx ?? 0),
+    qrPayload: order.qrPayload,
+    timestamp,
+    nonce
+  };
+
+  // 5) Sign dan kirim ulang
+  const sig = crypto
+    .createHmac('sha256', partner.callbackSecret)
+    .update(JSON.stringify(clientPayload))
+    .digest('hex');
+
+  try {
+    await retry(() =>
+      axios.post(partner.callbackUrl!, clientPayload, {
+        headers: { 'X-Callback-Signature': sig },
+        timeout: 5000
+      })
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res
+      .status(500)
+      .json({ error: err.message || 'Gagal mengirim callback' });
+  }
+}

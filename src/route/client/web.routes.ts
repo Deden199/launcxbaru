@@ -9,7 +9,8 @@ import {
   exportClientTransactions,
   getClientCallbackUrl,
   
-  updateClientCallbackUrl
+  updateClientCallbackUrl,
+  retryTransactionCallback
 } from '../../controller/clientDashboard.controller'
 import withdrawalRoutes from '../withdrawals.routes'
 import { setupTOTP, enableTOTP, getTOTPStatus } from '../../controller/totp.controller'
@@ -36,6 +37,7 @@ r.post('/change-password', express.json(), changeClientPassword)
 // Dashboard (saldo + transaksi)
 r.get('/dashboard', getClientDashboard)
 r.get('/dashboard/export', exportClientTransactions)
+r.post('/callbacks/:id/retry', retryTransactionCallback)
 
 // Withdrawal endpoints
 r.use('/withdrawals', withdrawalRoutes)

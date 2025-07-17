@@ -55,7 +55,7 @@ type Tx = {
   feeLauncx: number
   feePg: number
   netSettle: number
-  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE'  // <<< REVISI: 'PAID' tidak perlu, karena kita map langsung ke SUCCESS
+  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
   settlementStatus: string
   channel:          string  // ← baru
     paymentReceivedTime?: string
@@ -205,35 +205,62 @@ async function fetchWithdrawals() {
       setActiveBalance(data.totalMerchantBalance)
 
       // LANGSUNG PAKAI netSettle dari server
-      const mapped: Tx[] = data.transactions.map(o => ({
-        id:               o.id,
-        date:             o.date,
-        rrn:              o.rrn ?? '-',
-        playerId:         o.playerId,
-        amount:           o.amount   ?? 0,
-        feeLauncx:        o.feeLauncx?? 0,
-        feePg:            o.feePg    ?? 0,
-        netSettle:        o.netSettle,                // ← langsung pakai
-  status:    o.status ?? '',                             // <<< REVISI: pakai status asli
-        settlementStatus: o.settlementStatus.replace(/_/g,' '),
-          paymentReceivedTime: o.paymentReceivedTime ?? '',
-  settlementTime:      o.settlementTime      ?? '',
-  trxExpirationTime:   o.trxExpirationTime   ?? '',
-        channel:          o.channel ?? '-'      // ← baru
-        
+// Daftar status yang valid sesuai Tx['status']
+const VALID_STATUSES: Tx['status'][] = [
+  'SUCCESS',
+  'PENDING',
+  'EXPIRED',
+  'DONE',
+  'PAID',
+];
 
-      }))
+const mapped: Tx[] = data.transactions.map(o => {
+  const raw = o.status ?? '';
+
+  // Jika status dari server cocok dengan salah satu VALID_STATUSES, pakai itu,
+  // jika tidak, fallback ke '' (kosong)
+  const statusTyped: Tx['status'] = VALID_STATUSES.includes(raw as Tx['status'])
+    ? (raw as Tx['status'])
+    : '';
+
+  return {
+    id:                 o.id,
+    date:               o.date,
+    rrn:                o.rrn ?? '-',
+    playerId:           o.playerId,
+    amount:             o.amount ?? 0,
+    feeLauncx:          o.feeLauncx ?? 0,
+    feePg:              o.feePg ?? 0,
+    netSettle:          o.netSettle,
+    status:             statusTyped,                                // <<< revisi
+    settlementStatus:   o.settlementStatus.replace(/_/g, ' '),
+    paymentReceivedTime: o.paymentReceivedTime ?? '',
+    settlementTime:     o.settlementTime ?? '',
+    trxExpirationTime:  o.trxExpirationTime ?? '',
+    channel:            o.channel ?? '-',
+  };
+});
+
 const filtered = mapped.filter(t => {
-  // kalau filter = 'all', return semua
-  if (statusFilter === 'all') return true
+  // (1) Cek status dulu
+  if (statusFilter !== 'all' && t.status !== statusFilter) {
+    return false;
+  }
 
-  return t.settlementStatus === statusFilter
-    && (
-      t.id.toLowerCase().includes(search.toLowerCase()) ||
-      t.rrn.toLowerCase().includes(search.toLowerCase()) ||
-      t.playerId.toLowerCase().includes(search.toLowerCase())
-        )
-     } )
+  // (2) Kalau search kosong, tampilkan semua yang lolos status
+  const q = search.trim().toLowerCase();
+  if (!q) {
+    return true;
+  }
+
+  // (3) Baru cek keyword di id, rrn, atau playerId
+  return (
+    t.id.toLowerCase().includes(q) ||
+    t.rrn.toLowerCase().includes(q) ||
+    t.playerId.toLowerCase().includes(q)
+  );
+});
+
 
       setTxs(filtered)
       setTotalTrans(filtered.length)
@@ -353,16 +380,17 @@ const filtered = mapped.filter(t => {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All Status</option>
-            <option value="SETTLED">SETTLED</option>
-            <option value="PENDING SETTLEMENT">PENDING SETTLEMENT</option>
-            <option value="PENDING">PENDING</option>
-            <option value="EXPIRED">EXPIRED</option>
-          </select>
+<select
+  value={statusFilter}
+  onChange={e => setStatusFilter(e.target.value)}
+>
+  <option value="all">All Status</option>
+  <option value="SUCCESS">SUCCESS</option>
+  <option value="PAID">PAID</option>
+  <option value="PENDING">PENDING</option>
+  <option value="EXPIRED">EXPIRED</option>
+</select>
+
           <button
             onClick={() => {
               api.get('/admin/merchants/dashboard/export-all', {
@@ -446,14 +474,17 @@ const filtered = mapped.filter(t => {
                       <td>{t.feePg.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
                       <td className={styles.netSettle}>{t.netSettle.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
 <td>
-  {['SUCCESS', 'DONE', 'SETTLED', 'PAID'].includes(t.status)   // <<< REVISI: tambahkan 'PAID' di sini
-    ? 'SUCCESS'                                               // <<< REVISI: semua ini → SUCCESS
-    : t.status === 'PENDING'                                  // <<< REVISI: hanya PENDING
-      ? 'PENDING'                                             // <<< REVISI
-      : t.status || '-'                                       // <<< REVISI: sisanya tampil apa adanya
-  }
+  {t.status || '-'}
 </td>
-                   <td>{t.settlementStatus}</td>
+
+
+<td>
+  {t.settlementStatus === 'WAITING'
+    ? 'PENDING'
+    : t.settlementStatus === 'UNSUCCESSFUL'
+      ? 'FAILED'
+      : (t.settlementStatus || '-')}
+</td>
                     </tr>
                   ))}
                 </tbody>
