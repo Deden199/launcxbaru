@@ -6,10 +6,16 @@ const createSuccessResponse = (body: any) => {
   };
   
   const createErrorResponse = (error: any, body?: any) => {
+        const message =
+      typeof error === 'string'
+        ? error
+        : error && typeof error.message === 'string'
+        ? error.message
+        : String(error);
     return {
       success: false,
       result: body || null,
-      error: error || error.message,
+      error: message,
     };
   };
   
