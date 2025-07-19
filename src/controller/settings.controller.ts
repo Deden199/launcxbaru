@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../core/prisma'
+import { setWeekendOverrideDates } from '../util/time'
 
 export async function getSettings(req: Request, res: Response) {
   const rows = await prisma.setting.findMany()
@@ -19,5 +20,12 @@ export async function updateSettings(req: Request, res: Response) {
       })
     )
   )
+    if (updates['weekend_override_dates'] !== undefined) {
+    const dates = updates['weekend_override_dates']
+      .split(',')
+      .map(d => d.trim())
+      .filter(Boolean)
+    setWeekendOverrideDates(dates)
+  }
   res.json({ data: tx })
 }

@@ -7,6 +7,7 @@ import {HilogateClient ,HilogateConfig} from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
 import { config } from '../../config';
+import { isJakartaWeekend } from '../../util/time'
 
 
 const prisma = new PrismaClient();
@@ -490,10 +491,9 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
     const { partnerClientId, merchantId } = req.query as any;
 
-    // 1) Hitung hari ini: weekend vs weekday
-    const day = new Date().getDay(); // 0=Minggu,6=Sabtu
-    // Weekend ditetapkan pada hari Jumat (5) dan Sabtu (6)
-    const isWeekend = day === 5 || day === 6;    const scheduleFilter = isWeekend
+    // 1) Hitung hari ini: weekend vs weekday (termasuk override)
+    const isWeekend = isJakartaWeekend(new Date())
+    const scheduleFilter = isWeekend
       ? { weekday: false, weekend: true }
       : { weekday: true, weekend: false };
 

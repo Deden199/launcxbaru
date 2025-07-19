@@ -6,6 +6,7 @@ import { prisma } from '../core/prisma';  // tambahkan ini
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
 import { sub_merchant as SubMerchant } from '@prisma/client';
+import { isJakartaWeekend } from '../util/time'
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
@@ -50,18 +51,6 @@ const extractQR = (p: any): string | null =>
     ? p.data.qrImageUrl
     : null;
 
-function getJakartaDay(): number {
-  const now = new Date()
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Jakarta',
-    weekday: 'short'
-  }).formatToParts(now)
-  const weekday = parts.find(p => p.type === 'weekday')!.value  // ex: "Mon", "Tue", …
-  const map: Record<string, number> = {
-    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6
-  }
-  return map[weekday]
-}
 // overload untuk Hilogate
 export async function getActiveProviders(
   merchantId: string,
@@ -79,9 +68,8 @@ export async function getActiveProviders(
   merchantId: string,
   provider: 'hilogate' | 'oy'
 ): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
-  const day = getJakartaDay()               // WIB day
-  // Weekend is Friday (5) and Saturday (6) in Jakarta time
-  const isWeekend = [5, 6].includes(day)
+  const isWeekend = isJakartaWeekend(new Date())
+
   // full match kedua flag
   const scheduleFilter = isWeekend
     ? { weekday: false, weekend: true }

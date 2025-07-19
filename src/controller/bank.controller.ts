@@ -3,6 +3,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
+import { isJakartaWeekend } from '../util/time'
 
 export async function getBanks(req: Request, res: Response) {
   try {
@@ -14,10 +15,8 @@ export async function getBanks(req: Request, res: Response) {
       return res.status(500).json({ error: 'Internal Hilogate merchant not found' });
     }
 
-    // 2) Ambil sub-merchant yang aktif sesuai hari
-    const day = new Date().getDay();
-    // Weekend dianggap hari Jumat (5) dan Sabtu (6)
-    const isWeekend = day === 5 || day === 6;    const allSubs = await prisma.sub_merchant.findMany({
+    const isWeekend = isJakartaWeekend(new Date());
+    const allSubs = await prisma.sub_merchant.findMany({
       where: {
         merchantId: merchant.id,
         provider: 'hilogate',

@@ -16,6 +16,7 @@ import adminLogRoutes from './route/admin/log.routes';
 import usersRoutes from './route/users.routes';
 
 import settingsRoutes   from './route/settings.routes';
+import { loadWeekendOverrideDates } from './util/time'
 
 import { withdrawalCallback } from './controller/withdrawals.controller'
 import webRoutes from './route/web.routes';
@@ -43,6 +44,9 @@ import logger from './logger';
 import requestLogger from './middleware/log';
 
 const app = express();
+loadWeekendOverrideDates().catch(err =>
+  console.error('[init]', err)
+)
 app.disable('etag');
 app.use(express.json({
   verify: (req, _res, buf) => { (req as any).rawBody = buf }
@@ -118,6 +122,7 @@ app.use('/api/v1/admin/clients', authMiddleware, adminClientRoutes);
 app.use('/api/v1/admin/users', authMiddleware, usersRoutes);
 
 app.use('/api/v1/admin/settings', authMiddleware, settingsRoutes);
+
 app.use('/api/v1/admin/2fa', adminTotpRoutes);
 app.use('/api/v1/admin/logs', adminLogRoutes);
 

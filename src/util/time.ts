@@ -7,15 +7,47 @@ export function wibTimestamp(): string {
   const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   return wib.toISOString().replace(/\.\d{3}Z$/, '') + '+07:00';
 }
-export function isJakartaWeekend(date: Date = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Jakarta',
-    weekday: 'short',
-  }).formatToParts(date);
-  const day = parts.find(p => p.type === 'weekday')!.value;
-  // Weekend falls on Friday and Saturday in Jakarta time
-  return day === 'Fri' || day === 'Sat';}
+
 import moment from 'moment-timezone'
+import { prisma } from '../core/prisma'
+
+let weekendOverrideDates = new Set<string>()
+
+export async function loadWeekendOverrideDates(): Promise<void> {
+  const env = process.env.WEEKEND_OVERRIDE_DATES
+  if (env) {
+    weekendOverrideDates = new Set(
+      env.split(',').map(d => d.trim()).filter(Boolean)
+    )
+  }
+  try {
+    const row = await prisma.setting.findUnique({
+      where: { key: 'weekend_override_dates' }
+    })
+    if (row?.value) {
+      weekendOverrideDates = new Set(
+        row.value.split(',').map(d => d.trim()).filter(Boolean)
+      )
+    }
+  } catch (err) {
+    console.error('[loadWeekendOverrideDates]', err)
+  }
+}
+
+export function setWeekendOverrideDates(dates: string[]): void {
+  weekendOverrideDates = new Set(dates.map(d => d.trim()).filter(Boolean))
+}
+
+export function isJakartaHoliday(date: Date = new Date()): boolean {
+  const dateStr = moment(date).tz('Asia/Jakarta').format('YYYY-MM-DD')
+  return weekendOverrideDates.has(dateStr)
+}
+
+export function isJakartaWeekend(date: Date = new Date()): boolean {
+  if (isJakartaHoliday(date)) return true
+  const day = moment(date).tz('Asia/Jakarta').format('ddd')
+  return day === 'Fri' || day === 'Sat'
+}
 
 export function parseDateSafely(raw: any): Date | undefined {
   if (!raw) return undefined
