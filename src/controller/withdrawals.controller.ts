@@ -32,6 +32,11 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
   const { partnerClientId } = userWithDp
   const defaultProvider = userWithDp.partnerClient.defaultProvider
   if (!defaultProvider) return res.status(400).json({ error: 'defaultProvider tidak diset' })
+  // Optional query.clientId untuk filter child
+  const { clientId: qClientId } = req.query
+  const clientIds = typeof qClientId === 'string' && qClientId !== 'all'
+    ? [qClientId]
+    : [partnerClientId, ...(req.childrenIds ?? [])]
 
   // 2) Ambil semua sub_merchant dengan provider matching defaultProvider
   const subs = await prisma.sub_merchant.findMany({
@@ -46,7 +51,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
       _sum: { settlementAmount: true },
       where: {
         subMerchantId:  s.id,
-        partnerClientId: partnerClientId,
+        partnerClientId: { in: clientIds },
         settlementTime: { not: null }
       }
     })
@@ -57,7 +62,7 @@ export const listSubMerchants = async (req: ClientAuthRequest, res: Response) =>
       _sum: { amount: true },
       where: {
         subMerchantId: s.id,
-         partnerClientId: partnerClientId,
+        partnerClientId: { in: clientIds },
 
         status:        { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
       }

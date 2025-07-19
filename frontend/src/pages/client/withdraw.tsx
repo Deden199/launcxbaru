@@ -114,8 +114,9 @@ const bankOptions = banks.map(b => ({
 
 useEffect(() => {
   apiClient
-    .get<SubMerchant[]>('/client/withdrawals/submerchants')
-    .then(res => {
+    .get<SubMerchant[]>('/client/withdrawals/submerchants', {
+      params: { clientId: selectedChild }
+    })    .then(res => {
       setSubs(res.data)
       // <-- tambahkan ini:
       if (res.data.length > 0) {
@@ -123,7 +124,7 @@ useEffect(() => {
       }
     })
     .catch(console.error)
-}, [])
+}, [selectedChild])
 
 
   useEffect(() => {

@@ -46,8 +46,10 @@ export async function requireClientAuth(
     where: { id: cu.partnerClientId },
     select: { parentClientId: true }
   })
-  req.isParent = (pc?.parentClientId == null)
-
+  if (!pc) {
+    return res.status(401).json({ error: 'PartnerClient not found' })
+  }
+  req.isParent = pc.parentClientId == null
   // 4) Jika parent, load childrenIds
   if (req.isParent) {
     const kids = await prisma.partnerClient.findMany({
