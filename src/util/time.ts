@@ -13,8 +13,8 @@ export function isJakartaWeekend(date: Date = new Date()): boolean {
     weekday: 'short',
   }).formatToParts(date);
   const day = parts.find(p => p.type === 'weekday')!.value;
-  return day === 'Sat' || day === 'Sun';
-}
+  // Weekend falls on Friday and Saturday in Jakarta time
+  return day === 'Fri' || day === 'Sat';}
 import moment from 'moment-timezone'
 
 export function parseDateSafely(raw: any): Date | undefined {

@@ -1,5 +1,3 @@
-'use client'
-
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
@@ -7,7 +5,6 @@ import api from '@/lib/api'
 interface ProviderEntry {
   id: string
   name: string
-
   provider: string
   credentials: {
     merchantId: string
@@ -24,7 +21,6 @@ export default function PaymentProvidersPage() {
   const router = useRouter()
   const { merchantId } = router.query as { merchantId?: string }
   const [editId, setEditId] = useState<string | null>(null)
-
   const [merchant, setMerchant] = useState<{ name: string } | null>(null)
   const [entries, setEntries] = useState<ProviderEntry[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -34,7 +30,6 @@ export default function PaymentProvidersPage() {
     credentials: { merchantId: '', env: 'sandbox', secretKey: '' },
     schedule: { weekday: true, weekend: false },
     name: ''
-
   })
 
   useEffect(() => {
@@ -82,21 +77,19 @@ export default function PaymentProvidersPage() {
         })
       }
       setShowForm(false)
-            setEditId(null)
-
+      setEditId(null)
       fetchEntries()
     } catch (err: any) {
       setErrorMsg(err.response?.data.error || 'Gagal menyimpan, coba lagi.')
     }
   }
 
-    function startEdit(entry: ProviderEntry) {
+  function startEdit(entry: ProviderEntry) {
     setForm(entry)
     setEditId(entry.id)
     setErrorMsg('')
     setShowForm(true)
   }
-
 
   async function deleteEntry(subId: string) {
     if (!merchantId) return
@@ -111,7 +104,6 @@ export default function PaymentProvidersPage() {
     }
   }
 
-
   return (
     <div className="container">
       <header className="header">
@@ -120,7 +112,13 @@ export default function PaymentProvidersPage() {
         </h2>
         <button
           className="add-btn"
-          onClick={() => { setErrorMsg(''); setEditId(null); setForm({ provider: 'hilogate', credentials: { merchantId: '', env: 'sandbox', secretKey: '' }, schedule: { weekday: true, weekend: false }, name: '' }); setShowForm(true) }}          disabled={!merchant}
+          onClick={() => {
+            setErrorMsg('')
+            setEditId(null)
+            setForm({ provider: 'hilogate', credentials: { merchantId: '', env: 'sandbox', secretKey: '' }, schedule: { weekday: true, weekend: false }, name: '' })
+            setShowForm(true)
+          }}
+          disabled={!merchant}
         >
           + Tambah Provider
         </button>
@@ -131,33 +129,24 @@ export default function PaymentProvidersPage() {
           <thead>
             <tr>
               <th>Provider</th>
-                            <th>Name</th>
-
-              <th>Provider</th>
+              <th>Name</th>
+              <th>Merchant ID</th>
               <th>Env</th>
               <th>Weekday</th>
               <th>Weekend</th>
-              <th>Aksi</th>
+              {/* use client */}
             </tr>
           </thead>
           <tbody>
             {entries.map(e => (
               <tr key={e.id}>
                 <td className="cell-bold">{e.provider}</td>
-                                <td className="cell-bold">{e.name}</td>
-                <td>{e.provider}</td>
+                <td className="cell-bold">{e.name}</td>
                 <td>{e.credentials.merchantId}</td>
                 <td>{e.credentials.env}</td>
                 <td>{e.schedule.weekday ? '✔' : '–'}</td>
                 <td>{e.schedule.weekend ? '✔' : '–'}</td>
-                
-                <td>
-                  <button className="edit-btn" onClick={() => startEdit(e)}>Edit</button>{' '}
-
-                  <button className="delete-btn" onClick={() => deleteEntry(e.id)}>
-                    Hapus
-                  </button>
-                </td>
+                {/* use client */}
               </tr>
             ))}
             {entries.length === 0 && (
@@ -171,97 +160,52 @@ export default function PaymentProvidersPage() {
         </table>
       </div>
 
+      {/* Form Modal */}
       {showForm && (
         <div className="overlay" onClick={() => { setShowForm(false); setEditId(null) }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">{editId ? 'Edit Provider' : 'Tambah Provider Baru'}</h3>
             {errorMsg && <div className="error-banner">{errorMsg}</div>}
-
-            <div className="form-group">
-              <label>Provider</label>
-              <select
-                value={form.provider}
-                onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}
-              >
-                <option value="hilogate">Hilogate</option>
-                <option value="oy">OY</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Name</label>
-              <input
-                type="text"
-                value={form.name || ''}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Environment</label>
-              <select
-                value={form.credentials?.env}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  credentials: { ...f.credentials!, env: e.target.value }
-                }))}
-              >
-                <option value="sandbox">Sandbox</option>
-                <option value="production">Production</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>Merchant ID</label>
-              <input
-                type="text"
-                value={form.credentials?.merchantId || ''}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  credentials: { ...f.credentials!, merchantId: e.target.value }
-                }))}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Secret Key</label>
-              <input
-                type="text"
-                value={form.credentials?.secretKey || ''}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  credentials: { ...f.credentials!, secretKey: e.target.value }
-                }))}
-              />
-            </div>
-
-            <div className="checkbox-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={form.schedule?.weekday ?? false}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    schedule: { ...f.schedule!, weekday: e.target.checked }
-                  }))}
-                /> Weekday
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={form.schedule?.weekend ?? false}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    schedule: { ...f.schedule!, weekend: e.target.checked }
-                  }))}
-                /> Weekend
-              </label>
-            </div>
-
-            <div className="modal-actions">
-              <button className="save-btn" onClick={saveEntry}>{editId ? 'Update' : 'Simpan'}</button>
-              <button className="cancel-btn" onClick={() => { setShowForm(false); setEditId(null) }}>Batal</button>
-              <button className="cancel-btn" onClick={() => setShowForm(false)}>Batal</button>
-            </div>
+            <form>
+              <div className="form-group">
+                <label>Provider</label>
+                <select value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
+                  <option value="hilogate">Hilogate</option>
+                  <option value="oy">OY</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Name</label>
+                <input type="text" value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label>Environment</label>
+                <select value={form.credentials?.env} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, env: e.target.value } }))}>
+                  <option value="sandbox">Sandbox</option>
+                  <option value="production">Production</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Merchant ID</label>
+                <input type="text" value={form.credentials?.merchantId || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, merchantId: e.target.value } }))} />
+              </div>
+              <div className="form-group">
+                <label>Secret Key</label>
+                <input type="text" value={form.credentials?.secretKey || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, secretKey: e.target.value } }))} />
+              </div>
+              <div className="checkbox-group">
+                <label>
+                  <input type="checkbox" checked={form.schedule?.weekday ?? false} onChange={e => setForm(f => ({ ...f, schedule: { ...f.schedule!, weekday: e.target.checked } }))} /> Weekday
+                </label>
+                <label>
+                  <input type="checkbox" checked={form.schedule?.weekend ?? false} onChange={e => setForm(f => ({ ...f, schedule: { ...f.schedule!, weekend: e.target.checked } }))} /> Weekend
+                </label>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="save-btn" onClick={saveEntry}>{editId ? 'Update' : 'Simpan'}</button>
+                <button type="button" className="cancel-btn" onClick={() => { setShowForm(false); setEditId(null) }}>Batal</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

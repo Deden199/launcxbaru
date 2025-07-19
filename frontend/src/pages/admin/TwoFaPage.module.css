@@ -1,0 +1,142 @@
+/* TwoFaPage.module.css */
+
+.wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4rem 1rem;
+  background: #f3f4f6;
+  min-height: 100vh;
+  animation: fadeIn 0.5s ease;
+}
+
+.card {
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+  padding: 2.5rem;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.card:hover {
+  transform: translateY(-4px) scale(1.005);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 1rem;
+}
+
+.icon {
+  color: #4f46e5;
+  margin-right: 0.75rem;
+  font-size: 1.75rem;
+}
+
+.title {
+  font-size: 1.625rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.field {
+  margin-bottom: 1.5rem;
+}
+
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input:focus {
+  outline: none;
+  border-color: #4338ca;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
+}
+
+.button {
+  width: 100%;
+  background-image: linear-gradient(135deg, #4f46e5, #4338ca);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.2s;
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.2);
+}
+.button:disabled {
+  background: #9ca3af;
+  background-image: none;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.button:not(:disabled):hover {
+  filter: brightness(1.05);
+  transform: translateY(-2px);
+}
+
+.messageWrapper {
+  display: flex;
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.message {
+  margin-left: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.success {
+  color: #059669;
+}
+
+.error {
+  color: #dc2626;
+}
+.successIcon {
+  color: #059669;
+}
+.errorIcon {
+  color: #dc2626;
+}
+
+.qrImage {
+  display: block;
+  margin: 1.5rem auto;
+  max-width: 220px;
+  transition: transform 0.3s;
+}
+.qrImage:hover {
+  transform: scale(1.05);
+}
+
+.twoFaField {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.twoFaField .input {
+  flex: 1;
+  width: auto;
+}
+.twoFaField .button {
+  flex-shrink: 0;
+  width: auto;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

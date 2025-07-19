@@ -80,8 +80,8 @@ export async function getActiveProviders(
   provider: 'hilogate' | 'oy'
 ): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
   const day = getJakartaDay()               // WIB day
-  const isWeekend = [0, 6].includes(day)
-
+  // Weekend is Friday (5) and Saturday (6) in Jakarta time
+  const isWeekend = [5, 6].includes(day)
   // full match kedua flag
   const scheduleFilter = isWeekend
     ? { weekday: false, weekend: true }

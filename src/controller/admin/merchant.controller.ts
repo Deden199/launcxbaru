@@ -492,8 +492,8 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 
     // 1) Hitung hari ini: weekend vs weekday
     const day = new Date().getDay(); // 0=Minggu,6=Sabtu
-    const isWeekend = day === 0 || day === 6;
-    const scheduleFilter = isWeekend
+    // Weekend ditetapkan pada hari Jumat (5) dan Sabtu (6)
+    const isWeekend = day === 5 || day === 6;    const scheduleFilter = isWeekend
       ? { weekday: false, weekend: true }
       : { weekday: true, weekend: false };
 

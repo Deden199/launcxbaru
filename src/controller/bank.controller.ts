@@ -16,8 +16,8 @@ export async function getBanks(req: Request, res: Response) {
 
     // 2) Ambil sub-merchant yang aktif sesuai hari
     const day = new Date().getDay();
-    const isWeekend = day === 0 || day === 6;
-    const allSubs = await prisma.sub_merchant.findMany({
+    // Weekend dianggap hari Jumat (5) dan Sabtu (6)
+    const isWeekend = day === 5 || day === 6;    const allSubs = await prisma.sub_merchant.findMany({
       where: {
         merchantId: merchant.id,
         provider: 'hilogate',

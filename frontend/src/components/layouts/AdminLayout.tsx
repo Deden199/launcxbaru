@@ -3,7 +3,7 @@
 import { ReactNode, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Menu, Home, Box, LogOut, Settings, BoomBox } from 'lucide-react'
+import { Menu, Home, Box, LogOut, Settings, BoomBox, ShieldCheck } from 'lucide-react'
 import { motion } from 'framer-motion'
 import styles from './Layout.module.css'
 
@@ -12,12 +12,11 @@ interface AdminLayoutProps {
 }
 
 const navItems = [
-  { label: 'Dashboard',   href: '/dashboard',        Icon: Home },
-  { label: 'API Clients', href: '/admin/clients',   Icon: Box },
-    { label: 'Merchant Settings', href: '/admin/merchants',   Icon: BoomBox },
-      { label: 'WD Settings', href: '/admin/settings', Icon: Settings },
-
-
+  { label: 'Dashboard',        href: '/dashboard',       Icon: Home },
+  { label: 'API Clients',      href: '/admin/clients',   Icon: Box },
+  { label: 'Merchant Settings', href: '/admin/merchants', Icon: BoomBox },
+  { label: '2FA Setup',        href: '/admin/2fa',       Icon: ShieldCheck },
+  { label: 'WD Settings',      href: '/admin/settings',  Icon: Settings },
 ]
 
 export default function AdminLayout({ children }: AdminLayoutProps) {

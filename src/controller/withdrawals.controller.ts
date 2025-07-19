@@ -382,6 +382,11 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     otp?: string
 
   }
+
+    // Parent accounts are not allowed to perform withdrawals
+  if (req.isParent) {
+    return res.status(403).json({ error: 'Parent accounts cannot perform withdrawals' })
+  }
   const clientUserId = req.clientUserId!
 
   // 0) Cari partnerClientId dari clientUser
