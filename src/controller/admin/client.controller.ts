@@ -3,6 +3,7 @@ import { Request, Response } from 'express'
 import { PrismaClient } from '@prisma/client'
 import crypto from 'crypto'
 import bcrypt from 'bcrypt'
+import { AuthRequest } from '../../middleware/auth'
 
 const prisma = new PrismaClient()
 
@@ -34,7 +35,7 @@ export const getAllClients = async (_: Request, res: Response) => {
 }
 
 // 2) Create API-Client baru + default ClientUser
-export const createClient = async (req: Request, res: Response) => {
+export const createClient = async (req: AuthRequest, res: Response) => {
   const name  = (req.body.name  as string)?.trim()
   const email = (req.body.email as string)?.trim()
 
@@ -111,7 +112,15 @@ export const createClient = async (req: Request, res: Response) => {
       role: 'PARTNER_CLIENT'
     }
   })
-
+  if (req.userId) {
+    await prisma.adminLog.create({
+      data: {
+        adminId: req.userId,
+        action: 'createClient',
+        target: client.id
+      }
+    })
+  }
   // 2c) kembalikan data client + kredensial default
   res.status(201).json({
     client,
@@ -154,7 +163,7 @@ export const getClientById = async (req: Request, res: Response) => {
 }
 
 // 4) Update API-Client by ID
-export const updateClient = async (req: Request, res: Response) => {
+export const updateClient = async (req: AuthRequest, res: Response) => {
   const { clientId } = req.params
   const {
     name,
@@ -248,7 +257,15 @@ export const updateClient = async (req: Request, res: Response) => {
       data:  { parentClientId: clientId }
     })
   }
-
+  if (req.userId) {
+    await prisma.adminLog.create({
+      data: {
+        adminId: req.userId,
+        action: 'updateClient',
+        target: clientId
+      }
+    })
+  }
   res.json(updated)
 }
 
