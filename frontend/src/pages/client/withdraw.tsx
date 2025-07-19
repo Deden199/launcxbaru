@@ -282,7 +282,11 @@ const submit = async (e: React.FormEvent) => {
       // validasi gagal: tampilkan pesan backend
       setError(res.data.error || 'Data tidak valid');
 
-    } else {
+    }  else if (res.status === 403) {
+  // <-- tambahkan ini
+  setError('Forbidden: Tidak dapat withdraw menggunakan akun parent');
+}
+    else {
       // server error (>=500) atau status lain
       setError('Submit gagal: periksa lagi informasi rekening bank');
     }
