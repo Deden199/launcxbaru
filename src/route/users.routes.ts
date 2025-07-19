@@ -5,10 +5,10 @@ import {
   updateUser,
   deleteUser
 } from '../controller/users.controller'
-import { authMiddleware } from '../middleware/auth'
+import { requireAdminAuth } from '../middleware/auth'
 
 const router = Router()
-router.use(authMiddleware)
+router.use(requireAdminAuth)
 router.get('/', listUsers)
 router.post('/', createUser)
 router.put('/:id', updateUser)

@@ -231,6 +231,8 @@ model PartnerUser {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  logs      AdminLog[]
+
 }
 
 /// Key‐value settings
@@ -289,3 +291,12 @@ model WithdrawRequest {
 }
 
 
+model AdminLog {
+  id        String   @id @default(uuid()) @map("_id")
+  adminId   String
+  action    String
+  target    String?
+  createdAt DateTime @default(now())
+
+  admin PartnerUser @relation(fields: [adminId], references: [id])
+}

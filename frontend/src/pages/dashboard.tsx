@@ -435,7 +435,7 @@ const filtered = mapped.filter(t => {
 </aside>
 
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
-  <h2>Profit per Sub Merchant</h2>
+  <h2>Profit per sub</h2>
   {loadingProfitSub ? (
     <div className={styles.loader}>Loading profit…</div>
   ) : (
