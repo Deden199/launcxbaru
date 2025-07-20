@@ -41,21 +41,19 @@ export async function requireClientAuth(
   if (!cu) return res.status(401).json({ error: 'ClientUser not found' })
   req.partnerClientId = cu.partnerClientId
 
-  // 3) Tentukan role parent/child
-  const pc = await prisma.partnerClient.findUnique({
-    where: { id: cu.partnerClientId },
-    select: { parentClientId: true }
-  })
-  if (!pc) {
-    return res.status(401).json({ error: 'PartnerClient not found' })
-  }
-  req.isParent = pc.parentClientId == null
-  // 4) Jika parent, load childrenIds
-  if (req.isParent) {
-    const kids = await prisma.partnerClient.findMany({
-      where: { parentClientId: req.partnerClientId },
+    // 3) Pastikan partnerClient ada & cek apakah memiliki child
+  const [pc, kids] = await Promise.all([
+    prisma.partnerClient.findUnique({ where: { id: cu.partnerClientId }, select: { id: true } }),
+    prisma.partnerClient.findMany({
+      where: { parentClientId: cu.partnerClientId },
       select: { id: true }
     })
+      ])
+  if (!pc) return res.status(401).json({ error: 'PartnerClient not found' })
+
+  // 4) Tandai parent hanya jika memang memiliki child
+  req.isParent = kids.length > 0
+  if (req.isParent) {
     req.childrenIds = kids.map(c => c.id)
   }
 

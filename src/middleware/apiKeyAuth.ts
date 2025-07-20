@@ -36,15 +36,15 @@ export default async function apiKeyAuth(
     return res.status(401).json({ error: 'Invalid API key' })
 
   // 3) Attach context
-  req.clientId  = client.id
-  req.isParent  = (client.parentClientId == null)
+  req.clientId = client.id
+  const kids = await prisma.partnerClient.findMany({
+    where: { parentClientId: client.id },
+    select: { id: true }
+  })
+  req.isParent = kids.length > 0
 
   // 4) Jika parent, load childrenIds
   if (req.isParent) {
-    const kids = await prisma.partnerClient.findMany({
-      where: { parentClientId: client.id },
-      select: { id: true }
-    })
     req.childrenIds = kids.map(c => c.id)
   }
 
