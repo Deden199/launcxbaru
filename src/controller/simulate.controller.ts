@@ -1,65 +1,68 @@
-import { Request, Response } from 'express';
+// src/routes/simulate.ts
+import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import paymentController from './payment';
+import { transactionCallback } from './payment'; // make sure this is a named export
 import { prisma } from '../core/prisma';
+import logger from '../logger';
 
-export const simulateCallback = async (req: Request, res: Response) => {
+export const simulateCallback = async (
+  req: Request,
+  res: Response
+) => {
   try {
-    const { orderId, amount, method = 'qris' } = req.body;
-    if (!orderId || !amount) {
-      return res.status(400).json({ success: false, error: 'orderId & amount wajib' });
-    }
-    // panggil core processing
-    const payload = {
-      ref_id:            orderId,
-      amount,
-      method,
-      status:            'SUCCESS',
-      net_amount:        amount,
-      total_fee:         0,
-      qr_string:         'qris',
-      settlement_status: 'PENDING',
-      updated_at:        { value: new Date().toISOString() },
-      expires_at:        { value: new Date(Date.now() + 30 * 60_000).toISOString() },
-    };
+    // 1) We’re using express.raw() on this route,
+    //    so req.body is still a Buffer called rawBody.
+    const rawBody = (req as any).rawBody.toString('utf8');
+    logger.debug('[Simulate] rawBody:', rawBody);
 
+    // 2) Parse the JSON just like production does
+    const full = JSON.parse(rawBody);
+    const { ref_id, amount, method = 'qris' } = full;
+    if (!ref_id || amount == null) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'ref_id & amount are required' });
+    }
+
+    // 3) Lookup sub-merchant to get its secretKey
     const orderRecord = await prisma.order.findUnique({
-      where: { id: orderId },
-      select: { subMerchantId: true },
+      where: { id: ref_id },
+      select: { subMerchantId: true }
     });
     if (!orderRecord) {
-      return res.status(404).json({ success: false, error: 'Order tidak ditemukan' });
+      return res
+        .status(404)
+        .json({ success: false, error: 'Order not found' });
     }
-
     const sub = await prisma.sub_merchant.findUnique({
       where: { id: orderRecord.subMerchantId! },
-      select: { credentials: true },
+      select: { credentials: true }
     });
- if (!sub) {
-      return res.status(404).json({ success: false, error: 'Sub-merchant tidak ditemukan' });
+    if (!sub) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'Sub-merchant not found' });
     }
-    const cred = sub.credentials as { secretKey: string };
-    const minimal = JSON.stringify({ ref_id: orderId, amount, method });
+    const { secretKey } = sub.credentials as { secretKey: string };
+
+    // 4) Compute the MD5 signature exactly as production does
+    const minimal = JSON.stringify({ ref_id, amount, method });
     const signature = crypto
       .createHash('md5')
-      .update('/api/v1/transactions' + minimal + cred.secretKey, 'utf8')
+      .update('/api/v1/transactions' + minimal + secretKey, 'utf8')
       .digest('hex');
 
-    const fakeReq: any = {
-      rawBody: Buffer.from(JSON.stringify(payload), 'utf8'),
-      header(name: string) {
-        return name.toLowerCase() === 'x-signature' ? signature : undefined;
-      },
-    };
-    const fakeRes: any = {
-      status() {
-        return { json: () => Promise.resolve(null) };
-      },
-    };
-    await paymentController.transactionCallback(fakeReq, fakeRes);
+    // 5) Inject it back into headers so transactionCallback can verify it
+    req.headers['x-signature'] = signature;
 
-    return res.status(200).json({ success: true, message: 'Simulate callback Success' });
+    // 6) Override req.body with our parsed JSON
+    (req as any).body = full;
+
+    // 7) Delegate to the real production handler
+    //    NOTE: we only pass (req, res), since transactionCallback is declared as (req, res)
+    return transactionCallback(req, res);
   } catch (err: any) {
+    logger.error('[Simulate] error:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
