@@ -5,9 +5,9 @@ import React from 'react'
 import styles from './DocsPage.module.css'
 
 /**
- * Dokumentasi lengkap integrasi Launcx API untuk partner‑client.
- * Mendukung environment Production & Staging.
- * Menjelaskan header otentikasi, flow transaksi, callback, dan dashboard.
+ * Complete documentation of the Launcx API integration for partner clients.
+ * Supports Production & Staging environments.
+ * Explains authentication headers, transaction flow, callbacks, and dashboard.
  */
 
 const IntegrationDocs: NextPage & { disableLayout?: boolean } = () => (
@@ -23,7 +23,7 @@ const IntegrationDocs: NextPage & { disableLayout?: boolean } = () => (
         <li><strong>Staging:</strong> <code>https://staging.launcx.com/api/v1</code></li>
       </ul>
       <p className={styles.bodyText}>
-        Gunakan base URL sesuai environment Anda. Semua endpoint di bawah <code>/api/v1</code>.
+        Use the base URL according to your environment. All endpoints are under <code>/api/v1</code>.
       </p>
     </section>
 
@@ -31,12 +31,12 @@ const IntegrationDocs: NextPage & { disableLayout?: boolean } = () => (
     <section className={styles.section}>
       <h2 className={styles.heading2}>1. Authentication</h2>
       <p className={styles.bodyText}>
-        Setiap request ke <code>/api/v1/*</code> <strong>wajib</strong> menyertakan header:
+        Every request to <code>/api/v1/*</code> <strong>must</strong> include the following headers:
       </p>
       <ul className={styles.list}>
         <li><code>Content-Type: application/json</code></li>
         <li><code>x-api-key: &lt;YOUR_API_KEY&gt;</code></li>
-        <li><code>x-timestamp: &lt;Unix TS ms&gt;</code> (ditolak jika selisih &gt;5 menit)</li>
+        <li><code>x-timestamp: &lt;Unix TS ms&gt;</code> (rejected if difference &gt; 5 minutes)</li>
       </ul>
       <pre className={styles.codeBlock}><code>{`import axios from 'axios'
 
@@ -62,22 +62,22 @@ export default api`}</code></pre>
     <section className={styles.section}>
       <h2 className={styles.heading2}>2. Create Transaction / Order</h2>
       <p className={styles.bodyText}>
-        Endpoint: <code>POST /payments</code> mendukung dua flow:
+        Endpoint: <code>POST /payments</code> supports two flows:
       </p>
       <ol className={styles.list}>
-        <li><strong>Embed Flow</strong> – respon JSON berisi <code>qrPayload</code>.</li>
-        <li><strong>Redirect Flow</strong> – respon <code>303 See Other</code> dengan header <code>Location</code>.</li>
+        <li><strong>Embed Flow</strong> – JSON response containing <code>qrPayload</code>.</li>
+        <li><strong>Redirect Flow</strong> – <code>303 See Other</code> response with a <code>Location</code> header.</li>
       </ol>
 
       {/* Embed Flow */}
       <h3 className={styles.heading3}>2.1 Embed Flow</h3>
       <pre className={styles.codeBlock}><code>{`POST /api/v1/payments
-Headers: (lihat Authentication)
+Headers: (see Authentication)
 Body:
 {
   "price": 50000,
   "playerId": "gamer_foo",
-  "flow": "embed"    // default embed jika dihilangkan
+  "flow": "embed"    // defaults to embed if omitted
 }`}</code></pre>
       <p className={styles.bodyText}>Response <code>201 Created</code>:</p>
       <pre className={styles.codeBlock}><code>{`{
@@ -94,7 +94,7 @@ Body:
       {/* Redirect Flow */}
       <h3 className={styles.heading3}>2.2 Redirect Flow</h3>
       <pre className={styles.codeBlock}><code>{`POST /api/v1/payments
-Headers: (sama)
+Headers: (same as above)
 Body:
 {
   "price": 50000,
@@ -105,7 +105,7 @@ Body:
       <pre className={styles.codeBlock}><code>{`HTTP/1.1 303 See Other
 Location: https://payment.launcx.com/order/685e6f36263c75af53ba84b3`}</code></pre>
 
-      <h4 className={styles.heading3}>Contoh cURL (Embed)</h4>
+      <h4 className={styles.heading3}>cURL Example (Embed)</h4>
       <pre className={styles.codeBlock}><code>{`curl -i -X POST https://launcx.com/api/v1/payments \
   -H "Content-Type: application/json" \
   -H "x-api-key: <YOUR_API_KEY>" \
@@ -115,7 +115,7 @@ Location: https://payment.launcx.com/order/685e6f36263c75af53ba84b3`}</code></pr
         "playerId": "gamer_foo"
       }'`}</code></pre>
 
-      <h4 className={styles.heading3}>Contoh Axios (Redirect)</h4>
+      <h4 className={styles.heading3}>Axios Example (Redirect)</h4>
       <pre className={styles.codeBlock}><code>{`import api from '@/lib/api'
 
 async function payRedirect() {
@@ -130,26 +130,26 @@ async function payRedirect() {
   } else {
     console.error('Unexpected response', res.data)
   }
-  }`}</code></pre>
-      </section>
+}`}</code></pre>
+    </section>
 
-      {/* Retry Callback */}
-      <section className={styles.section}>
-        <h3 className={styles.heading3}>5.1 Retry Transaction Callback</h3>
-        <p className={styles.bodyText}>
-          Jika callback terakhir gagal, kirim ulang dengan:
-        </p>
-        <pre className={styles.codeBlock}><code>{`POST /client/callbacks/{orderId}/retry`}</code></pre>
-        <p className={styles.bodyText}>
-          Server akan memuat payload callback terakhir, menghitung signature baru,
-          lalu POST kembali ke <code>callbackUrl</code> Anda.
-        </p>
-      </section>
-    {/* Register Callback URL */}
+    {/* ─────────────────────────────────── 5.1 Retry Transaction Callback */}
+    <section className={styles.section}>
+      <h3 className={styles.heading3}>5.1 Retry Transaction Callback</h3>
+      <p className={styles.bodyText}>
+        If the last callback failed, retry with:
+      </p>
+      <pre className={styles.codeBlock}><code>{`POST /client/callbacks/{orderId}/retry`}</code></pre>
+      <p className={styles.bodyText}>
+        The server will load the last callback payload, calculate a new signature, and then POST back to your <code>callbackUrl</code>.
+      </p>
+    </section>
+
+    {/* ─────────────────────────────────── 3. Register Callback URL */}
     <section className={styles.section}>
       <h2 className={styles.heading2}>3. Register Callback URL</h2>
       <p className={styles.bodyText}>
-        Daftarkan endpoint di Dashboard Launcx sebelum menerima callback.
+        Register your endpoint in the Launcx Dashboard before receiving callbacks.
       </p>
       <pre className={styles.codeBlock}><code>{`POST /client/callback-url
 Authorization: Bearer <YOUR_JWT_TOKEN>
@@ -160,16 +160,15 @@ Body:
   "url": "https://your-server.com/api/transactions/callback"
 }`}</code></pre>
       <p className={styles.bodyText}>
-        Setelah sukses, Anda akan melihat <strong>Callback Secret</strong> di halaman Callback Settings.
-        Simpan secret ini untuk memverifikasi signature.
+        After success, you will see the <strong>Callback Secret</strong> on the Callback Settings page. Save this secret to verify signatures.
       </p>
     </section>
 
-    {/* Handle Callback */}
+    {/* ─────────────────────────────────── 4. Handle Callback */}
     <section className={styles.section}>
       <h2 className={styles.heading2}>4. Handle Callback</h2>
       <p className={styles.bodyText}>
-        Launcx akan POST ke URL Anda saat transaksi <strong>SUCCESS</strong> atau <strong>DONE</strong>.
+        Launcx will POST to your URL when the transaction is <strong>SUCCESS</strong> or <strong>DONE</strong>.
       </p>
       <pre className={styles.codeBlock}><code>{`{
   "orderId": "685d4578f2745f068c635f17",
@@ -183,7 +182,7 @@ Body:
   "nonce": "uuid-v4"
 }`}</code></pre>
       <p className={styles.bodyText}>
-        Signature HMAC-SHA256 di header <code>X-Callback-Signature</code>. Verifikasi:
+        The HMAC-SHA256 signature is in the <code>X-Callback-Signature</code> header. Verify it as follows:
       </p>
       <pre className={styles.codeBlock}><code>{`import crypto from 'crypto'
 
@@ -199,63 +198,66 @@ function verifyCallback(body, signature, secret) {
       {/* Staging: Simulate Callback */}
       <h3 className={styles.heading3}>4.1 Simulate Callback (Staging Only)</h3>
       <p className={styles.bodyText}>
-        Di environment staging, Anda dapat mengetes callback sebelum integrasi riil:
+        In the staging environment, you can test callbacks before real integration:
       </p>
-      <pre className={styles.codeBlock}><code>{`API_KEY="5ef7b50d-e4db..."
-ORDER_ID="685fe5b5153faa0cc6e1b498"
+      <pre className={styles.codeBlock}><code>{`API_KEY="46c58b1b-3e3f-488a-87e6-0446356c4f1b"
+ORDER_ID="687e4adb92ca2a2b070c590b"
 
 curl -i -X POST https://staging.launcx.com/api/v1/simulate-callback \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
   -H "X-Timestamp: $(date +%s000)" \
   -d '{
-    "orderId":"'$ORDER_ID'",
-    "amount":1000,
-    "method":"qris"
+    "ref_id": "'"$ORDER_ID"'",
+    "amount": 1000,
+    "net_amount": 1000,
+    "method": "qris",
+    "status": "SUCCESS",
+    "total_fee": 0,
+    "qr_string": "qris",
+    "settlement_status": "PENDING",
+    "updated_at": {
+      "value": "'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"
+    },
+    "expires_at": {
+      "value": "'"$(date -u -d "+30 minutes" +"%Y-%m-%dT%H:%M:%SZ")"'"
+    }
   }'`}</code></pre>
       <p className={styles.bodyText}>
-        Response <code>200 OK</code>:
+        <code>200 OK</code> response:
       </p>
-      <pre className={styles.codeBlock}><code>{`{"success":true,"message":"Simulasi callback berhasil"}`}</code></pre>
+      <pre className={styles.codeBlock}><code>{`{"success":true,"message":"ok"}`}</code></pre>
       <p className={styles.bodyText}>
-        Pastikan telah mendaftarkan Callback URL di Dashboard sebelum simulasi.
+        Ensure you have registered the Callback URL in the Dashboard before simulation.
       </p>
     </section>
 
-    {/* Client Dashboard & Withdraw */}
+    {/* ─────────────────────────────────── 5. Client Dashboard & Withdraw */}
     <section className={styles.section}>
       <h2 className={styles.heading2}>5. Client Dashboard & Withdraw</h2>
       <p className={styles.bodyText}>
-        Akses Dashboard di <code>/client/dashboard</code>. Fitur:
+        Access the Dashboard at <code>/client/dashboard</code>. Features:
       </p>
       <ul className={styles.list}>
-        <li><strong>Saldo Aktif</strong>: Saldo terkini.</li>
-        <li><strong>Total Transaksi</strong>: Ringkasan transaksi.</li>
-        <li><strong>Riwayat Transaksi</strong>: Daftar semua transaksi.</li>
-        <li><strong>Callback Settings</strong>: Daftar URL + Callback Secret.</li>
-        <li><strong>Withdraw</strong>: Ajukan penarikan dana.</li>
+        <li><strong>Active Balance</strong>: Current balance.</li>
+        <li><strong>Total Transactions</strong>: Transaction summary.</li>
+        <li><strong>Transaction History</strong>: List of all transactions.</li>
+        <li><strong>Callback Settings</strong>: List of URLs + Callback Secrets.</li>
+        <li><strong>Withdraw</strong>: Submit a withdrawal request.</li>
       </ul>
-      <pre className={styles.codeBlock}><code>{`POST /client/dashboard/withdraw
-Content-Type: application/json
-
-{
-  "bank_code": "bca",
-  "account_number": "1234567890",
-  "amount": 25000
-}`}</code></pre>
     </section>
 
-    {/* End-to-End Flow */}
+    {/* ─────────────────────────────────── 6. End-to-End Flow */}
     <section className={styles.section}>
       <h2 className={styles.heading2}>6. End-to-End Flow</h2>
       <ol className={styles.list}>
-        <li>Login & dapatkan <code>apiKey</code>.</li>
-        <li>Register Callback URL di Dashboard.</li>
+        <li>Login & obtain <code>apiKey</code>.</li>
+        <li>Register Callback URL in the Dashboard.</li>
         <li>Create Order (<code>/payments</code>).</li>
-        <li>Redirect user ke Checkout URL atau render QR embed.</li>
-        <li>Terima Callback, verifikasi signature.</li>
-        <li>Tampilkan status & monitor saldo di Client Dashboard.</li>
-        <li>Ajukan Withdraw saat diperlukan.</li>
+        <li>Redirect user to Checkout URL or render embedded QR.</li>
+        <li>Receive Callback, verify signature.</li>
+        <li>Display status & monitor balance in Client Dashboard.</li>
+        <li>Submit a withdrawal when needed.</li>
       </ol>
     </section>
   </main>
