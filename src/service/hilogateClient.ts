@@ -18,7 +18,7 @@ export class HilogateClient {
       baseURL:
         config.env === 'live'
           ? 'https://app.hilogate.com'
-          : 'https://sandbox.hilogate.com',
+          : 'https://app.hilogate.com',
       headers: {
         'Content-Type': 'application/json',
         'X-Merchant-ID': config.merchantId,

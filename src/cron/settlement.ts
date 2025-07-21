@@ -54,7 +54,7 @@ export function scheduleSettlementChecker() {
           }
 
           logger.info(`[SettlementCron] ${o.id} uses sub-merchant ${o.subMerchantId}`)
-          const baseUrl = cred.env === 'live' ? 'https://app.hilogate.com' : 'https://sandbox.hilogate.com'
+          const baseUrl = cred.env === 'live' ? 'https://app.hilogate.com' : 'https://app.hilogate.com'
           const path = `/api/v1/transactions/${o.id}`
           const sig  = generateSignature(path, cred.secretKey)
           const resp = await axios.get(
