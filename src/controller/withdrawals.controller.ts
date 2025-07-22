@@ -173,7 +173,7 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     status:        w.status,
     createdAt:     w.createdAt.toISOString(),
     completedAt:   w.completedAt?.toISOString() ?? null,
-        wallet:        w.subMerchant.name || w.subMerchant.provider,
+    wallet:        w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
 
   }));
 
@@ -289,17 +289,19 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
       completedAt = parseDateSafely(data.completed_at)
     }
 
-        // 6) Idempotent update + retry
+        // 6) Idempotent update +retry
         
     const updateData: any = { status: newStatus }
-        const feeRaw =
-      typeof data.fee === 'number'
-        ? data.fee
-        : typeof data.transfer_fee === 'number'
-          ? data.transfer_fee
-          : typeof data.admin_fee?.total_fee === 'number'
-            ? data.admin_fee.total_fee
-            : null
+    const feeRaw =
+      typeof data.total_fee === 'number'
+        ? data.total_fee
+        : typeof data.fee === 'number'
+          ? data.fee
+          : typeof data.transfer_fee === 'number'
+            ? data.transfer_fee
+            : typeof data.admin_fee?.total_fee === 'number'
+              ? data.admin_fee.total_fee
+              : null
     if (feeRaw != null) {
       updateData.pgFee = feeRaw
     }
