@@ -25,7 +25,15 @@
 .retryBtn:hover {
   background: #b91c1c;
 }
-
+.settledBalance {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+}
+.settledBalance .cardIcon,
+.settledBalance h2,
+.settledBalance p {
+  color: #ffffff;
+}
 /* ==== FILTER BAR ====================================================== */
 .filters {
   display: flex;

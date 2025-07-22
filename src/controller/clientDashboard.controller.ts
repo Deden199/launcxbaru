@@ -94,10 +94,6 @@ export async function updateClientCallbackUrl(req: ClientAuthRequest, res: Respo
 }
 export async function getClientDashboard(req: ClientAuthRequest, res: Response) {
   try {
-    console.log('--- getClientDashboard START ---');
-    console.log('clientUserId:', req.clientUserId);
-    console.log('query params:', req.query);
-
     // (1) ambil user + partnerClient + children (termasuk balance)
     const user = await prisma.clientUser.findUnique({
       where: { id: req.clientUserId! },
@@ -106,46 +102,49 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
           select: {
             id: true,
             name: true,
-            balance: true,         // ambil balance parent
+            balance: true,
             children: {
               select: {
                 id: true,
                 name: true,
-                balance: true      // ambil balance tiap child
+                balance: true
               }
             }
           }
         }
       }
     });
-    if (!user) {
-      console.warn('User tidak ditemukan untuk id', req.clientUserId);
-      return res.status(404).json({ error: 'User tidak ditemukan' });
-    }
+    if (!user) return res.status(404).json({ error: 'User tidak ditemukan' });
     const pc = user.partnerClient!;
-    console.log('partnerClient loaded:', { id: pc.id, childrenCount: pc.children.length });
 
     // (2) parse tanggal
     const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined;
     const dateTo   = req.query.date_to   ? new Date(String(req.query.date_to))   : undefined;
-    const createdAtFilter: any = {};
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
     if (dateFrom) createdAtFilter.gte = dateFrom;
     if (dateTo)   createdAtFilter.lte = dateTo;
+
+    // (2b) parse status filter (dipakai untuk totalTransaksi)
+    const rawStatus = (req.query as any).status;
+    const allowed = DASHBOARD_STATUSES as readonly string[];
+    let statuses: string[] = [];
+    if (Array.isArray(rawStatus)) {
+      statuses = rawStatus.map(String).filter(s => allowed.includes(s));
+    } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
+      statuses = rawStatus.split(',').map(s => s.trim()).filter(s => allowed.includes(s));
+    }
+    if (statuses.length === 0) statuses = [...allowed];
 
     // (3) build list of IDs to query
     let clientIds: string[];
     if (typeof req.query.clientId === 'string'
         && req.query.clientId !== 'all'
-        && req.query.clientId.trim()
-    ) {
-      clientIds = [req.query.clientId];  // child-only
-      console.log('override dengan single child:', clientIds);
+        && req.query.clientId.trim()) {
+      clientIds = [req.query.clientId];
     } else if (pc.children.length > 0) {
-      clientIds = [pc.id, ...pc.children.map(c => c.id)];  // parent + all children
-      console.log('parent + children => clientIds:', clientIds);
+      clientIds = [pc.id, ...pc.children.map(c => c.id)];
     } else {
-      clientIds = [pc.id];  // no children
-      console.log('user biasa => clientIds:', clientIds);
+      clientIds = [pc.id];
     }
 
     // (4a) total pending seperti sebelumnya
@@ -158,24 +157,20 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
       }
     });
     const totalPending = pendingAgg._sum.pendingAmount ?? 0;
-    console.log('totalPending:', totalPending);
 
     // (4b) HITUNG TOTAL ACTIVE BALANCE BERDASARKAN clientIds
-    const parentBal = clientIds.includes(pc.id)
-      ? pc.balance ?? 0
-      : 0;
+    const parentBal = clientIds.includes(pc.id) ? pc.balance ?? 0 : 0;
     const childrenBal = pc.children
       .filter(c => clientIds.includes(c.id))
       .reduce((sum, c) => sum + (c.balance ?? 0), 0);
     const totalActive = parentBal + childrenBal;
-    console.log('totalActive (filtered):', totalActive);
 
-    // (4c) ambil transaksi seperti biasa
+    // (4c) ambil transaksi seperti biasa (tetap pakai DASHBOARD_STATUSES biar tabel aman)
     const orders = await prisma.order.findMany({
       where: {
         partnerClientId: { in: clientIds },
         status: { in: DASHBOARD_STATUSES },
-        ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -187,15 +182,17 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
         trxExpirationTime:   true,
       }
     });
-    console.log(`ditemukan ${orders.length} order(s)`);
 
-    // (5) hitung totalTransaksi
-const COMPLETED_STATUSES: string[] = ['SUCCESS', 'DONE', 'SETTLED'];
-
-    const totalTransaksi = orders
-      .filter(o => COMPLETED_STATUSES.includes(o.status))
-      .reduce((sum, o) => sum + o.amount, 0);
-    console.log('totalTransaksi:', totalTransaksi);
+// (5) totalTransaksi -> hitung langsung di DB dengan status filter user
+const totalAgg = await prisma.order.aggregate({
+  _sum: { amount: true },
+  where: {
+    partnerClientId: { in: clientIds },
+    status: { in: statuses },                         // <- status yang kamu pilih
+    ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+  }
+});
+const totalTransaksi = totalAgg._sum.amount ?? 0;
 
     // (6) map ke response
     const transactions = orders.map(o => {
@@ -213,62 +210,71 @@ const COMPLETED_STATUSES: string[] = ['SUCCESS', 'DONE', 'SETTLED'];
         netSettle,
         settlementStatus: o.settlementStatus ?? '',
         status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
-       // tambahkan ISO-string dari tiga timestamp:
         paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
         settlementTime:      o.settlementTime?.toISOString()      ?? '',
-        trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',      };
+        trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',
+      };
     });
 
-    console.log('--- getClientDashboard END ---');
     return res.json({
-      balance: totalActive,      // pakai totalActive yang sudah ter-filter
+      balance: totalActive,
       totalPending,
       totalTransaksi,
       transactions,
-      children: pc.children      // tetap kirim semua children untuk dropdown
+      children: pc.children
     });
 
   } catch (err: any) {
-    console.error('Error di getClientDashboard:', err);
     return res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 }
 
-
 export async function exportClientTransactions(req: ClientAuthRequest, res: Response) {
-  // (1) load user + children
+  // 1) load user + children
   const user = await prisma.clientUser.findUnique({
     where: { id: req.clientUserId! },
     include: {
       partnerClient: {
-        include: {
-          children: { select: { id: true, name: true } }
-        }
+        include: { children: { select: { id: true, name: true } } }
       }
     }
   })
   if (!user) return res.status(404).json({ error: 'User tidak ditemukan' })
-  const pc = user.partnerClient
+  const pc = user.partnerClient!
 
-  // (2) parse tanggal
+  // 2) tanggal
   const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined
   const dateTo   = req.query.date_to   ? new Date(String(req.query.date_to))   : undefined
-  const createdAtFilter: any = {}
-  if (dateFrom) createdAtFilter.gte = dateFrom
-  if (dateTo)   createdAtFilter.lte = dateTo
+  const createdAt: any = {}
+  if (dateFrom) createdAt.gte = dateFrom
+  if (dateTo)   createdAt.lte = dateTo
 
-  // (3) siapkan daftar IDs
-const clientIds = req.isParent
-  ? [pc.id, ...pc.children.map(c => c.id)]  // <<< include parent juga
-  : [pc.id]
-console.log('export clientIds:', clientIds)
+  // 3) clientIds
+  const isParent = pc.children.length > 0
+  let clientIds = isParent
+    ? [pc.id, ...pc.children.map(c => c.id)]
+    : [pc.id]
 
-  // (4) ambil semua order
+  // jika FE kirim clientId tertentu → override
+  if (typeof req.query.clientId === 'string' && req.query.clientId !== 'all' && req.query.clientId.trim()) {
+    clientIds = [String(req.query.clientId)]
+  }
+
+  // 4) status filter (samain dengan dashboard)
+  const mapStatus = (s?: string) => {
+    if (!s) return { in: DASHBOARD_STATUSES }
+    if (s === 'SUCCESS') return { in: ['SUCCESS', 'SETTLED'] }
+    return s
+  }
+  const statusParam = (req.query.status as string | undefined)?.trim()
+  const statusWhere = mapStatus(statusParam)
+
+  // 5) query orders
   const orders = await prisma.order.findMany({
     where: {
       partnerClientId: { in: clientIds },
-      status: { in: DASHBOARD_STATUSES },
-      ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
+      status: statusWhere,
+      ...(dateFrom || dateTo ? { createdAt } : {})
     },
     orderBy: { createdAt: 'desc' },
     select: {
@@ -288,76 +294,64 @@ console.log('export clientIds:', clientIds)
     }
   })
 
-  // (5) map ID→name untuk semua child
+  // 6) map ID → name
   const idToName: Record<string,string> = {}
   pc.children.forEach(c => { idToName[c.id] = c.name })
-  // (opsional, jika parent juga mau ditampilkan di All-sheet)
   idToName[pc.id] = pc.name
 
-  // (6) group per partnerClientId
-  const byClient: Record<string, typeof orders> = {}
-  orders.forEach(o => {
-    byClient[o.partnerClientId] ??= []
-    byClient[o.partnerClientId].push(o)
-  })
-
-  // (7) buat workbook + sheet “All Transactions”
+  // 7) workbook
   const wb = new ExcelJS.Workbook()
   const all = wb.addWorksheet('All Transactions')
   all.columns = [
-    { header: 'Child Name', key: 'name',   width: 30 },
-    { header: 'Order ID',    key: 'id',     width: 36 },
-    { header: 'RRN',         key: 'rrn',    width: 24 },
-    { header: 'Player ID',   key: 'player', width: 20 },
-    { header: 'Amount',      key: 'amt',    width: 15 },
-    { header: 'Pending',     key: 'pend',   width: 15 },
-    { header: 'Settled',     key: 'sett',   width: 15 },
-    { header: 'Fee',         key: 'fee',    width: 15 },
-    { header: 'Status',      key: 'stat',   width: 16 },
-    { header: 'Date',        key: 'date',   width: 20 },
-    { header: 'Paid At',     key: 'paidAt',    width: 20 },
-  { header: 'Settled At',  key: 'settledAt', width: 20 },
-  { header: 'Expires At',  key: 'expiresAt', width: 20 },
+    { header: 'Child Name', key: 'name',     width: 30 },
+    { header: 'Order ID',   key: 'id',       width: 36 },
+    { header: 'RRN',        key: 'rrn',      width: 24 },
+    { header: 'Player ID',  key: 'player',   width: 20 },
+    { header: 'Amount',     key: 'amt',      width: 15 },
+    { header: 'Pending',    key: 'pend',     width: 15 },
+    { header: 'Settled',    key: 'sett',     width: 15 },
+    { header: 'Fee',        key: 'fee',      width: 15 },
+    { header: 'Status',     key: 'stat',     width: 16 },
+    { header: 'Date',       key: 'date',     width: 20 },
+    { header: 'Paid At',    key: 'paidAt',    width: 20 },
+    { header: 'Settled At', key: 'settledAt', width: 20 },
+    { header: 'Expires At', key: 'expiresAt', width: 20 },
   ]
 
   orders.forEach(o => {
     all.addRow({
-      name:   idToName[o.partnerClientId] || o.partnerClientId,
-      id:     o.id,
-      rrn:    o.rrn ?? '',
-      player: o.playerId,
-      amt:    o.amount,
-      pend:   o.pendingAmount ?? 0,
-      sett:   o.settlementAmount ?? 0,
-      fee:    o.feeLauncx ?? 0,
-      stat:   o.status,
-    date:   o.createdAt.toISOString(),
-    // isi kolom timestamp
-    paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
-    settledAt: o.settlementTime?.toISOString()      ?? '',
-    expiresAt: o.trxExpirationTime?.toISOString()   ?? '',    })
+      name:     idToName[o.partnerClientId] || o.partnerClientId,
+      id:       o.id,
+      rrn:      o.rrn ?? '',
+      player:   o.playerId,
+      amt:      o.amount,
+      pend:     o.pendingAmount ?? 0,
+      sett:     o.settlementAmount ?? 0,
+      fee:      o.feeLauncx ?? 0,
+      stat:     o.status,
+      date:     o.createdAt.toISOString(),
+      paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
+      settledAt: o.settlementTime?.toISOString()      ?? '',
+      expiresAt: o.trxExpirationTime?.toISOString()   ?? '',
+    })
   })
 
-  // (8) buat sheet per child
+  // 8) sheet per child
   for (const child of pc.children) {
     const sheet = wb.addWorksheet(child.name)
-    sheet.columns = all.columns.slice(1).concat([
-      { header: 'Paid At',     key: 'paidAt',    width: 20 },
-      { header: 'Settled At',  key: 'settledAt', width: 20 },
-      { header: 'Expires At',  key: 'expiresAt', width: 20 },
-    ])    
-    const list = byClient[child.id] || []
+    sheet.columns = all.columns.slice(1) // tanpa 'Child Name'
+    const list = orders.filter(o => o.partnerClientId === child.id)
     list.forEach(o => {
       sheet.addRow({
-        id:     o.id,
-        rrn:    o.rrn ?? '',
-        player: o.playerId,
-        amt:    o.amount,
-        pend:   o.pendingAmount ?? 0,
-        sett:   o.settlementAmount ?? 0,
-        fee:    o.feeLauncx ?? 0,
-        stat:   o.status,
-        date:   o.createdAt.toISOString(),
+        id:       o.id,
+        rrn:      o.rrn ?? '',
+        player:   o.playerId,
+        amt:      o.amount,
+        pend:     o.pendingAmount ?? 0,
+        sett:     o.settlementAmount ?? 0,
+        fee:      o.feeLauncx ?? 0,
+        stat:     o.status,
+        date:     o.createdAt.toISOString(),
         paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
         settledAt: o.settlementTime?.toISOString()      ?? '',
         expiresAt: o.trxExpirationTime?.toISOString()   ?? '',
@@ -365,7 +359,7 @@ console.log('export clientIds:', clientIds)
     })
   }
 
-  // (9) kirim file
+  // 9) kirim
   res.setHeader('Content-Disposition','attachment; filename=client-transactions.xlsx')
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   await wb.xlsx.write(res)

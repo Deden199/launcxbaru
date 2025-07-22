@@ -100,7 +100,9 @@ const buildParams = () => {
     params.date_from = sJak.toISOString()
     params.date_to   = eJak.toISOString()
   }
-
+ if (statusFilter) {
+   params.status = statusFilter   // kirim 1 status. (Kalau mau multi, kirim array/comma)
+ }
   if (selectedChild !== 'all') {
     params.clientId = selectedChild
   }
@@ -197,6 +199,7 @@ const buildParams = () => {
       t.playerId.toLowerCase().includes(search.toLowerCase())
     )
   )
+const totalTransaksiCount = filtered.length // <<< CHANGED
 
   if (loadingSummary) return <div className={styles.loader}>Loading summary…</div>
 
@@ -238,7 +241,7 @@ const buildParams = () => {
           </div>
           <div className={styles.card}>
             <ListChecks className={styles.cardIcon} /><h2>Transactions</h2>
-            <p>{totalTrans}</p>
+ <p>{totalTransaksiCount}</p>             {/* <<< CHANGED */}
           </div>
           <div className={`${styles.card} ${styles.pendingBalance}`}>
             <Clock className={styles.cardIcon} /><h2>Pending Settlement</h2>

@@ -158,7 +158,7 @@ export const transactionCallback = async (req: Request, res: Response) => {
     const gotSig = req.header('X-Signature') || req.header('x-signature') || ''
     logger.debug(`[Callback] gotSig=${gotSig} expected=${expectedSig}`)
     if (gotSig !== expectedSig) {
-      throw new Error('Invalid Hilogate signature')
+      throw new Error('Invalid H signature')
     }
    const paymentReceivedTime = new Date();
   // settlementTime ← full.updated_at (gateway’s completion timestamp)
@@ -326,7 +326,7 @@ await prisma.order.update({
 
   } catch (err: any) {
     logger.error('[Callback] Error processing transaction:', err)
-    if (rawBody && !err.message.includes('Invalid Hilogate signature')) {
+    if (rawBody && !err.message.includes('Invalid H signature')) {
       logger.debug('[Callback] rawBody on error:', rawBody)
     }
     return res
