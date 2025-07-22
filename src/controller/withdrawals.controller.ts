@@ -144,6 +144,7 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
         accountNumber: true,
         amount:        true,
         netAmount:     true,
+        pgFee:         true,
         withdrawFeePercent: true,
         withdrawFeeFlat:    true,
         status:        true,
@@ -165,6 +166,8 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     accountNumber: w.accountNumber,
     amount:        w.amount,
         netAmount:     w.netAmount,
+            pgFee:         w.pgFee ?? null,
+
     withdrawFeePercent: w.withdrawFeePercent,
     withdrawFeeFlat:    w.withdrawFeeFlat,
     status:        w.status,
@@ -286,9 +289,20 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
       completedAt = parseDateSafely(data.completed_at)
     }
 
-    // 6) Idempotent update + retry
         // 6) Idempotent update + retry
+        
     const updateData: any = { status: newStatus }
+        const feeRaw =
+      typeof data.fee === 'number'
+        ? data.fee
+        : typeof data.transfer_fee === 'number'
+          ? data.transfer_fee
+          : typeof data.admin_fee?.total_fee === 'number'
+            ? data.admin_fee.total_fee
+            : null
+    if (feeRaw != null) {
+      updateData.pgFee = feeRaw
+    }
     if (completedAt) {
       updateData.completedAt = completedAt
     } else if (data.last_updated_date) {

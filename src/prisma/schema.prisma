@@ -275,6 +275,8 @@ model WithdrawRequest {
   branchName        String?
   amount            Float
   netAmount         Float?
+  pgFee             Float?
+
   paymentGatewayId  String?
   isTransferProcess Boolean?           @default(false)
   status            DisbursementStatus @default(PENDING)

@@ -39,6 +39,8 @@ interface Withdrawal {
   amount: number
   withdrawFeePercent: number
   withdrawFeeFlat: number
+  pgFee?: number
+
   netAmount?: number
   paymentGatewayId?: string
   isTransferProcess: boolean
@@ -628,6 +630,8 @@ const filtered = mapped.filter(t => {
 
                   <th>Amount</th>
                   <th>Net Amount</th>
+                   <th>PG Fee</th>
+
                   <th>PG Trx ID</th>
                   <th>In Process</th>
                   <th>Status</th>
@@ -653,13 +657,13 @@ const filtered = mapped.filter(t => {
                       <td>{w.branchName ?? '-'}</td>
                       <td>{w.wallet}</td>
                       <td>
-                        {w.amount.toLocaleString('id-ID', {
+                        {(w.amount - (w.netAmount ?? 0)).toLocaleString('id-ID', {
                           style: 'currency',
                           currency: 'IDR'
                         })}
                       </td>
                       <td>
-                        {(w.amount - (w.netAmount ?? 0)).toLocaleString('id-ID', {
+                        {w.amount.toLocaleString('id-ID', {
                           style: 'currency',
                           currency: 'IDR'
                         })}
@@ -667,6 +671,15 @@ const filtered = mapped.filter(t => {
                       <td>
                         {w.netAmount != null
                           ? w.netAmount.toLocaleString('id-ID', {
+                              style: 'currency',
+                              currency: 'IDR'
+                            })
+                          : '-'}
+                      </td>
+
+                     <td>
+                        {w.pgFee != null
+                          ? w.pgFee.toLocaleString('id-ID', {
                               style: 'currency',
                               currency: 'IDR'
                             })
@@ -687,7 +700,7 @@ const filtered = mapped.filter(t => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={16} className={styles.noData}>
+                    <td colSpan={17} className={styles.noData}>
                       No withdrawals
                     </td>
                   </tr>

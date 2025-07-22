@@ -391,6 +391,8 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
         branchName:        true,
         amount:            true,
         netAmount:         true,
+        pgFee:            true,
+
         paymentGatewayId:  true,
         isTransferProcess: true,
         status:            true,
@@ -414,6 +416,7 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
       branchName:        w.branchName ?? null,
       amount:            w.amount,
       netAmount:         w.netAmount ?? null,
+      pgFee:            w.pgFee ?? null,
       withdrawFeePercent: w.withdrawFeePercent,
       withdrawFeeFlat:    w.withdrawFeeFlat,
       paymentGatewayId:  w.paymentGatewayId ?? null,
@@ -620,8 +623,19 @@ export async function exportDashboardAll(req: Request, res: Response) {
     const withdrawals = await prisma.withdrawRequest.findMany({
       where: whereWD,
       orderBy: { createdAt: 'desc' },
-      select: { createdAt: true, refId: true, bankName: true, accountNumber: true, amount: true, status: true }
-    })
+      select: {
+        createdAt:          true,
+        refId:              true,
+        bankName:           true,
+        accountNumber:      true,
+        amount:             true,
+        netAmount:          true,
+        withdrawFeePercent: true,
+        withdrawFeeFlat:    true,
+        pgFee:              true,
+        status:             true
+      }
+        })
 
     // Prepare workbook
     const wb = new ExcelJS.Workbook()
@@ -638,11 +652,20 @@ export async function exportDashboardAll(req: Request, res: Response) {
 
     // Sheet 2: Withdrawals
     const wdSheet = wb.addWorksheet('Withdrawals')
-    wdSheet.addRow(['Date','Ref ID','Bank','Account','Amount','Status'])
+    wdSheet.addRow(['Date','Ref ID','Bank','Account','Amount','Withdrawal Fee','PG Fee','Status'])
     withdrawals.forEach(w => {
+            const wdFee = w.netAmount != null
+        ? w.amount - w.netAmount
+        : ((w.withdrawFeePercent / 100) * w.amount) + w.withdrawFeeFlat
       wdSheet.addRow([
-        w.createdAt.toISOString(), w.refId, w.bankName, w.accountNumber, w.amount, w.status
-      ])
+        w.createdAt.toISOString(),
+        w.refId,
+        w.bankName,
+        w.accountNumber,
+        w.amount,
+        wdFee,
+        w.pgFee ?? 0,
+        w.status      ])
     })
 
     // Response headers
