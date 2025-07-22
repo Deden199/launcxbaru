@@ -15,6 +15,8 @@ import paymentService, {
 import { AuthRequest }                  from '../middleware/auth'
 import { prisma }               from '../core/prisma'
 import Decimal from 'decimal.js'
+import moment                    from 'moment-timezone'
+
 import { isJakartaWeekend } from '../util/time'
 
 
@@ -354,14 +356,20 @@ const receivedAmt = full.receive_amount
     if (receivedAmt == null) throw new Error('Missing received_amount')
 
       const paymentReceivedTime = full.payment_received_time
-  ? new Date(full.payment_received_time)  // e.g. "2025-07-03 22:47:28"
-  : null;
+  ? moment
+      .tz(full.payment_received_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Jakarta')
+      .toDate()  
+        : null;
 const settlementTime = full.settlement_time
-  ? new Date(full.settlement_time)        // e.g. "2025-07-04 15:00:00"
-  : null;
+  ? moment
+      .tz(full.settlement_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Jakarta')
+      .toDate()  
+        : null;
 const trxExpirationTime = full.trx_expiration_time
-  ? new Date(full.trx_expiration_time)    // e.g. "2025-07-03 23:16:12"
-  : null;
+  ? moment
+      .tz(full.trx_expiration_time, 'YYYY-MM-DD HH:mm:ss', 'Asia/Jakarta')
+      .toDate()  
+        : null;
 
 const cb = await prisma.transaction_callback.findFirst({
   where: { referenceId: orderId }
