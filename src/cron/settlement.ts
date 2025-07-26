@@ -1,13 +1,52 @@
 import cron from 'node-cron'
 import axios from 'axios'
+import https from 'https'
+import os from 'os'
+import pLimit from 'p-limit'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
 import crypto from 'crypto'
-import { getActiveProviders } from '../service/provider'
-import { HilogateConfig } from '../service/hilogateClient'
-import { OyConfig } from '../service/oyClient'
 import logger from '../logger'
 
+// ————————— CONFIG —————————
+const BATCH_SIZE = 500                          // jumlah order PAID diproses per batch
+const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
+const DB_CONCURRENCY   = 5                      // naikan jika DB mampu; pantau latensi
+const POLL_INTERVAL_MS = 15 * 60_000            // polling setiap 15 menit
+
+let lastCreatedAt: Date | null = null
+let lastId: string | null = null
+let running = true
+let isRunning = false
+
+// HTTPS agent: verify certificates di production
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: process.env.NODE_ENV === 'production',
+  keepAlive: true
+})
+
+// retry helper untuk deadlock/write‑conflict
+async function retryTx(fn: () => Promise<any>, attempts = 5, baseDelayMs = 100) {
+  let lastErr: any
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (err: any) {
+      lastErr = err
+      const msg = (err.message ?? '').toLowerCase()
+      if (i < attempts - 1 && msg.includes('write conflict')) {
+        const delay = baseDelayMs * 2 ** i
+        logger.warn(`[SettlementCron] retryTx attempt ${i + 1} failed (write conflict), retrying in ${delay}ms…`, err.message)
+        await new Promise(r => setTimeout(r, delay))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr
+}
+
+// signature helper
 function generateSignature(path: string, secretKey: string): string {
   return crypto
     .createHash('md5')
@@ -15,162 +54,164 @@ function generateSignature(path: string, secretKey: string): string {
     .digest('hex')
 }
 
-let cronStarted = false
-export function scheduleSettlementChecker() {
-  if (cronStarted) return
-  cronStarted = true
+// core worker: proses satu batch; return true jika masih ada data
+type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number }
+async function processBatchOnce(): Promise<boolean> {
+  // cursor-based pagination with tie-breaker
+  const where: any = {
+    status: 'PAID',
+    partnerClientId: { not: null },
+    ...(lastCreatedAt && lastId
+      ? { OR: [
+          { createdAt: { gt: lastCreatedAt } },
+          { createdAt: lastCreatedAt, id: { gt: lastId } }
+        ] }
+      : {})
+  }
 
-  // Jadwal setiap hari jam 17:00 Asia/Jakarta
-  cron.schedule(
-  '0 17 * * *',
-    async () => {
-      // (1) Ambil semua order PAID
-      const pendingOrders = await prisma.order.findMany({
-        where: { status: 'PAID', partnerClientId: { not: null } },
-        select: {
-          id: true,
-          partnerClientId: true,
-          pendingAmount: true,
-          channel: true,
-          subMerchantId: true
-        }   
-         })
+  const pendingOrders = await prisma.order.findMany({
+    where,
+    orderBy: [
+      { createdAt: 'asc' },
+      { id: 'asc' }
+    ],
+    take: BATCH_SIZE,
+    select: {
+      id: true,
+      partnerClientId: true,
+      pendingAmount: true,
+      channel: true,
+      createdAt: true,
+      subMerchant: { select: { credentials: true } }
+    }
+  })
 
-      // (2) Proses Hilogate
-      const hilogateOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'hilogate')
-      await Promise.all(hilogateOrders.map(async o => {
-        try {
-                    // Ambil merchant internal untuk order ini
-          if (!o.subMerchantId) return
-          const sub = await prisma.sub_merchant.findUnique({
-            where: { id: o.subMerchantId },
-            select: { credentials: true }
-          })
-          if (!sub) return
-          const cred = sub.credentials as {
-            merchantId: string
-            env?: 'sandbox' | 'live' | 'production'
-            secretKey: string
-          }
+  if (pendingOrders.length === 0) return false
 
-          logger.info(`[SettlementCron] ${o.id} uses sub-merchant ${o.subMerchantId}`)
-          const baseUrl = cred.env === 'live' ? 'https://app.hilogate.com' : 'https://app.hilogate.com'
-          const path = `/api/v1/transactions/${o.id}`
-          const sig  = generateSignature(path, cred.secretKey)
-          const resp = await axios.get(
-            `${config.api.hilogate.baseUrl}${path}`,
-            {
-              headers: {
-                'Content-Type':  'application/json',
-                'X-Merchant-ID': cred.merchantId,
-                'X-Signature':   sig
-              },
-              timeout: 5_000
-            }
-          )
+  // update cursor
+  const last = pendingOrders[pendingOrders.length - 1]
+  lastCreatedAt = last.createdAt
+  lastId = last.id
 
-          const tx       = resp.data.data
-          const settleSt = (tx.settlement_status ?? '').toUpperCase()
-          if (['ACTIVE','SETTLED','COMPLETED'].includes(settleSt)) {
-            const netAmt = o.pendingAmount ?? tx.net_amount
-            const settlementTime = tx.updated_at
-              ? new Date(tx.updated_at)
-              : undefined
-            const upd = await prisma.order.update({
-              where: { id: o.id, status: 'PAID', partnerClientId: { not: null } },
-              data: {
-                status: 'SETTLED',
-                settlementAmount: netAmt,
-                pendingAmount: null,
-                rrn: tx.rrn ?? 'N/A',
-                settlementStatus: settleSt || 'SETTLED',
-                settlementTime,
-                updatedAt: new Date()
-              }
-            })
-            await prisma.partnerClient.update({
-              where: { id: o.partnerClientId! },
-              data: { balance: { increment: netAmt } }
-            })
-          }
-        } catch {
-          // silenced
-        }
-      }))
+  logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`)
 
-      // (3) Proses OY QRIS
-      const oyOrders = pendingOrders.filter(o => o.channel.toLowerCase() === 'oy')
-      await Promise.all(oyOrders.map(async o => {
-        try {
-          // Check-status
-                    if (!o.subMerchantId) return
-          const sub = await prisma.sub_merchant.findUnique({
-            where: { id: o.subMerchantId },
-            select: { credentials: true }
-          })
-          if (!sub) return
-          const cred = sub.credentials as { merchantId: string; secretKey: string }
+  const httpLimit = pLimit(HTTP_CONCURRENCY)
+  const dbLimit   = pLimit(DB_CONCURRENCY)
 
-          logger.info(`[SettlementCron] ${o.id} uses sub-merchant ${o.subMerchantId}`)
-          const statusUrl     = 'https://partner.oyindonesia.com/api/payment-routing/check-status'
-          const statusBody = { partner_trx_id: o.id, send_callback: false }
-          const headers = {
-            'Content-Type':  'application/json',
-            'x-oy-username': cred.merchantId,
-            'x-api-key':     cred.secretKey
-          }
+  const txPromises = pendingOrders.map(o => httpLimit(async () => {
+    try {
+      const creds = o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined
+      if (!creds) return null
 
-          const statusResp = await axios.post(statusUrl, statusBody, { headers, timeout: 5_000 })
-          const s          = statusResp.data
-          const code       = s.status?.code
-          const settleSt   = (s.settlement_status ?? '').toUpperCase()
-          if (code !== '000' || settleSt === 'WAITING') return
+      let settlementResult: SettlementResult | null = null
+      const { merchantId, secretKey } = creds
 
-          // Detail-transaksi
-          const detailUrl    = 'https://partner.oyindonesia.com/api/v1/transaction'
-          const detailParams = { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }
-          const detailResp = await axios.get(detailUrl, {
-            params: detailParams,
-            headers,
-            timeout: 5_000
-          })
+      if (o.channel === 'hilogate') {
+        const path = `/api/v1/transactions/${o.id}`
+        const url = `${config.api.hilogate.baseUrl}${path}`
+        const sig = generateSignature(path, secretKey)
+        const resp = await axios.get(url, { headers: { 'X-Merchant-ID': merchantId, 'X-Signature': sig }, httpsAgent, timeout: 15_000 })
+        const tx = resp.data.data
+        const st = (tx.settlement_status || '').toUpperCase()
+        if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) return null
+        settlementResult = { netAmt: o.pendingAmount ?? tx.net_amount, rrn: tx.rrn || 'N/A', st, tmt: tx.updated_at ? new Date(tx.updated_at) : undefined }
 
-          const ds = detailResp.data.status
-          if (ds?.code !== '000') return
-          const d = detailResp.data.data
-          if (!d) return
+      } else if (o.channel === 'oy') {
+        const statusResp = await axios.post(
+          'https://partner.oyindonesia.com/api/payment-routing/check-status',
+          { partner_trx_id: o.id, send_callback: false },
+          { headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
+        )
+        const s = statusResp.data
+        const st = (s.settlement_status || '').toUpperCase()
+        if (s.status?.code !== '000' || st === 'WAITING') return null
 
-          const netAmt = d.settlement_amount
-          const fee    = d.admin_fee.total_fee
+        const detailResp = await axios.get(
+          'https://partner.oyindonesia.com/api/v1/transaction',
+          { params: { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }, headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
+        )
+        const d = detailResp.data.data
+        if (!d || detailResp.data.status?.code !== '000') return null
+        settlementResult = { netAmt: d.settlement_amount, fee: d.admin_fee.total_fee, rrn: s.trx_id, st, tmt: d.settlement_time ? new Date(d.settlement_time) : undefined }
+      }
 
-          const settlementTime = d.settlement_time
-            ? new Date(d.settlement_time)
-            : undefined
+      if (!settlementResult) return null
 
-          const upd = await prisma.order.updateMany({
-            where: { id: o.id, status: 'PAID', partnerClientId: { not: null } },
+      // idempotent update dengan updateMany + count check
+      return dbLimit(() => retryTx(() =>
+        prisma.$transaction(async tx => {
+          const upd = await tx.order.updateMany({
+            where: { id: o.id, status: 'PAID' },
             data: {
               status: 'SETTLED',
-              settlementAmount: netAmt,
+              settlementAmount: settlementResult.netAmt,
               pendingAmount: null,
-              fee3rdParty: fee,
-              rrn: s.trx_id,
-              settlementStatus: settleSt || 'SETTLED',
-              updatedAt: new Date(),
-              settlementTime
+              ...(settlementResult.fee && { fee3rdParty: settlementResult.fee }),
+              rrn: settlementResult.rrn,
+              settlementStatus: settlementResult.st,
+              settlementTime: settlementResult.tmt,
+              updatedAt: new Date()
             }
           })
           if (upd.count > 0) {
-            await prisma.partnerClient.update({
+            await tx.partnerClient.update({
               where: { id: o.partnerClientId! },
-              data: { balance: { increment: netAmt } }
+              data: { balance: { increment: settlementResult.netAmt } }
             })
           }
-        } catch {
-          // silenced
-        }
-      }))
-    },
-    { timezone: 'Asia/Jakarta' }
-  )
+        })
+      ))
+    } catch (err) {
+      logger.error(`[SettlementCron] order ${o.id} failed:`, err)
+      return null
+    }
+  }))
+
+  await Promise.allSettled(txPromises)
+  return true
+}
+
+// safe runner untuk mencegah overlap
+async function processBatchLoop() {
+  let batches = 0
+  const MAX_BATCHES = 10
+  while (running && batches < MAX_BATCHES && await processBatchOnce()) {
+    batches++
+    logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`)
+  }
+  if (batches === MAX_BATCHES) {
+    logger.info(`[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`)
+  }
+}
+
+async function safeRun() {
+  if (!running || isRunning) return
+  isRunning = true
+  try {
+    await processBatchLoop()
+  } finally {
+    isRunning = false
+  }
+}
+
+export function scheduleSettlementChecker() {
+  if (!running) return
+
+  process.on('SIGINT', () => { logger.info('[SettlementCron] SIGINT received, shutting down…'); running = false })
+  process.on('SIGTERM', () => { logger.info('[SettlementCron] SIGTERM received, shutting down…'); running = false })
+
+  ;(async () => {
+    // 1) Drain backlog di startup
+    await safeRun()
+    logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode')
+
+    // 2) Polling interval
+    setInterval(() => safeRun(), POLL_INTERVAL_MS)
+
+    // 3) Fallback cron harian 17:00 WIB
+    cron.schedule('0 17 * * *', () => {
+      logger.info('[SettlementCron] ▶️ Cron tick at ' + new Date().toISOString())
+      safeRun()
+    }, { timezone: 'Asia/Jakarta' })
+  })()
 }
