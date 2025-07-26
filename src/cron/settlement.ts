@@ -11,39 +11,42 @@ import logger from '../logger'
 // ————————— CONFIG —————————
 const BATCH_SIZE = 500                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
-const DB_CONCURRENCY   = 5                      // naikan jika DB mampu; pantau latensi
+const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari write conflict
 const POLL_INTERVAL_MS = 15 * 60_000            // polling setiap 15 menit
 
-let lastCreatedAt: Date | null = null
-let lastId: string | null = null
-let running = true
-let isRunning = false
+let lastCreatedAt: Date | null = null;
+let lastId: string | null = null;
+let running = true;
+let isRunning = false;
 
-// HTTPS agent: verify certificates di production
+// HTTPS agent dengan keep-alive
 const httpsAgent = new https.Agent({
   rejectUnauthorized: process.env.NODE_ENV === 'production',
   keepAlive: true
-})
+});
 
-// retry helper untuk deadlock/write‑conflict
+// retry helper untuk deadlock/write-conflict
 async function retryTx(fn: () => Promise<any>, attempts = 5, baseDelayMs = 100) {
-  let lastErr: any
+  let lastErr: any;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await fn()
+      return await fn();
     } catch (err: any) {
-      lastErr = err
-      const msg = (err.message ?? '').toLowerCase()
+      lastErr = err;
+      const msg = (err.message ?? '').toLowerCase();
       if (i < attempts - 1 && msg.includes('write conflict')) {
-        const delay = baseDelayMs * 2 ** i
-        logger.warn(`[SettlementCron] retryTx attempt ${i + 1} failed (write conflict), retrying in ${delay}ms…`, err.message)
-        await new Promise(r => setTimeout(r, delay))
-        continue
+        const delay = baseDelayMs * 2 ** i;
+        logger.warn(
+          `[SettlementCron] retryTx attempt ${i + 1} failed (write conflict), retrying in ${delay}ms…`,
+          err.message
+        );
+        await new Promise(r => setTimeout(r, delay));
+        continue;
       }
-      throw err
+      throw err;
     }
   }
-  throw lastErr
+  throw lastErr;
 }
 
 // signature helper
@@ -51,23 +54,26 @@ function generateSignature(path: string, secretKey: string): string {
   return crypto
     .createHash('md5')
     .update(path + secretKey, 'utf8')
-    .digest('hex')
+    .digest('hex');
 }
 
+type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number };
+
 // core worker: proses satu batch; return true jika masih ada data
-type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number }
 async function processBatchOnce(): Promise<boolean> {
-  // cursor-based pagination with tie-breaker
+  // cursor-based pagination
   const where: any = {
     status: 'PAID',
     partnerClientId: { not: null },
     ...(lastCreatedAt && lastId
-      ? { OR: [
-          { createdAt: { gt: lastCreatedAt } },
-          { createdAt: lastCreatedAt, id: { gt: lastId } }
-        ] }
+      ? {
+          OR: [
+            { createdAt: { gt: lastCreatedAt } },
+            { createdAt: lastCreatedAt, id: { gt: lastId } }
+          ]
+        }
       : {})
-  }
+  };
 
   const pendingOrders = await prisma.order.findMany({
     where,
@@ -84,134 +90,190 @@ async function processBatchOnce(): Promise<boolean> {
       createdAt: true,
       subMerchant: { select: { credentials: true } }
     }
-  })
+  });
 
-  if (pendingOrders.length === 0) return false
+  if (!pendingOrders.length) {
+    return false;
+  }
 
   // update cursor
-  const last = pendingOrders[pendingOrders.length - 1]
-  lastCreatedAt = last.createdAt
-  lastId = last.id
+  const last = pendingOrders[pendingOrders.length - 1];
+  lastCreatedAt = last.createdAt;
+  lastId = last.id;
 
-  logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`)
+  logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`);
 
-  const httpLimit = pLimit(HTTP_CONCURRENCY)
-  const dbLimit   = pLimit(DB_CONCURRENCY)
+  const httpLimit = pLimit(HTTP_CONCURRENCY);
+  const dbLimit = pLimit(DB_CONCURRENCY);
 
-  const txPromises = pendingOrders.map(o => httpLimit(async () => {
-    try {
-      const creds = o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined
-      if (!creds) return null
+  const txPromises = pendingOrders.map(o =>
+    httpLimit(async () => {
+      try {
+        const creds =
+          o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
+        if (!creds) {
+          return null;
+        }
 
-      let settlementResult: SettlementResult | null = null
-      const { merchantId, secretKey } = creds
+        let settlementResult: SettlementResult | null = null;
+        const { merchantId, secretKey } = creds;
 
-      if (o.channel === 'hilogate') {
-        const path = `/api/v1/transactions/${o.id}`
-        const url = `${config.api.hilogate.baseUrl}${path}`
-        const sig = generateSignature(path, secretKey)
-        const resp = await axios.get(url, { headers: { 'X-Merchant-ID': merchantId, 'X-Signature': sig }, httpsAgent, timeout: 15_000 })
-        const tx = resp.data.data
-        const st = (tx.settlement_status || '').toUpperCase()
-        if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) return null
-        settlementResult = { netAmt: o.pendingAmount ?? tx.net_amount, rrn: tx.rrn || 'N/A', st, tmt: tx.updated_at ? new Date(tx.updated_at) : undefined }
-
-      } else if (o.channel === 'oy') {
-        const statusResp = await axios.post(
-          'https://partner.oyindonesia.com/api/payment-routing/check-status',
-          { partner_trx_id: o.id, send_callback: false },
-          { headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
-        )
-        const s = statusResp.data
-        const st = (s.settlement_status || '').toUpperCase()
-        if (s.status?.code !== '000' || st === 'WAITING') return null
-
-        const detailResp = await axios.get(
-          'https://partner.oyindonesia.com/api/v1/transaction',
-          { params: { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' }, headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
-        )
-        const d = detailResp.data.data
-        if (!d || detailResp.data.status?.code !== '000') return null
-        settlementResult = { netAmt: d.settlement_amount, fee: d.admin_fee.total_fee, rrn: s.trx_id, st, tmt: d.settlement_time ? new Date(d.settlement_time) : undefined }
-      }
-
-      if (!settlementResult) return null
-
-      // idempotent update dengan updateMany + count check
-      return dbLimit(() => retryTx(() =>
-        prisma.$transaction(async tx => {
-          const upd = await tx.order.updateMany({
-            where: { id: o.id, status: 'PAID' },
-            data: {
-              status: 'SETTLED',
-              settlementAmount: settlementResult.netAmt,
-              pendingAmount: null,
-              ...(settlementResult.fee && { fee3rdParty: settlementResult.fee }),
-              rrn: settlementResult.rrn,
-              settlementStatus: settlementResult.st,
-              settlementTime: settlementResult.tmt,
-              updatedAt: new Date()
-            }
-          })
-          if (upd.count > 0) {
-            await tx.partnerClient.update({
-              where: { id: o.partnerClientId! },
-              data: { balance: { increment: settlementResult.netAmt } }
-            })
+        if (o.channel === 'hilogate') {
+          const path = `/api/v1/transactions/${o.id}`;
+          const url = `${config.api.hilogate.baseUrl}${path}`;
+          const sig = generateSignature(path, secretKey);
+          const resp = await axios.get(url, {
+            headers: { 'X-Merchant-ID': merchantId, 'X-Signature': sig },
+            httpsAgent,
+            timeout: 15_000
+          });
+          const tx = resp.data.data;
+          const st = (tx.settlement_status || '').toUpperCase();
+          if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) {
+            return null;
           }
-        })
-      ))
-    } catch (err) {
-      logger.error(`[SettlementCron] order ${o.id} failed:`, err)
-      return null
-    }
-  }))
+          settlementResult = {
+            netAmt: o.pendingAmount ?? tx.net_amount,
+            rrn: tx.rrn || 'N/A',
+            st,
+            tmt: tx.updated_at ? new Date(tx.updated_at) : undefined
+          };
+        } else if (o.channel === 'oy') {
+          const statusResp = await axios.post(
+            'https://partner.oyindonesia.com/api/payment-routing/check-status',
+            { partner_trx_id: o.id, send_callback: false },
+            { headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
+          );
+          const s = statusResp.data;
+          const st = (s.settlement_status || '').toUpperCase();
+          if (s.status?.code !== '000' || st === 'WAITING') {
+            return null;
+          }
 
-  await Promise.allSettled(txPromises)
-  return true
+          const detailResp = await axios.get(
+            'https://partner.oyindonesia.com/api/v1/transaction',
+            {
+              params: { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' },
+              headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey },
+              httpsAgent,
+              timeout: 15_000
+            }
+          );
+          const d = detailResp.data.data;
+          if (!d || detailResp.data.status?.code !== '000') {
+            return null;
+          }
+          settlementResult = {
+            netAmt: d.settlement_amount,
+            fee: d.admin_fee.total_fee,
+            rrn: s.trx_id,
+            st,
+            tmt: d.settlement_time ? new Date(d.settlement_time) : undefined
+          };
+        }
+
+        if (!settlementResult) {
+          return null;
+        }
+
+        // idempotent update dengan updateMany + count check
+        return dbLimit(() =>
+          retryTx(() =>
+            prisma.$transaction(async tx => {
+              const upd = await tx.order.updateMany({
+                where: { id: o.id, status: 'PAID' },
+                data: {
+                  status: 'SETTLED',
+                  settlementAmount: settlementResult.netAmt,
+                  pendingAmount: null,
+                  ...(settlementResult.fee && { fee3rdParty: settlementResult.fee }),
+                  rrn: settlementResult.rrn,
+                  settlementStatus: settlementResult.st,
+                  settlementTime: settlementResult.tmt,
+                  updatedAt: new Date()
+                }
+              });
+              if (upd.count > 0) {
+                await tx.partnerClient.update({
+                  where: { id: o.partnerClientId! },
+                  data: { balance: { increment: settlementResult.netAmt } }
+                });
+              }
+            })
+          )
+        );
+      } catch (err) {
+        logger.error(`[SettlementCron] order ${o.id} failed:`, err);
+        return null;
+      }
+    })
+  );
+
+  await Promise.allSettled(txPromises);
+  return true;
 }
 
-// safe runner untuk mencegah overlap
+// safe runner untuk batch loop dengan limit
 async function processBatchLoop() {
-  let batches = 0
-  const MAX_BATCHES = 10
-  while (running && batches < MAX_BATCHES && await processBatchOnce()) {
-    batches++
-    logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`)
+  let batches = 0;
+  const MAX_BATCHES = 10;
+  while (running && batches < MAX_BATCHES && (await processBatchOnce())) {
+    batches++;
+    logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`);
   }
   if (batches === MAX_BATCHES) {
-    logger.info(`[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`)
+    logger.info(
+      `[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`
+    );
   }
 }
 
+// wrapper untuk prevent overlap
 async function safeRun() {
-  if (!running || isRunning) return
-  isRunning = true
+  if (!running || isRunning) {
+    return;
+  }
+  isRunning = true;
   try {
-    await processBatchLoop()
+    await processBatchLoop();
   } finally {
-    isRunning = false
+    isRunning = false;
   }
 }
 
 export function scheduleSettlementChecker() {
-  if (!running) return
+  if (!running) {
+    return;
+  }
 
-  process.on('SIGINT', () => { logger.info('[SettlementCron] SIGINT received, shutting down…'); running = false })
-  process.on('SIGTERM', () => { logger.info('[SettlementCron] SIGTERM received, shutting down…'); running = false })
+  process.on('SIGINT', () => {
+    logger.info('[SettlementCron] SIGINT received, shutting down…');
+    running = false;
+  });
+  process.on('SIGTERM', () => {
+    logger.info('[SettlementCron] SIGTERM received, shutting down…');
+    running = false;
+  });
 
+  // Drain backlog di startup
   ;(async () => {
-    // 1) Drain backlog di startup
-    await safeRun()
-    logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode')
+    await safeRun();
+    logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode');
 
-    // 2) Polling interval
-    setInterval(() => safeRun(), POLL_INTERVAL_MS)
+    // Polling interval setiap 15 menit
+    setInterval(() => {
+      logger.info(`[SettlementCron] ⏱ Polling tick at ${new Date().toISOString()}`);
+      safeRun();
+    }, POLL_INTERVAL_MS);
 
-    // 3) Fallback cron harian 17:00 WIB
-    cron.schedule('0 17 * * *', () => {
-      logger.info('[SettlementCron] ▶️ Cron tick at ' + new Date().toISOString())
-      safeRun()
-    }, { timezone: 'Asia/Jakarta' })
-  })()
+    // Fallback cron harian 17:00 WIB
+    cron.schedule(
+      '0 17 * * *',
+      () => {
+        logger.info('[SettlementCron] ▶️ Daily cron tick at ' + new Date().toISOString());
+        safeRun();
+      },
+      { timezone: 'Asia/Jakarta' }
+    );
+  })();
 }
