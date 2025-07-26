@@ -12,7 +12,6 @@ import logger from '../logger'
 const BATCH_SIZE = 500                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari write conflict
-const POLL_INTERVAL_MS = 15 * 60_000            // polling setiap 15 menit
 
 let lastCreatedAt: Date | null = null;
 let lastId: string | null = null;
@@ -62,18 +61,23 @@ type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; f
 // core worker: proses satu batch; return true jika masih ada data
 async function processBatchOnce(): Promise<boolean> {
   // cursor-based pagination
-  const where: any = {
-    status: 'PAID',
-    partnerClientId: { not: null },
-    ...(lastCreatedAt && lastId
-      ? {
-          OR: [
-            { createdAt: { gt: lastCreatedAt } },
-            { createdAt: lastCreatedAt, id: { gt: lastId } }
-          ]
-        }
-      : {})
-  };
+const where: any = {
+  status: 'PAID',
+  partnerClientId: { not: null },
+
+  // hanya sampai cut‑off
+  ...(cutoffTime && { createdAt: { lte: cutoffTime } }),
+
+  ...(lastCreatedAt && lastId
+    ? {
+        OR: [
+          { createdAt: { gt: lastCreatedAt } },
+          { createdAt: lastCreatedAt, id: { gt: lastId } }
+        ]
+      }
+    : {})
+};
+
 
   const pendingOrders = await prisma.order.findMany({
     where,
@@ -240,38 +244,39 @@ async function safeRun() {
     isRunning = false;
   }
 }
+let cutoffTime: Date | null = null;
 
 export function scheduleSettlementChecker() {
-  if (!running) {
-    return;
-  }
+  if (!running) return;
 
-  process.on('SIGINT', () => {
-    logger.info('[SettlementCron] SIGINT received, shutting down…');
-    running = false;
-  });
-  process.on('SIGTERM', () => {
-    logger.info('[SettlementCron] SIGTERM received, shutting down…');
-    running = false;
-  });
+  process.on('SIGINT', () => { running = false; logger.info('[SettlementCron] SIGINT, shutdown…'); });
+  process.on('SIGTERM', () => { running = false; logger.info('[SettlementCron] SIGTERM, shutdown…'); });
 
-  // Drain backlog di startup
   ;(async () => {
+    // sekali jalan di startup (drain backlog terakhir, jika diperlukan)
     await safeRun();
     logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode');
 
-    // Polling interval setiap 15 menit
-    setInterval(() => {
-      logger.info(`[SettlementCron] ⏱ Polling tick at ${new Date().toISOString()}`);
-      safeRun();
-    }, POLL_INTERVAL_MS);
-
-    // Fallback cron harian 17:00 WIB
+    // 1) Harian jam 17:00: reset cursor & cut‑off
     cron.schedule(
-      '0 17-19 * * *',
-      () => {
-        logger.info('[SettlementCron] ▶️ Daily cron tick at ' + new Date().toISOString());
-        safeRun();
+      '0 17 * * *',
+      async () => {
+        cutoffTime    = new Date();
+        lastCreatedAt = null;
+        lastId        = null;
+        logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
+        await safeRun();
+      },
+      { timezone: 'Asia/Jakarta' }
+    );
+
+    // 2) Polling tiap 5 menit 17:00–20:00
+    cron.schedule(
+      '*/5 17-20 * * *',
+      async () => {
+        if (!running) return;
+        logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
+        await safeRun();
       },
       { timezone: 'Asia/Jakarta' }
     );

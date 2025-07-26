@@ -60,7 +60,7 @@ type Tx = {
   feeLauncx: number
   feePg: number
   netSettle: number
-  status: '' | 'SETTLED' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
+  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
   settlementStatus: string
   channel:          string  // ← baru
     paymentReceivedTime?: string
@@ -74,8 +74,12 @@ type SubBalance = { id: string; name: string; provider: string; balance: number 
 
 type TransactionsResponse = {
   transactions: RawTx[]
+  total: number
   totalPending: number
+  ordersActiveBalance: number
   totalMerchantBalance: number
+   totalPaid: number             // ← tambahan
+
 }
 
 export default function DashboardPage() {
@@ -96,10 +100,15 @@ const [currentBalance, setCurrentBalance] = useState(0)
   const [from, setFrom]   = useState(() => toJakartaDate(new Date()))
   const [to, setTo]       = useState(() => toJakartaDate(new Date()))
   const [search, setSearch] = useState('')
-const [statusFilter, setStatusFilter] = useState<'PAID' | string>('PAID')
+const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('PAID')
+
+
+  const [totalPages, setTotalPages] = useState(1)
 
   // Summary cards state
   const [loadingSummary, setLoadingSummary] = useState(true)
+ const [totalClientBalance, setTotalClientBalance] = useState(0)
+
   const [activeBalance, setActiveBalance]     = useState(0)
   const [totalPending, setTotalPending]       = useState(0)
   const [loadingProfit, setLoadingProfit]     = useState(true)
@@ -114,7 +123,8 @@ const [statusFilter, setStatusFilter] = useState<'PAID' | string>('PAID')
   const [loadingTx, setLoadingTx] = useState(true)
   const [txs, setTxs]             = useState<Tx[]>([])
   const [totalTrans, setTotalTrans] = useState(0)
-
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(10)
   // Date helpers
   function toJakartaDate(d: Date): string {
     return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
@@ -175,6 +185,8 @@ function buildParams() {
     if (statusFilter !== 'all') {
     p.status = statusFilter
   }
+    p.page  = page
+  p.limit = perPage
   console.log('buildParams →', p)
   return p
 }
@@ -196,6 +208,8 @@ const fetchSummary = async () => {
     const { data } = await api.get<{
       subBalances:        SubBalance[]
       activeBalance?:     number
+         totalClientBalance: number    // ← Ubah response type
+
       total_withdrawal?:  number
       pending_withdrawal?:number
     }>('/admin/merchants/dashboard/summary', { params })
@@ -207,7 +221,7 @@ const fetchSummary = async () => {
       setSelectedSub(current.id)
       setCurrentBalance(current.balance)
     }
-        if (data.activeBalance       !== undefined) setActiveBalance(data.activeBalance)
+if (data.totalClientBalance !== undefined) setTotalClientBalance(data.totalClientBalance)  // ← Tambahkan ini
     if (data.pending_withdrawal  !== undefined) setTotalPending(data.pending_withdrawal)
 
   } catch (e) {
@@ -277,9 +291,12 @@ async function fetchWithdrawals() {
         { params }
       )
 
-      setTotalPending(data.totalPending)
-      setActiveBalance(data.totalMerchantBalance)
 
+          setTotalPending(data.totalPending)
+    setActiveBalance(data.ordersActiveBalance)
+    setTotalPages(Math.max(1, Math.ceil(data.total / perPage)))
+    // pakai totalPaid dari API:
+    setTotalTrans(data.totalPaid)
       // LANGSUNG PAKAI netSettle dari server
 // Daftar status yang valid sesuai Tx['status']
 const VALID_STATUSES: Tx['status'][] = [
@@ -318,16 +335,10 @@ const mapped: Tx[] = data.transactions.map(o => {
 });
 
 const filtered = mapped.filter(t => {
-  // (1) Cek status dulu
-  if (statusFilter !== 'all' && t.status !== statusFilter) {
-    return false;
-  }
-
+ 
   // (2) Kalau search kosong, tampilkan semua yang lolos status
   const q = search.trim().toLowerCase();
-  if (!q) {
-    return true;
-  }
+    if (!q) return true;
 
   // (3) Baru cek keyword di id, rrn, atau playerId
   return (
@@ -338,8 +349,8 @@ const filtered = mapped.filter(t => {
 });
 
 
-      setTxs(filtered)
-      setTotalTrans(filtered.length)
+   setTxs(filtered)
+
     } catch (e) {
       console.error('fetchTransactions error', e)
     } finally {
@@ -357,7 +368,7 @@ const filtered = mapped.filter(t => {
   }, [range, from, to, selectedMerchant])
   useEffect(() => {
     fetchTransactions()
-  }, [range, from, to, selectedMerchant, search, statusFilter])
+  }, [range, from, to, selectedMerchant, search, statusFilter, page, perPage])
 
   if (loadingSummary) {
     return <div className={styles.loader}>Loading summary…</div>
@@ -415,7 +426,7 @@ const filtered = mapped.filter(t => {
    <div className={`${styles.card} ${styles.activeBalance}`}>
       <Layers className={styles.cardIcon} />
       <h2>Total Client Balance</h2>
-      <p>{activeBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
+    <p>{totalClientBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
     </div>
 
     {/* <div className={`${styles.card} ${styles.pendingBalance}`}>
@@ -424,8 +435,8 @@ const filtered = mapped.filter(t => {
 
    <div className={`${styles.card} ${styles.pendingBalance}`}>
       <ListChecks className={styles.cardIcon} />
-      <h2>Jumlah Transaksi</h2>
-      <p>{totalTrans}</p>
+      <h2>Total Nominal Paid</h2>
+      <p>{totalTrans.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
     </div>
    <div className={`${styles.card} ${styles.pendingBalance}`}>
       <Layers className={styles.cardIcon} />
@@ -500,7 +511,7 @@ const filtered = mapped.filter(t => {
   onChange={e => setStatusFilter(e.target.value)}
 >
   <option value="all">All Status</option>
-  <option value="SETTLED">SUCCESS</option>
+  <option value="SUCCESS">SUCCESS</option>
   <option value="PAID">PAID</option>
   <option value="PENDING">PENDING</option>
   <option value="EXPIRED">EXPIRED</option>
@@ -605,7 +616,34 @@ const filtered = mapped.filter(t => {
                 </tbody>
               </table>
             </div>
-          )}
+)}
+<div className={styles.pagination}>
+              <div>
+                Rows
+                <select
+                  value={perPage}
+                  onChange={e => {
+                    setPerPage(+e.target.value)
+                    setPage(1)
+                  }}
+                >
+                  {[10, 20, 50].map(n => (
+                    <option key={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                  ‹
+                </button>
+                <span>{page}/{totalPages}</span>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  ›
+                </button>
+              </div>
+            </div>
+
+
         </section>
 
 

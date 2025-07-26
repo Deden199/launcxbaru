@@ -110,6 +110,32 @@
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: #ffffff;
 }
+/* pagination controls */
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  margin-top: 1rem;
+}
+.pagination button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.25rem;
+}
+.pagination button:disabled {
+  color: #9ca3af;
+  cursor: default;
+}
+.pagination select {
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
 .activeBalance h2,
 .activeBalance p {
   color: #ffffff;

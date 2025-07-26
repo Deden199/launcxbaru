@@ -166,6 +166,12 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
               <button onClick={() => router.push(`/admin/clients/${c.id}`)}>
                 Manage
               </button>
+               <button onClick={() => router.push(`/admin/clients/${c.id}/dashboard`)}>
+                Dashboard
+              </button>
+               <button onClick={() => router.push(`/admin/clients/${c.id}/withdraw`)}>
+                Withdrawals
+              </button>
             </div>
           </div>
         ))}
@@ -191,7 +197,11 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
   padding: 0 1rem;
   background: var(--clr-bg);
 }
+.container .card-footer button + button {
+  margin-left: 0.5rem;
+    margin-top: 0.5rem;
 
+}
 .container .page-title {
   font-size: 2.25rem;
   font-weight: 800;

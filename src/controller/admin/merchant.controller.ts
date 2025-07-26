@@ -267,6 +267,10 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         return res.status(400).json({ error: 'Invalid status' })
       }
       statusList = arr.map(String)
+            if (statusList.includes('SUCCESS') && !statusList.includes('SETTLED')) {
+        statusList.push('SETTLED')
+      }
+      statusList = Array.from(new Set(statusList))
     }
 
     // (2) build where untuk orders
@@ -295,7 +299,12 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } }
     })
     const ordersActiveBalance = settleAgg._sum.settlementAmount ?? 0
-
+    // (4.1) total paid (SUM(amount) status = 'PAID' tanpa limit)
+    const paidAgg = await prisma.order.aggregate({
+      _sum: { amount: true },
+      where: { ...whereOrders, status: 'PAID' }
+    })
+    const totalPaid = paidAgg._sum.amount ?? 0
     // (5) merchant total balance
     const pcWhere: any = {}
     if (partnerClientId && partnerClientId !== 'all') {
@@ -368,10 +377,11 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       }
     })
 
-    // (8) kembalikan JSON
+   // (8) kembalikan JSON, sekarang dengan totalPaid terpisah
     return res.json({
-      transactions,
-      total,
+     transactions,
+      total,                  // jumlah row (untuk paging)
+      totalPaid,              // total nominal semua transaksi PAID
       totalPending,
       ordersActiveBalance,
       totalMerchantBalance
@@ -622,15 +632,17 @@ export async function exportDashboardAll(req: Request, res: Response) {
     if (dateFrom) createdAtFilter.gte = dateFrom
     if (dateTo)   createdAtFilter.lte = dateTo
 
-    // Build order filter
-        const allowedStatuses = [
+    // ▶ REVISI #1: Izinkan semua kemungkinan status
+    const allowedStatuses = [
       'SUCCESS',
       'DONE',
       'SETTLED',
       'PAID',
       'PENDING',
-      'EXPIRED'
+      'EXPIRED',
     ] as const
+
+    // ▶ REVISI #2: Bangun statusList dan tambahkan mapping khusus
     let statusList: string[] | undefined
     if (status !== undefined) {
       const arr = Array.isArray(status) ? status : [status]
@@ -638,15 +650,29 @@ export async function exportDashboardAll(req: Request, res: Response) {
         return res.status(400).json({ error: 'Invalid status' })
       }
       statusList = arr.map(String)
+
+      // ▶ REVISI: kalau user pilih 'SUCCESS', sertakan 'SETTLED'
+      if (statusList.includes('SUCCESS') && !statusList.includes('SETTLED')) {
+        statusList.push('SETTLED')
+      }
+      // ▶ REVISI: kalau user pilih 'PAID', sertakan 'DONE'
+      if (statusList.includes('PAID') && !statusList.includes('DONE')) {
+        statusList.push('DONE')
+      }
+
+      // hilangkan duplikat
+      statusList = Array.from(new Set(statusList))
     }
+
+    // ▶ REVISI #3: Terapkan ke whereOrders
     const whereOrders: any = {
-      ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
+      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
     }
-        if (statusList) {
-      whereOrders.status = { in: statusList }
+    if (statusList) {
+      whereOrders.status = { in: statusList }   // ▶ REVISI
     } else {
-      // default only settled or successful/pending/expired but not withdrawals
-      whereOrders.status = { in: ['SUCCESS','DONE','SETTLED','PAID'] }
+      // ▶ REVISI: default mencakup SEMUA status
+      whereOrders.status = { in: allowedStatuses }
     }
     if (partnerClientId && partnerClientId !== 'all') {
       whereOrders.partnerClientId = partnerClientId
@@ -663,7 +689,10 @@ export async function exportDashboardAll(req: Request, res: Response) {
 
     // Sheet 1: Transactions
     const txSheet = wb.addWorksheet('Transactions')
-    txSheet.addRow(['Date','TRX ID','RRN','Player ID','Channel','Amount','Fee Launcx','Fee PG','Net Amount','Status']).commit()
+    txSheet.addRow([
+      'Date','TRX ID','RRN','Player ID','Channel',
+      'Amount','Fee Launcx','Fee PG','Net Amount','Status'
+    ]).commit()
 
     let skipOrders = 0
     for (;;) {
@@ -671,9 +700,17 @@ export async function exportDashboardAll(req: Request, res: Response) {
         where: whereOrders,
         orderBy: { createdAt: 'desc' },
         select: {
-          createdAt: true, id: true, rrn: true, playerId: true, channel: true,
-          amount: true, feeLauncx: true, fee3rdParty: true,
-          pendingAmount: true, settlementAmount: true, status: true
+          createdAt: true,
+          id: true,
+          rrn: true,
+          playerId: true,
+          channel: true,
+          amount: true,
+          feeLauncx: true,
+          fee3rdParty: true,
+          pendingAmount: true,
+          settlementAmount: true,
+          status: true
         },
         take: CHUNK_SIZE,
         skip: skipOrders,
@@ -682,11 +719,19 @@ export async function exportDashboardAll(req: Request, res: Response) {
       for (const o of ordersChunk) {
         const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
         txSheet.addRow([
-          o.createdAt.toISOString(), o.id, o.rrn, o.playerId, o.channel,
-          o.amount, o.feeLauncx, o.fee3rdParty, net, o.status
+          o.createdAt.toISOString(),
+          o.id,
+          o.rrn,
+          o.playerId,
+          o.channel,
+          o.amount,
+          o.feeLauncx,
+          o.fee3rdParty,
+          net,
+          o.status
         ]).commit()
       }
-          skipOrders += ordersChunk.length
+      skipOrders += ordersChunk.length
       if (ordersChunk.length < CHUNK_SIZE) break
     }
 
@@ -695,7 +740,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
     if (partnerClientId && partnerClientId !== 'all') {
       whereWD.partnerClientId = partnerClientId
     }
-    if (dateFrom||dateTo) {
+    if (dateFrom || dateTo) {
       whereWD.createdAt = createdAtFilter
     }
 
@@ -704,25 +749,25 @@ export async function exportDashboardAll(req: Request, res: Response) {
       where: whereWD,
       orderBy: { createdAt: 'desc' },
       select: {
-        createdAt:          true,
-        refId:              true,
-        bankName:           true,
-        accountNumber:      true,
-        amount:             true,
-        netAmount:          true,
+        createdAt: true,
+        refId: true,
+        bankName: true,
+        accountNumber: true,
+        amount: true,
+        netAmount: true,
         withdrawFeePercent: true,
-        withdrawFeeFlat:    true,
-        pgFee:              true,
-        status:             true
+        withdrawFeeFlat: true,
+        pgFee: true,
+        status: true
       }
-        })
-
-    // Prepare workbook
-
+    })
 
     // Sheet 2: Withdrawals
     const wdSheet = wb.addWorksheet('Withdrawals')
-    wdSheet.addRow(['Date','Ref ID','Bank','Account','Amount','Withdrawal Fee','PG Fee','Status']).commit()
+    wdSheet.addRow([
+      'Date','Ref ID','Bank','Account',
+      'Amount','Withdrawal Fee','PG Fee','Status'
+    ]).commit()
 
     let skipWD = 0
     for (;;) {
@@ -730,16 +775,16 @@ export async function exportDashboardAll(req: Request, res: Response) {
         where: whereWD,
         orderBy: { createdAt: 'desc' },
         select: {
-          createdAt:          true,
-          refId:              true,
-          bankName:           true,
-          accountNumber:      true,
-          amount:             true,
-          netAmount:          true,
+          createdAt: true,
+          refId: true,
+          bankName: true,
+          accountNumber: true,
+          amount: true,
+          netAmount: true,
           withdrawFeePercent: true,
-          withdrawFeeFlat:    true,
-          pgFee:              true,
-          status:             true
+          withdrawFeeFlat: true,
+          pgFee: true,
+          status: true
         },
         take: CHUNK_SIZE,
         skip: skipWD,
@@ -748,7 +793,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
       for (const w of withdrawalsChunk) {
         const wdFee = w.netAmount != null
           ? w.amount - w.netAmount
-          : ((w.withdrawFeePercent / 100) * w.amount) + w.withdrawFeeFlat
+          : (w.withdrawFeePercent / 100) * w.amount + w.withdrawFeeFlat
         wdSheet.addRow([
           w.createdAt.toISOString(),
           w.refId,
@@ -760,11 +805,10 @@ export async function exportDashboardAll(req: Request, res: Response) {
           w.status
         ]).commit()
       }
-
-    // Response headers
       skipWD += withdrawalsChunk.length
       if (withdrawalsChunk.length < CHUNK_SIZE) break
     }
+
     await wb.commit()
     res.end()
   } catch (err: any) {

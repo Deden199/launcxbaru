@@ -1,9 +1,10 @@
 // src/controllers/admin/client.controller.ts
 import { Request, Response } from 'express'
-import { PrismaClient } from '@prisma/client'
 import crypto from 'crypto'
 import bcrypt from 'bcrypt'
 import { AuthRequest } from '../../middleware/auth'
+import { parseDateSafely } from '../../util/time'
+import { PrismaClient, DisbursementStatus } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -275,4 +276,248 @@ export const listProviders = async (_: Request, res: Response) => {
     select: { id: true, name: true, credentials: true }
   })
   res.json(providers)
+}
+
+const DASHBOARD_STATUSES = [
+  'SUCCESS',
+  'DONE',
+  'SETTLED',
+  'PAID',
+  'PENDING',
+  'EXPIRED',
+]
+
+export const getClientDashboardAdmin = async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params
+
+    const pc = await prisma.partnerClient.findUnique({
+      where: { id: clientId },
+      select: {
+        id: true,
+        name: true,
+        balance: true,
+        children: {
+          select: { id: true, name: true, balance: true }
+        }
+      }
+    })
+    if (!pc) return res.status(404).json({ error: 'Client tidak ditemukan' })
+
+    const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined
+    const dateTo   = req.query.date_to   ? new Date(String(req.query.date_to))   : undefined
+    const createdAtFilter: { gte?: Date; lte?: Date } = {}
+    if (dateFrom) createdAtFilter.gte = dateFrom
+    if (dateTo)   createdAtFilter.lte = dateTo
+
+    const rawStatus = (req.query as any).status
+    const allowed = DASHBOARD_STATUSES as readonly string[]
+    let statuses: string[] = []
+    if (Array.isArray(rawStatus)) {
+      statuses = rawStatus.map(String).filter(s => allowed.includes(s))
+    } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
+      statuses = rawStatus.split(',').map(s => s.trim()).filter(s => allowed.includes(s))
+    }
+    if (statuses.length === 0) statuses = [...allowed]
+
+    let ids: string[]
+    if (typeof req.query.clientId === 'string' && req.query.clientId !== 'all' && req.query.clientId.trim()) {
+      ids = [req.query.clientId]
+    } else if (pc.children.length > 0) {
+      ids = [pc.id, ...pc.children.map(c => c.id)]
+    } else {
+      ids = [pc.id]
+    }
+
+    const pendingAgg = await prisma.order.aggregate({
+      _sum: { pendingAmount: true },
+      where: {
+        partnerClientId: { in: ids },
+        status: 'PAID',
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+      }
+    })
+    const totalPending = pendingAgg._sum.pendingAmount ?? 0
+
+    const parentBal = ids.includes(pc.id) ? pc.balance ?? 0 : 0
+    const childrenBal = pc.children.filter(c => ids.includes(c.id)).reduce((sum, c) => sum + (c.balance ?? 0), 0)
+    const totalActive = parentBal + childrenBal
+
+    const orders = await prisma.order.findMany({
+      where: {
+        partnerClientId: { in: ids },
+        status: { in: DASHBOARD_STATUSES },
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        qrPayload: true,
+        rrn: true,
+        playerId: true,
+        amount: true,
+        feeLauncx: true,
+        settlementAmount: true,
+        pendingAmount: true,
+        status: true,
+        settlementStatus: true,
+        createdAt: true,
+        paymentReceivedTime: true,
+        settlementTime: true,
+        trxExpirationTime: true,
+      }
+    })
+
+    const totalAgg = await prisma.order.aggregate({
+      _sum: { amount: true },
+      where: {
+        partnerClientId: { in: ids },
+        status: { in: statuses },
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+      }
+    })
+    const totalTransaksi = totalAgg._sum.amount ?? 0
+
+    const transactions = orders.map(o => {
+      const netSettle = o.status === 'PAID' ? (o.pendingAmount ?? 0) : (o.settlementAmount ?? 0)
+      return {
+        id: o.id,
+        date: o.createdAt.toISOString(),
+        reference: o.qrPayload ?? '',
+        rrn: o.rrn ?? '',
+        playerId: o.playerId,
+        amount: o.amount,
+        feeLauncx: o.feeLauncx ?? 0,
+        netSettle,
+        settlementStatus: o.settlementStatus ?? '',
+        status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+        paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
+        settlementTime: o.settlementTime?.toISOString() ?? '',
+        trxExpirationTime: o.trxExpirationTime?.toISOString() ?? '',
+      }
+    })
+
+    return res.json({
+      balance: totalActive,
+      totalPending,
+      totalTransaksi,
+      transactions,
+      children: pc.children,
+    })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Internal Server Error' })
+  }
+}
+
+export const getClientWithdrawalsAdmin = async (req: AuthRequest, res: Response) => {
+  const { clientId } = req.params
+  const { status, date_from, date_to, page = '1', limit = '20' } = req.query
+
+  const fromDate = parseDateSafely(date_from)
+  const toDate   = parseDateSafely(date_to)
+
+  const where: any = { partnerClientId: clientId }
+  if (status) where.status = status as string
+  if (fromDate || toDate) {
+    where.createdAt = {}
+    if (fromDate) where.createdAt.gte = fromDate
+    if (toDate)   where.createdAt.lte = toDate
+  }
+
+  const pageNum  = Math.max(1, parseInt(page as string, 10))
+  const pageSize = Math.min(100, parseInt(limit as string, 10))
+
+  const [rows, total] = await Promise.all([
+    prisma.withdrawRequest.findMany({
+      where,
+      skip:  (pageNum - 1) * pageSize,
+      take:  pageSize,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        refId: true,
+        bankName: true,
+        accountName: true,
+        accountNumber: true,
+        amount: true,
+        netAmount: true,
+        pgFee: true,
+        withdrawFeePercent: true,
+        withdrawFeeFlat: true,
+        status: true,
+        createdAt: true,
+        completedAt: true,
+        subMerchant: { select: { name: true, provider: true } },
+      },
+    }),
+    prisma.withdrawRequest.count({ where }),
+  ])
+
+  const data = rows.map(w => ({
+    refId: w.refId,
+    bankName: w.bankName,
+    accountName: w.accountName,
+    accountNumber: w.accountNumber,
+    amount: w.amount,
+    netAmount: w.netAmount,
+    pgFee: w.pgFee ?? null,
+    withdrawFeePercent: w.withdrawFeePercent,
+    withdrawFeeFlat: w.withdrawFeeFlat,
+    status: w.status,
+    createdAt: w.createdAt.toISOString(),
+    completedAt: w.completedAt?.toISOString() ?? null,
+    wallet: w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+  }))
+
+  res.json({ data, total })
+}
+
+// 7) Get list of sub-wallet balances for a client
+export const getClientSubWallets = async (req: Request, res: Response) => {
+  const { clientId } = req.params as { clientId: string }
+
+  const client = await prisma.partnerClient.findUnique({
+    where: { id: clientId },
+    select: { defaultProvider: true },
+  })
+  if (!client) return res.status(404).json({ error: 'Client not found' })
+
+  const provider = client.defaultProvider || 'hilogate'
+
+  const subs = await prisma.sub_merchant.findMany({
+    where: { provider },
+    select: { id: true, name: true, provider: true },
+  })
+
+  const result = await Promise.all(
+    subs.map(async (s) => {
+      const inAgg = await prisma.order.aggregate({
+        _sum: { settlementAmount: true },
+        where: {
+          subMerchantId: s.id,
+          partnerClientId: clientId,
+          settlementTime: { not: null },
+        },
+      })
+      const totalIn = inAgg._sum.settlementAmount ?? 0
+
+      const outAgg = await prisma.withdrawRequest.aggregate({
+        _sum: { amount: true },
+        where: {
+          subMerchantId: s.id,
+          partnerClientId: clientId,
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] },
+        },
+      })
+      const totalOut = outAgg._sum.amount ?? 0
+
+      return {
+        id: s.id,
+        name: s.name,
+        provider: s.provider,
+        balance: totalIn - totalOut,
+      }
+    })
+  )
+
+  res.json(result)
 }

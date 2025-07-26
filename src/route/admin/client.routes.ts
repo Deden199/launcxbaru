@@ -19,6 +19,9 @@ router.put('/:clientId',       ctrl.updateClient)
 
 // 2) Dropdown PG‐Providers (jika masih diperlukan untuk referensi)
 router.get('/providers',       ctrl.listProviders)
+router.get('/:clientId/dashboard', ctrl.getClientDashboardAdmin)
+router.get('/:clientId/withdrawals', ctrl.getClientWithdrawalsAdmin)
+router.get('/:clientId/subwallets',  ctrl.getClientSubWallets)
 
 // 3) [Dihapus] Koneksi PG per client
 // Feature deprecated: fee kini ditetapkan global di PartnerClient
