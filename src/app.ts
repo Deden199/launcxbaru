@@ -5,7 +5,7 @@ import cors from 'cors';
 import cron from 'node-cron';
 import { errorHandler } from './middleware/errorHandler'
 
-import { scheduleSettlementChecker } from './cron/settlement'
+// import { scheduleSettlementChecker } from './cron/settlement'
 import subMerchantRoutes from './route/admin/subMerchant.routes';
 import pgProviderRoutes from './route/admin/pgProvider.routes';
 import adminMerchantRoutes from './route/admin/merchant.routes';
@@ -141,7 +141,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 /* ========== 6. SCHEDULED TASKS ========== */
-scheduleSettlementChecker()
+// scheduleSettlementChecker()
 // Start server
 app.use(errorHandler)
 

@@ -237,7 +237,10 @@ export const regenerateApiKey = async (_req: Request, res: Response) => {
 export async function getDashboardTransactions(req: Request, res: Response) {
   try {
     // (1) parse tanggal & merchant filter
-    const { date_from, date_to, partnerClientId } = req.query as any
+    const { date_from, date_to, partnerClientId, page = '1', limit = '50' } =
+      req.query as any
+    const pageNum = Math.max(1, parseInt(page as string, 10))
+    const pageSize = Math.min(100, parseInt(limit as string, 10))
     const dateFrom = date_from ? new Date(String(date_from)) : undefined
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined
     const createdAtFilter: any = {}
@@ -288,29 +291,33 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       .reduce((sum, pc) => sum + pc.balance, 0)
 
     // (6) ambil detail orders, termasuk ketiga timestamp
-    const orders = await prisma.order.findMany({
-      where: whereOrders,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id:                   true,
-        createdAt:            true,
-        playerId:             true,
-        qrPayload:            true,
-        rrn:                  true,
-        amount:               true,
-        feeLauncx:            true,
-        fee3rdParty:          true,
-        pendingAmount:        true,
-        settlementAmount:     true,
-        status:               true,
-        settlementStatus:     true,
-        channel:              true,
-        paymentReceivedTime:  true,  // ← baru
-        settlementTime:       true,  // ← baru
-        trxExpirationTime:    true,  // ← barus
-      }
-    })
-
+      const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where: whereOrders,
+        orderBy: { createdAt: 'desc' },
+        skip:  (pageNum - 1) * pageSize,
+        take:  pageSize,
+        select: {
+          id:                   true,
+          createdAt:            true,
+          playerId:             true,
+          qrPayload:            true,
+          rrn:                  true,
+          amount:               true,
+          feeLauncx:            true,
+          fee3rdParty:          true,
+          pendingAmount:        true,
+          settlementAmount:     true,
+          status:               true,
+          settlementStatus:     true,
+          channel:              true,
+          paymentReceivedTime:  true,  // ← baru
+          settlementTime:       true,  // ← baru
+          trxExpirationTime:    true,  // ← barus
+        }
+      }),
+      prisma.order.count({ where: whereOrders })
+    ])
     // (7) map ke format FE, include netSettle + timestamp ISO
     const transactions = orders.map(o => {
       const pend = o.pendingAmount    ?? 0
@@ -346,6 +353,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     // (8) kembalikan JSON
     return res.json({
       transactions,
+      total,
       totalPending,
       ordersActiveBalance,
       totalMerchantBalance
@@ -360,8 +368,10 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 export async function getDashboardWithdrawals(req: Request, res: Response) {
   try {
     // (1) Parse filter tanggal & partnerClientId
-    const { date_from, date_to, partnerClientId } = req.query as any;
-    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
+    const { date_from, date_to, partnerClientId, page = '1', limit = '50' } =
+      req.query as any;
+    const pageNum = Math.max(1, parseInt(page as string, 10));
+    const pageSize = Math.min(100, parseInt(limit as string, 10));    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined;
     const createdAtFilter: any = {};
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
@@ -377,33 +387,37 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
     }
  
     // (3) Ambil data dari DB, select semua kolom yang diperlukan
-    const rows = await prisma.withdrawRequest.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id:                true,
-        refId:             true,
-        accountName:       true,
-        accountNameAlias:  true,
-        accountNumber:     true,
-        bankCode:          true,
-        bankName:          true,
-        branchName:        true,
-        amount:            true,
-        netAmount:         true,
-        pgFee:            true,
+   const [rows, total] = await Promise.all([
+      prisma.withdrawRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id:                true,
+          refId:             true,
+          accountName:       true,
+          accountNameAlias:  true,
+          accountNumber:     true,
+          bankCode:          true,
+          bankName:          true,
+          branchName:        true,
+          amount:            true,
+          netAmount:         true,
+          pgFee:            true,
 
-        paymentGatewayId:  true,
-        isTransferProcess: true,
-        status:            true,
-        createdAt:         true,
-        completedAt:       true,
-        withdrawFeePercent: true,
-        withdrawFeeFlat:    true,
-        subMerchant: { select: { name: true, provider: true } },
-      },
-    });
-
+          paymentGatewayId:  true,
+          isTransferProcess: true,
+          status:            true,
+          createdAt:         true,
+          completedAt:       true,
+          withdrawFeePercent: true,
+          withdrawFeeFlat:    true,
+          subMerchant: { select: { name: true, provider: true } },
+        },
+      }),
+      prisma.withdrawRequest.count({ where }),
+    ])
     // (4) Format & kirim
     const data = rows.map(w => ({
       id:                w.id,
@@ -428,7 +442,7 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
 
     }));
 
-    return res.json({ data });
+    return res.json({ data, total });
   } catch (err: any) {
     console.error('[getDashboardWithdrawals]', err);
     return res.status(500).json({ error: 'Failed to fetch withdrawals' });
@@ -600,15 +614,42 @@ export async function exportDashboardAll(req: Request, res: Response) {
     }
 
     // Fetch orders
-    const orders = await prisma.order.findMany({
-      where: whereOrders,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        createdAt: true, id: true, rrn: true, playerId: true, channel: true,
-        amount: true, feeLauncx: true, fee3rdParty: true,
-        pendingAmount: true, settlementAmount: true, status: true
+    const CHUNK_SIZE = 1000
+
+    // Prepare workbook stream
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', 'attachment; filename="dashboard-all.xlsx"')
+
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res })
+
+    // Sheet 1: Transactions
+    const txSheet = wb.addWorksheet('Transactions')
+    txSheet.addRow(['Date','TRX ID','RRN','Player ID','Channel','Amount','Fee Launcx','Fee PG','Net Amount','Status']).commit()
+
+    let skipOrders = 0
+    for (;;) {
+      const ordersChunk = await prisma.order.findMany({
+        where: whereOrders,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          createdAt: true, id: true, rrn: true, playerId: true, channel: true,
+          amount: true, feeLauncx: true, fee3rdParty: true,
+          pendingAmount: true, settlementAmount: true, status: true
+        },
+        take: CHUNK_SIZE,
+        skip: skipOrders,
+      })
+
+      for (const o of ordersChunk) {
+        const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
+        txSheet.addRow([
+          o.createdAt.toISOString(), o.id, o.rrn, o.playerId, o.channel,
+          o.amount, o.feeLauncx, o.fee3rdParty, net, o.status
+        ]).commit()
       }
-    })
+          skipOrders += ordersChunk.length
+      if (ordersChunk.length < CHUNK_SIZE) break
+    }
 
     // Build withdrawal filter
     const whereWD: any = {}
@@ -638,41 +679,54 @@ export async function exportDashboardAll(req: Request, res: Response) {
         })
 
     // Prepare workbook
-    const wb = new ExcelJS.Workbook()
-    // Sheet 1: Transactions
-    const txSheet = wb.addWorksheet('Transactions')
-    txSheet.addRow(['Date','TRX ID','RRN','Player ID','Channel','Amount','Fee Launcx','Fee PG','Net Amount','Status'])
-    orders.forEach(o => {
-      const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
-      txSheet.addRow([
-        o.createdAt.toISOString(), o.id, o.rrn, o.playerId, o.channel,
-        o.amount, o.feeLauncx, o.fee3rdParty, net, o.status
-      ])
-    })
+
 
     // Sheet 2: Withdrawals
     const wdSheet = wb.addWorksheet('Withdrawals')
-    wdSheet.addRow(['Date','Ref ID','Bank','Account','Amount','Withdrawal Fee','PG Fee','Status'])
-    withdrawals.forEach(w => {
-            const wdFee = w.netAmount != null
-        ? w.amount - w.netAmount
-        : ((w.withdrawFeePercent / 100) * w.amount) + w.withdrawFeeFlat
-      wdSheet.addRow([
-        w.createdAt.toISOString(),
-        w.refId,
-        w.bankName,
-        w.accountNumber,
-        w.amount,
-        wdFee,
-        w.pgFee ?? 0,
-        w.status      ])
-    })
+    wdSheet.addRow(['Date','Ref ID','Bank','Account','Amount','Withdrawal Fee','PG Fee','Status']).commit()
+
+    let skipWD = 0
+    for (;;) {
+      const withdrawalsChunk = await prisma.withdrawRequest.findMany({
+        where: whereWD,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          createdAt:          true,
+          refId:              true,
+          bankName:           true,
+          accountNumber:      true,
+          amount:             true,
+          netAmount:          true,
+          withdrawFeePercent: true,
+          withdrawFeeFlat:    true,
+          pgFee:              true,
+          status:             true
+        },
+        take: CHUNK_SIZE,
+        skip: skipWD,
+      })
+
+      for (const w of withdrawalsChunk) {
+        const wdFee = w.netAmount != null
+          ? w.amount - w.netAmount
+          : ((w.withdrawFeePercent / 100) * w.amount) + w.withdrawFeeFlat
+        wdSheet.addRow([
+          w.createdAt.toISOString(),
+          w.refId,
+          w.bankName,
+          w.accountNumber,
+          w.amount,
+          wdFee,
+          w.pgFee ?? 0,
+          w.status
+        ]).commit()
+      }
 
     // Response headers
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', 'attachment; filename="dashboard-all.xlsx"')
-
-    await wb.xlsx.write(res)
+      skipWD += withdrawalsChunk.length
+      if (withdrawalsChunk.length < CHUNK_SIZE) break
+    }
+    await wb.commit()
     res.end()
   } catch (err: any) {
     console.error('[exportDashboardAll]', err)
