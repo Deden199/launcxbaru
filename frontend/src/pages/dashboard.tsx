@@ -60,7 +60,7 @@ type Tx = {
   feeLauncx: number
   feePg: number
   netSettle: number
-  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
+  status: '' | 'SETTLED' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
   settlementStatus: string
   channel:          string  // ← baru
     paymentReceivedTime?: string
@@ -171,6 +171,9 @@ function buildParams() {
 
   if (selectedMerchant !== 'all') {
     p.partnerClientId = selectedMerchant
+  }
+    if (statusFilter !== 'all') {
+    p.status = statusFilter
   }
   console.log('buildParams →', p)
   return p
@@ -497,7 +500,7 @@ const filtered = mapped.filter(t => {
   onChange={e => setStatusFilter(e.target.value)}
 >
   <option value="all">All Status</option>
-  <option value="SUCCESS">SUCCESS</option>
+  <option value="SETTLED">SUCCESS</option>
   <option value="PAID">PAID</option>
   <option value="PENDING">PENDING</option>
   <option value="EXPIRED">EXPIRED</option>

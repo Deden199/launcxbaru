@@ -237,8 +237,14 @@ export const regenerateApiKey = async (_req: Request, res: Response) => {
 export async function getDashboardTransactions(req: Request, res: Response) {
   try {
     // (1) parse tanggal & merchant filter
-    const { date_from, date_to, partnerClientId, page = '1', limit = '50' } =
-      req.query as any
+    const {
+      date_from,
+      date_to,
+      partnerClientId,
+      page = '1',
+      limit = '50',
+      status
+    } = req.query as any
     const pageNum = Math.max(1, parseInt(page as string, 10))
     const pageSize = Math.min(100, parseInt(limit as string, 10))
     const dateFrom = date_from ? new Date(String(date_from)) : undefined
@@ -246,19 +252,31 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     const createdAtFilter: any = {}
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom
     if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo
+    const allowedStatuses = [
+      'SUCCESS',
+      'DONE',
+      'SETTLED',
+      'PAID',
+      'PENDING',
+      'EXPIRED'
+    ] as const
+    let statusList: string[] | undefined
+    if (status !== undefined) {
+      const arr = Array.isArray(status) ? status : [status]
+      if (!arr.every((s) => allowedStatuses.includes(String(s) as any))) {
+        return res.status(400).json({ error: 'Invalid status' })
+      }
+      statusList = arr.map(String)
+    }
 
     // (2) build where untuk orders
     const whereOrders: any = {
-      status: {
-        in: [
-          'SUCCESS',
-          'DONE',
-          'SETTLED',
-          'PAID',
-          'PENDING',
-          'EXPIRED'
-        ],
-      },      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {}),
+      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+    }
+    if (statusList) {
+      whereOrders.status = { in: statusList }
+    } else {
+      whereOrders.status = { in: allowedStatuses as any }
     }
     if (partnerClientId && partnerClientId !== 'all') {
       whereOrders.partnerClientId = partnerClientId
@@ -597,7 +615,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 
 export async function exportDashboardAll(req: Request, res: Response) {
   try {
-    const { date_from, date_to, partnerClientId } = req.query as any
+    const { date_from, date_to, partnerClientId, status } = req.query as any
     const dateFrom = date_from ? new Date(String(date_from)) : undefined
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined
     const createdAtFilter: any = {}
@@ -605,9 +623,30 @@ export async function exportDashboardAll(req: Request, res: Response) {
     if (dateTo)   createdAtFilter.lte = dateTo
 
     // Build order filter
+        const allowedStatuses = [
+      'SUCCESS',
+      'DONE',
+      'SETTLED',
+      'PAID',
+      'PENDING',
+      'EXPIRED'
+    ] as const
+    let statusList: string[] | undefined
+    if (status !== undefined) {
+      const arr = Array.isArray(status) ? status : [status]
+      if (!arr.every((s) => allowedStatuses.includes(String(s) as any))) {
+        return res.status(400).json({ error: 'Invalid status' })
+      }
+      statusList = arr.map(String)
+    }
     const whereOrders: any = {
-      status: { in: ['SUCCESS','DONE','SETTLED','PAID'] },
       ...(dateFrom||dateTo ? { createdAt: createdAtFilter } : {})
+    }
+        if (statusList) {
+      whereOrders.status = { in: statusList }
+    } else {
+      // default only settled or successful/pending/expired but not withdrawals
+      whereOrders.status = { in: ['SUCCESS','DONE','SETTLED','PAID'] }
     }
     if (partnerClientId && partnerClientId !== 'all') {
       whereOrders.partnerClientId = partnerClientId

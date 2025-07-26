@@ -268,7 +268,7 @@ export function scheduleSettlementChecker() {
 
     // Fallback cron harian 17:00 WIB
     cron.schedule(
-      '0 17 * * *',
+      '0 17-19 * * *',
       () => {
         logger.info('[SettlementCron] ▶️ Daily cron tick at ' + new Date().toISOString());
         safeRun();
