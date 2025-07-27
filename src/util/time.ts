@@ -33,6 +33,9 @@ export async function loadWeekendOverrideDates(): Promise<void> {
     console.error('[loadWeekendOverrideDates]', err)
   }
 }
+export function formatDateJakarta(date: Date): string {
+  return moment(date).tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss')
+}
 
 export function setWeekendOverrideDates(dates: string[]): void {
   weekendOverrideDates = new Set(dates.map(d => d.trim()).filter(Boolean))

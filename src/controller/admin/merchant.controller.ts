@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, DisbursementStatus } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto'
 import axios from 'axios'
@@ -7,7 +7,7 @@ import {HilogateClient ,HilogateConfig} from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
 import { config } from '../../config';
-import { isJakartaWeekend } from '../../util/time'
+import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 
 
 const prisma = new PrismaClient();
@@ -534,8 +534,13 @@ export const getProfitPerSubMerchant = async (req: Request, res: Response) => {
 // src/controller/admin/merchant.controller.ts
 export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
-    const { partnerClientId, merchantId } = req.query as any;
+    const { partnerClientId, merchantId, date_from, date_to } = req.query as any;
 
+    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
+    const dateTo   = date_to   ? new Date(String(date_to))   : undefined;
+    const createdAtFilter: any = {};
+    if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
+    if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo;
     // 1) Hitung hari ini: weekend vs weekday (termasuk override)
     const isWeekend = isJakartaWeekend(new Date())
     const scheduleFilter = isWeekend
@@ -590,7 +595,41 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     }
       subBalances.push({ id: s.id, name: s.name, provider: s.provider, balance: bal })
   }
- 
+     // ─── 3) Aggregate orders & withdrawals ───────────────────
+    const whereOrders: any = {};
+    if (partnerClientId && partnerClientId !== 'all') {
+      whereOrders.partnerClientId = partnerClientId;
+    }
+    if (dateFrom || dateTo) {
+      whereOrders.createdAt = createdAtFilter;
+    }
+
+    const tpvAgg = await prisma.order.aggregate({
+      _sum: { amount: true },
+      where: whereOrders,
+    });
+    const paidAgg = await prisma.order.aggregate({
+      _sum: { amount: true },
+      where: { ...whereOrders, status: 'PAID' },
+    });
+    const settleAgg = await prisma.order.aggregate({
+      _sum: { settlementAmount: true },
+      where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } },
+    });
+
+    const whereWd: any = { status: DisbursementStatus.COMPLETED };
+    if (partnerClientId && partnerClientId !== 'all') {
+      whereWd.partnerClientId = partnerClientId;
+    }
+    if (dateFrom || dateTo) {
+      whereWd.createdAt = createdAtFilter;
+    }
+    const succWdAgg = await prisma.withdrawRequest.aggregate({
+      _sum: { amount: true },
+      where: whereWd,
+    });
+
+    const totalAvailableWithdraw = total_withdrawal - pending_withdrawal;
     // ─── 4) Total Client Balance ────────────────────────
     let totalClientBalance = 0;
     if (partnerClientId && partnerClientId !== 'all') {
@@ -613,6 +652,11 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       total_withdrawal,
       pending_withdrawal,
       totalClientBalance,
+      totalPaymentVolume: tpvAgg._sum.amount ?? 0,
+      totalPaid:          paidAgg._sum.amount ?? 0,
+      totalSettlement:    settleAgg._sum.settlementAmount ?? 0,
+      totalAvailableWithdraw,
+      totalSuccessfulWithdraw: succWdAgg._sum.amount ?? 0,
     })
 
   } catch (err: any) {
@@ -626,8 +670,8 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 export async function exportDashboardAll(req: Request, res: Response) {
   try {
     const { date_from, date_to, partnerClientId, status } = req.query as any
-    const dateFrom = date_from ? new Date(String(date_from)) : undefined
-    const dateTo   = date_to   ? new Date(String(date_to))   : undefined
+    const dateFrom = parseDateSafely(date_from)
+    const dateTo   = parseDateSafely(date_to)
     const createdAtFilter: any = {}
     if (dateFrom) createdAtFilter.gte = dateFrom
     if (dateTo)   createdAtFilter.lte = dateTo
@@ -719,7 +763,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
       for (const o of ordersChunk) {
         const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
         txSheet.addRow([
-          o.createdAt.toISOString(),
+          formatDateJakarta(o.createdAt),
           o.id,
           o.rrn,
           o.playerId,
@@ -795,7 +839,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
           ? w.amount - w.netAmount
           : (w.withdrawFeePercent / 100) * w.amount + w.withdrawFeeFlat
         wdSheet.addRow([
-          w.createdAt.toISOString(),
+          formatDateJakarta(w.createdAt),
           w.refId,
           w.bankName,
           w.accountNumber,

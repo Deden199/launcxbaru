@@ -108,7 +108,10 @@ const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('P
   // Summary cards state
   const [loadingSummary, setLoadingSummary] = useState(true)
  const [totalClientBalance, setTotalClientBalance] = useState(0)
-
+  const [tpv, setTpv]                         = useState(0)
+  const [totalSettlement, setTotalSettlement] = useState(0)
+  const [availableWithdraw, setAvailableWithdraw] = useState(0)
+  const [successWithdraw, setSuccessWithdraw] = useState(0)
   const [activeBalance, setActiveBalance]     = useState(0)
   const [totalPending, setTotalPending]       = useState(0)
   const [loadingProfit, setLoadingProfit]     = useState(true)
@@ -208,8 +211,12 @@ const fetchSummary = async () => {
     const { data } = await api.get<{
       subBalances:        SubBalance[]
       activeBalance?:     number
-         totalClientBalance: number    // ← Ubah response type
-
+      totalClientBalance: number
+      totalPaymentVolume?: number
+      totalPaid?: number
+      totalSettlement?: number
+      totalAvailableWithdraw?: number
+      totalSuccessfulWithdraw?: number
       total_withdrawal?:  number
       pending_withdrawal?:number
     }>('/admin/merchants/dashboard/summary', { params })
@@ -223,7 +230,11 @@ const fetchSummary = async () => {
     }
 if (data.totalClientBalance !== undefined) setTotalClientBalance(data.totalClientBalance)  // ← Tambahkan ini
     if (data.pending_withdrawal  !== undefined) setTotalPending(data.pending_withdrawal)
-
+    if (data.totalPaymentVolume   !== undefined) setTpv(data.totalPaymentVolume)
+    if (data.totalSettlement      !== undefined) setTotalSettlement(data.totalSettlement)
+    if (data.totalAvailableWithdraw !== undefined) setAvailableWithdraw(data.totalAvailableWithdraw)
+    if (data.totalSuccessfulWithdraw !== undefined) setSuccessWithdraw(data.totalSuccessfulWithdraw)
+    if (data.totalPaid !== undefined) setTotalTrans(data.totalPaid)
   } catch (e) {
     console.error('fetchSummary error', e)
   } finally {
@@ -388,68 +399,87 @@ const filtered = mapped.filter(t => {
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
+                  <div className={styles.rangeControls}>
+            <select value={range} onChange={e => setRange(e.target.value as any)}>
+              <option value="today">Hari ini</option>
+              <option value="week">7 Hari Terakhir</option>
+              <option value="custom">Custom</option>
+            </select>
+            {range === 'custom' && (
+              <>
+                <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} />
+                <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} />
+              </>
+            )}
+          </div>
       </div>
 <aside className={styles.sidebar}>
-
-
   <section className={styles.statsGrid}>
-    {/* Kartu pertama: Balance per Sub Merchant */}
-   <div className={`${styles.card} ${styles.activeBalance}`}>
-      
-      <Wallet className={styles.cardIcon} />
-      <h2>
-        Balance {subBalances.find(s => s.id === selectedSub)?.name || ''}
-      </h2>
-      <p>
-        {currentBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
-
+    <div className={`${styles.card} ${styles.pendingBalance}`}>
+      <div className={styles.iconWrapper}>
+        <Layers size={48} />
+      </div>
+      <h3 className={styles.cardTitle}>TPV</h3>
+      <p className={styles.cardValue}>
+        {tpv.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
       </p>
-        {/* dropdown untuk memilih sub-merchant */}
-  <div className={styles.balanceSelector}>
-    <label>Sub Merchant:  </label>
-    <select
-      value={selectedSub}
-      onChange={e => {
-        setSelectedSub(e.target.value)
-        const sb = subBalances.find(s => s.id === e.target.value)
-        setCurrentBalance(sb?.balance ?? 0)
-      }}
-    >
-      {subBalances.map(s => (
-        <option key={s.id} value={s.id}>{s.name}</option>
-      ))}
-    </select>
-  </div>
     </div>
 
-    {/* Kartu-kartu lain tetap sama */}
-   <div className={`${styles.card} ${styles.activeBalance}`}>
-      <Layers className={styles.cardIcon} />
-      <h2>Total Client Balance</h2>
-    <p>{totalClientBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
+    <div className={`${styles.card} ${styles.pendingBalance}`}>
+      <div className={styles.iconWrapper}>
+        <ListChecks size={48} />
+      </div>
+      <h3 className={styles.cardTitle}>Total Paid</h3>
+      <p className={styles.cardValue}>
+        {totalTrans.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
+      </p>
     </div>
 
-    {/* <div className={`${styles.card} ${styles.pendingBalance}`}>
-      … (Pending Settlement) …
-    </div> */}
-
-   <div className={`${styles.card} ${styles.pendingBalance}`}>
-      <ListChecks className={styles.cardIcon} />
-      <h2>Total Nominal Paid</h2>
-      <p>{totalTrans.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
+    <div className={`${styles.card} ${styles.pendingBalance}`}>
+      <div className={styles.iconWrapper}>
+        <Clock size={48} />
+      </div>
+      <h3 className={styles.cardTitle}>Total Settlement</h3>
+      <p className={styles.cardValue}>
+        {totalSettlement.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
+      </p>
     </div>
-   <div className={`${styles.card} ${styles.pendingBalance}`}>
-      <Layers className={styles.cardIcon} />
-      <h2>Gross Profit</h2>
-      <p>
-        {loadingProfit
-          ? 'Loading…'
-          : (totalProfit ?? 0).toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+
+    <div className={`${styles.card} ${styles.pendingBalance}`}>
+      <div className={styles.iconWrapper}>
+        <Layers size={48} />
+      </div>
+      <h3 className={styles.cardTitle}>Available Withdraw</h3>
+      <p className={styles.cardValue}>
+        {availableWithdraw.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
+      </p>
+    </div>
+
+    <div className={`${styles.card} ${styles.pendingBalance}`}>
+      <div className={styles.iconWrapper}>
+        <Wallet size={48} />
+      </div>
+      <h3 className={styles.cardTitle}>Successful Withdraw</h3>
+      <p className={styles.cardValue}>
+        {successWithdraw.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
       </p>
     </div>
   </section>
 </aside>
 
+<section className={styles.cardSection} style={{ marginTop: 32 }}>
+  <h2>Wallet Balances</h2>
+  <div className={styles.statsGrid}>
+    {subBalances.map(s => (
+      <div key={s.id} className={`${styles.card} ${styles.activeBalance}`}>
+        <h3 className={styles.cardTitle}>{s.name}</h3>
+        <p className={styles.cardValue}>
+          {s.balance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+        </p>
+      </div>
+    ))}
+  </div>
+</section>
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
   <h2>Profit per sub</h2>
   {loadingProfitSub ? (

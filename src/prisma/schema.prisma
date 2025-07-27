@@ -84,6 +84,9 @@ model transaction_request {
   merchant         merchant?         @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
   subMerchant      sub_merchant?     @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
 
+  @@index([merchantId])
+  @@index([createdAt])
+  @@index([status])
 }
 
 /// Simpan response mentah dari gateway
@@ -93,6 +96,8 @@ model transaction_response {
   playerId     String?
   responseBody Json
   createdAt    DateTime @default(now())
+
+  @@index([referenceId])
 }
 
 /// Callback masuk dari gateway
@@ -217,6 +222,10 @@ model Order {
   trxExpirationTime    DateTime?      // full.trx_expiration_time
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+
+  @@index([partnerClientId])
+  @@index([createdAt])
+  @@index([status])
 }
 
 /// PartnerUser untuk login admin
@@ -289,6 +298,9 @@ model WithdrawRequest {
   withdrawFeeFlat    Float
   partnerClient PartnerClient @relation(fields: [partnerClientId], references: [id])
   subMerchant        sub_merchant    @relation("SubMerchantWithdrawals", fields: [subMerchantId], references: [id])
+  @@index([partnerClientId])
+  @@index([createdAt])
+  @@index([status])
 
 }
 

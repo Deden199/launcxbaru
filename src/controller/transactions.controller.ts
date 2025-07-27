@@ -15,7 +15,7 @@ export async function listTransactions (req: AuthRequest, res: Response) {
           page = 1, limit = 20 } = req.query
 
   const where: any = {}
-  if (ref_id)     where.id         = { contains: String(ref_id) }
+  if (ref_id)     where.id         = String(ref_id)
   if (merchantId) where.merchantId = merchantId
   if (status)     where.status     = String(status)
   if (date_from || date_to) {

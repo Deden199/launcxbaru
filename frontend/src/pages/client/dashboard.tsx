@@ -223,7 +223,7 @@ const totalTransaksiCount = filtered.length // <<< CHANGED
 
       <aside className={styles.sidebar}>
         <section className={styles.statsGrid}>
-          <div className={`${styles.card} ${styles.activeBalance}`}>
+          {/* <div className={`${styles.card} ${styles.activeBalance}`}>
             <Wallet className={styles.cardIcon} />
             <h2>
   Active Balance
@@ -238,7 +238,7 @@ const totalTransaksiCount = filtered.length // <<< CHANGED
 </h2>
 
             <p>{balance.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
-          </div>
+          </div> */}
           <div className={styles.card}>
             <ListChecks className={styles.cardIcon} /><h2>Transactions</h2>
  <p>{totalTransaksiCount}</p>             {/* <<< CHANGED */}
