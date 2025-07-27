@@ -272,7 +272,7 @@ export function scheduleSettlementChecker() {
 
     // 2) Polling tiap 5 menit 17:00–20:00
     cron.schedule(
-      '*/5 17-20 * * *',
+      '*/5 18-20 * * *',
       async () => {
         if (!running) return;
         logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());

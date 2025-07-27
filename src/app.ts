@@ -141,7 +141,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 /* ========== 6. SCHEDULED TASKS ========== */
-// scheduleSettlementChecker()
+scheduleSettlementChecker()
 // Start server
 app.use(errorHandler)
 
