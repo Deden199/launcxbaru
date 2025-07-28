@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient, DisbursementStatus } from '@prisma/client';
+import { DisbursementStatus } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto'
 import axios from 'axios'
@@ -10,7 +10,7 @@ import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 
 
-const prisma = new PrismaClient();
+import { prisma } from '../../core/prisma';
 
 // 1. Create merchant (mdr wajib)
 export const createMerchant = async (req: Request, res: Response) => {
@@ -243,12 +243,15 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       partnerClientId,
       page = '1',
       limit = '50',
-      status
-    } = req.query as any
+      status,
+      search
+        } = req.query as any
     const pageNum = Math.max(1, parseInt(page as string, 10))
     const pageSize = Math.min(100, parseInt(limit as string, 10))
     const dateFrom = date_from ? new Date(String(date_from)) : undefined
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined
+    const searchStr = typeof search === 'string' ? search.trim() : ''
+
     const createdAtFilter: any = {}
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom
     if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo
@@ -310,6 +313,13 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     if (partnerClientId && partnerClientId !== 'all') {
       pcWhere.id = partnerClientId
     }
+        if (searchStr) {
+      whereOrders.OR = [
+        { id:       { contains: searchStr, mode: 'insensitive' } },
+        { rrn:      { contains: searchStr, mode: 'insensitive' } },
+        { playerId: { contains: searchStr, mode: 'insensitive' } },
+      ]
+    }
     const partnerClients = await prisma.partnerClient.findMany({
       where: pcWhere,
       select: { balance: true }
@@ -322,8 +332,10 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       prisma.order.findMany({
         where: whereOrders,
         orderBy: { createdAt: 'desc' },
-        skip:  (pageNum - 1) * pageSize,
-        take:  pageSize,
+        ...(searchStr ? {} : {
+          skip:  (pageNum - 1) * pageSize,
+          take:  pageSize,
+        }),
         select: {
           id:                   true,
           createdAt:            true,
@@ -549,7 +561,6 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 
     // ─── 2) Sub-Merchant Balances ─────────────────────────────
     let total_withdrawal = 0, pending_withdrawal = 0
-    const subBalances: { id: string; name: string; provider: string; balance: number }[] = []
 
     const subs = await prisma.sub_merchant.findMany({
       where: {
@@ -559,8 +570,10 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       select: { id: true, name: true, provider: true, credentials: true }
     })
 
-    for (const s of subs) {
+    const balanceResults = await Promise.all(subs.map(async (s) => {
       let bal = 0
+            let wdTotal: number | undefined
+      let wdPending: number | undefined
       try {
         if (s.provider === 'hilogate') {
           const raw = s.credentials as any
@@ -573,10 +586,8 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
           const resp   = await client.getBalance()
           const data   = resp.data
           bal = data.active_balance ?? 0
-          if (total_withdrawal === 0 && pending_withdrawal === 0) {
-            total_withdrawal   = data.total_withdrawal   ?? 0
-            pending_withdrawal = data.pending_withdrawal ?? 0
-          }
+          wdTotal   = data.total_withdrawal
+          wdPending = data.pending_withdrawal
         } else if (s.provider === 'oy') {
           const raw = s.credentials as any
           const cfg: OyConfig = {
@@ -589,12 +600,27 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
           const data   = (resp as any).data ?? resp
           bal = data.availableBalance ?? data.balance ?? 0
         }
-    
-    } catch (e) {
+      } catch (e) {
+
         console.error(`[${s.provider}] getBalance error`, e)
+              }
+      return { id: s.id, name: s.name, provider: s.provider, balance: bal, wdTotal, wdPending }
+    }))
+
+    const subBalances = balanceResults.map(r => ({
+      id:       r.id,
+      name:     r.name,
+      provider: r.provider,
+      balance:  r.balance
+    }))
+
+    for (const r of balanceResults) {
+      if (r.wdTotal != null && total_withdrawal === 0 && pending_withdrawal === 0) {
+        total_withdrawal   = r.wdTotal ?? 0
+        pending_withdrawal = r.wdPending ?? 0
+      }
     }
-      subBalances.push({ id: s.id, name: s.name, provider: s.provider, balance: bal })
-  }
+
      // ─── 3) Aggregate orders & withdrawals ───────────────────
     const whereOrders: any = {};
     if (partnerClientId && partnerClientId !== 'all') {

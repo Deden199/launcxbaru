@@ -208,8 +208,11 @@ function buildParams() {
     if (statusFilter !== 'all') {
     p.status = statusFilter
   }
-    p.page  = page
-  p.limit = perPage
+  if (search.trim()) {
+    p.search = search.trim()
+  }
+  p.page  = page
+    p.limit = perPage
   console.log('buildParams →', p)
   return p
 }
