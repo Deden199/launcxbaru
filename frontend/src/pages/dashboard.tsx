@@ -415,6 +415,7 @@ const filtered = mapped.filter(t => {
       </div>
 <aside className={styles.sidebar}>
   <section className={styles.statsGrid}>
+ 
     <div className={`${styles.card} ${styles.pendingBalance}`}>
       <div className={styles.iconWrapper}>
         <Layers size={48} />
@@ -445,13 +446,13 @@ const filtered = mapped.filter(t => {
       </p>
     </div>
 
-    <div className={`${styles.card} ${styles.pendingBalance}`}>
+       <div className={`${styles.card} ${styles.activeBalance}`}>
       <div className={styles.iconWrapper}>
-        <Layers size={48} />
+        <Wallet size={48} />
       </div>
-      <h3 className={styles.cardTitle}>Available Withdraw</h3>
+      <h3 className={styles.cardTitle}>Available Client Withdraw</h3>
       <p className={styles.cardValue}>
-        {availableWithdraw.toLocaleString("id-ID", { style: "currency", currency: "IDR" })}
+        {totalClientBalance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
       </p>
     </div>
 

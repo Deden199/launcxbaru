@@ -631,21 +631,39 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 
     const totalAvailableWithdraw = total_withdrawal - pending_withdrawal;
     // ─── 4) Total Client Balance ────────────────────────
-    let totalClientBalance = 0;
+    let clientIds: string[] | undefined
     if (partnerClientId && partnerClientId !== 'all') {
-      const pc = await prisma.partnerClient.findUnique({
-        where: { id: partnerClientId },
-        select: { balance: true },
-      });
-      totalClientBalance = pc?.balance ?? 0;
-    } else {
-      const agg = await prisma.partnerClient.aggregate({
-        _sum: { balance: true },
-        where: { isActive: true }
-      });
-      totalClientBalance = agg._sum.balance ?? 0;
-    }
+      clientIds = [partnerClientId]
 
+    } else {
+      const list = await prisma.partnerClient.findMany({
+        where: { isActive: true },
+        select: { id: true }
+      })
+      clientIds = list.map(c => c.id)
+    }
+    const subIds = subs.map(s => s.id)
+
+    const inAgg = await prisma.order.aggregate({
+      _sum: { settlementAmount: true },
+      where: {
+        partnerClientId: { in: clientIds },
+        subMerchantId:   { in: subIds },
+        settlementTime:  { not: null }
+      }
+    })
+
+    const outAgg = await prisma.withdrawRequest.aggregate({
+      _sum: { amount: true },
+      where: {
+        partnerClientId: { in: clientIds },
+        subMerchantId:   { in: subIds },
+        status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
+      }
+    })
+
+    const totalClientBalance =
+      (inAgg._sum.settlementAmount ?? 0) - (outAgg._sum.amount ?? 0)
     // ─── 5) Kirim response ───────────────────────────────
     return res.json({
       subBalances,
