@@ -604,10 +604,15 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       whereOrders.createdAt = createdAtFilter;
     }
 
-    const tpvAgg = await prisma.order.aggregate({
-      _sum: { amount: true },
-      where: whereOrders,
-    });
+const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS'];
+const tpvAgg = await prisma.order.aggregate({
+  _sum: { amount: true },
+  where: {
+    ...whereOrders,
+    status: { in: successStatuses },
+  },
+});
+
     const paidAgg = await prisma.order.aggregate({
       _sum: { amount: true },
       where: { ...whereOrders, status: 'PAID' },
