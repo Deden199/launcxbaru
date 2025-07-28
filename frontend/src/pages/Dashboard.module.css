@@ -165,7 +165,41 @@
   border: 1px solid #d1d5db;
   border-radius: 6px;
 }
+.customDatePicker {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+}
 
+.dateInput {
+  flex: 1;
+}
+
+.clearRangeBtn {
+  background: transparent;
+  border: none;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: .875rem;
+}
+
+.clearRangeBtn:hover {
+  text-decoration: underline;
+}
+
+.applyBtn {
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  padding: .5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.applyBtn:disabled {
+  background: #a5b4fc;
+  cursor: not-allowed;
+}
 /* ==== TABLE SECTION ================================================== */
 .tableSection {
   background: #ffffff;

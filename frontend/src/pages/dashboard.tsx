@@ -5,7 +5,8 @@ import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
 import { Wallet, ListChecks, Clock, FileText, ClipboardCopy, Layers } from 'lucide-react'
 import styles from './Dashboard.module.css'
-
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 type RawTx = {
   id: string
   date: string
@@ -96,8 +97,10 @@ const [selectedSub, setSelectedSub] = useState<string>('')
 const [currentBalance, setCurrentBalance] = useState(0)
   // Filters
   
-  const [range, setRange] = useState<'today'|'week'|'custom'>('today')
-  const [from, setFrom]   = useState(() => toJakartaDate(new Date()))
+  const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
+  const [startDate, endDate] = dateRange
+    const [from, setFrom]   = useState(() => toJakartaDate(new Date()))
   const [to, setTo]       = useState(() => toJakartaDate(new Date()))
   const [search, setSearch] = useState('')
 const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('PAID')
@@ -156,6 +159,14 @@ function buildParams() {
     p.date_from = start.toISOString()
     p.date_to   = now.toISOString()
   }
+    else if (range === 'yesterday') {
+    const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0,0,0,0)
+    const startJak = new Date(d.toLocaleString('en-US', { timeZone: tz }))
+    const endJak = new Date(new Date(d.getTime()+86399999).toLocaleString('en-US', { timeZone: tz }))
+
+    p.date_from = startJak.toISOString()
+    p.date_to   = endJak.toISOString()
+  }
   else if (range === 'week') {
     // 7 hari lalu 00:00 Jakarta
     const weekAgo = new Date()
@@ -174,12 +185,21 @@ function buildParams() {
     p.date_from = start.toISOString()
     p.date_to   = now.toISOString()
   }
-  else {
-    // custom — gunakan full‑day juga
-    const [fy, fm, fd] = from.split('-').map(Number)
-    const [ty, tm, td] = to.split('-').map(Number)
-    p.date_from = new Date(fy, fm-1, fd, 0, 0, 0).toISOString()
-    p.date_to   = new Date(ty, tm-1, td, 23, 59, 59).toISOString()
+  else if (range === 'month') {
+    const start = new Date(); start.setDate(start.getDate() - 29); start.setHours(0,0,0,0)
+    const end   = new Date()
+    const startJak = new Date(start.toLocaleString('en-US', { timeZone: tz }))
+    const endJak   = new Date(end.toLocaleString('en-US', { timeZone: tz }))
+    p.date_from = startJak.toISOString()
+    p.date_to   = endJak.toISOString()
+  }
+  else if (startDate && endDate) {
+    const s = new Date(startDate); s.setHours(0,0,0,0)
+    const e = new Date(endDate); e.setHours(23,59,59,999)
+    const sJak = new Date(s.toLocaleString('en-US', { timeZone: tz }))
+    const eJak = new Date(e.toLocaleString('en-US', { timeZone: tz }))
+    p.date_from = sJak.toISOString()
+    p.date_to   = eJak.toISOString()
   }
 
   if (selectedMerchant !== 'all') {
@@ -368,7 +388,12 @@ const filtered = mapped.filter(t => {
       setLoadingTx(false)
     }
   }
-
+  const applyDateRange = () => {
+    if (startDate && endDate) {
+      setFrom(toJakartaDate(startDate))
+      setTo(toJakartaDate(endDate))
+    }
+  }
   // Effects
   useEffect(() => {
     fetchSummary()
@@ -402,14 +427,55 @@ const filtered = mapped.filter(t => {
                   <div className={styles.rangeControls}>
             <select value={range} onChange={e => setRange(e.target.value as any)}>
               <option value="today">Hari ini</option>
+              <option value="yesterday">Kemarin</option>
+
               <option value="week">7 Hari Terakhir</option>
+              <option value="month">30 Hari Terakhir</option>
+
               <option value="custom">Custom</option>
             </select>
             {range === 'custom' && (
-              <>
-                <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} />
-                <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} />
-              </>
+              <div className={styles.customDatePicker}>
+                <DatePicker
+                  selectsRange
+                  startDate={startDate}
+                  endDate={endDate}
+                  onChange={upd => setDateRange(upd)}
+                  isClearable={false}
+                  placeholderText="Select Date Range…"
+                  maxDate={new Date()}
+                  dateFormat="dd-MM-yyyy"
+                  className={styles.dateInput}
+                />
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    className={styles.clearRangeBtn}
+                    onClick={() => {
+                      setDateRange([null, null])
+                      setFrom(toJakartaDate(new Date()))
+                      setTo(toJakartaDate(new Date()))
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.applyBtn}
+                  onClick={() => {
+                    applyDateRange()
+                    fetchSummary()
+                    fetchProfit()
+                    fetchProfitSub()
+                    fetchWithdrawals()
+                    fetchTransactions()
+                  }}
+                  disabled={!startDate || !endDate}
+                >
+                  Terapkan
+                </button>
+              </div>
             )}
           </div>
       </div>
@@ -520,14 +586,56 @@ const filtered = mapped.filter(t => {
           <div className={styles.rangeControls}>
             <select value={range} onChange={e => setRange(e.target.value as any)}>
               <option value="today">Hari ini</option>
+              <option value="yesterday">Kemarin</option>
+
               <option value="week">7 Hari Terakhir</option>
+
+              <option value="month">30 Hari Terakhir</option>
+
               <option value="custom">Custom</option>
             </select>
             {range === 'custom' && (
-              <>
-                <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} />
-                <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} />
-              </>
+              <div className={styles.customDatePicker}>
+                <DatePicker
+                  selectsRange
+                  startDate={startDate}
+                  endDate={endDate}
+                  onChange={upd => setDateRange(upd)}
+                  isClearable={false}
+                  placeholderText="Select Date Range…"
+                  maxDate={new Date()}
+                  dateFormat="dd-MM-yyyy"
+                  className={styles.dateInput}
+                />
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    className={styles.clearRangeBtn}
+                    onClick={() => {
+                      setDateRange([null, null])
+                      setFrom(toJakartaDate(new Date()))
+                      setTo(toJakartaDate(new Date()))
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.applyBtn}
+                  onClick={() => {
+                    applyDateRange()
+                    fetchSummary()
+                    fetchProfit()
+                    fetchProfitSub()
+                    fetchWithdrawals()
+                    fetchTransactions()
+                  }}
+                  disabled={!startDate || !endDate}
+                >
+                  Terapkan
+                </button>
+              </div>
             )}
           </div>
           <input
