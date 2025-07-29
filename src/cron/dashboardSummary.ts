@@ -2,9 +2,10 @@ import cron from 'node-cron'
 import moment from 'moment-timezone'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
-import { sendTelegramMessage } from '../core/telegram.axios'
 import { DisbursementStatus } from '@prisma/client'
 import { formatDateJakarta } from '../util/time'
+import { formatIdr } from '../util/currency'
+import axios from 'axios'
 
 async function buildSummaryMessage(): Promise<string> {
   const nowJakarta = moment().tz('Asia/Jakarta')
@@ -38,15 +39,29 @@ async function buildSummaryMessage(): Promise<string> {
       status: DisbursementStatus.COMPLETED
     }
   })
+  const inAgg = await prisma.order.aggregate({
+    _sum: { settlementAmount: true },
+    where: { settlementTime: { not: null } }
+  })
+
+  const outAgg = await prisma.withdrawRequest.aggregate({
+    _sum: { amount: true },
+    where: { status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] } }
+  })
+
+  const totalClientBalance =
+    (inAgg._sum.settlementAmount ?? 0) - (outAgg._sum.amount ?? 0)
 
   const msgLines = [
     `[Dashboard Summary] ${formatDateJakarta(now)}`,
-    `Total Payment Volume : ${tpvAgg._sum.amount ?? 0}`,
-    `Total Paid           : ${paidAgg._sum.amount ?? 0}`,
-    `Total Settlement     : ${settleAgg._sum.settlementAmount ?? 0}`,
-    `Successful Withdraw  : ${wdAgg._sum.amount ?? 0}`
+    `Total Payment Volume : ${formatIdr(tpvAgg._sum.amount ?? 0)}`,
+    `Total Paid           : ${formatIdr(paidAgg._sum.amount ?? 0)}`,
+    `Total Settlement     : ${formatIdr(settleAgg._sum.settlementAmount ?? 0)}`,
+    `Successful Withdraw  : ${formatIdr(wdAgg._sum.amount ?? 0)}`,
+    `Available Client Withdraw : ${formatIdr(totalClientBalance)}`
   ]
-  return msgLines.join('\n')
+  // Bungkus dengan triple backticks:
+  return ['```', ...msgLines, '```'].join('\n')
 }
 
 async function sendSummary() {
@@ -54,7 +69,14 @@ async function sendSummary() {
     const message = await buildSummaryMessage()
     const chatId = config.api.telegram.adminChannel
     if (chatId) {
-      await sendTelegramMessage(chatId, message)
+      await axios.post(
+        `https://api.telegram.org/bot${config.api.telegram.botToken}/sendMessage`,
+        {
+          chat_id: chatId,
+          text: message,
+          parse_mode: 'Markdown'
+        }
+      )
     }
   } catch (err) {
     console.error('[dashboardSummary]', err)
