@@ -16,6 +16,7 @@ import { AuthRequest }                  from '../middleware/auth'
 import { prisma }               from '../core/prisma'
 import Decimal from 'decimal.js'
 import moment                    from 'moment-timezone'
+import { postWithRetry }                from '../utils/postWithRetry'
 
 import { isJakartaWeekend } from '../util/time'
 
@@ -310,15 +311,18 @@ await prisma.order.update({
         .update(JSON.stringify(clientPayload))
         .digest('hex')
 
-      axios.post(partner.callbackUrl, clientPayload, {
-        headers: { 'X-Callback-Signature': clientSig },
-        timeout: 5000
-      })
-      .then(() => logger.info('[Callback] Forwarded SUCCESS transaction'))
-      .catch(err => logger.error('[Callback] Forward to client failed', {
-        url: partner.callbackUrl,
-        error: err.message
-      }))
+      try {
+        await postWithRetry(partner.callbackUrl, clientPayload, {
+          headers: { 'X-Callback-Signature': clientSig },
+          timeout: 5000,
+        })
+        logger.info('[Callback] Forwarded SUCCESS transaction')
+      } catch (err: any) {
+        logger.error('[Callback] Forward to client failed', {
+          url: partner.callbackUrl,
+          error: err.message,
+        })
+      }
     }
 
     // 13) Kirim sukses ke Hilogate
@@ -473,13 +477,15 @@ if (!pc) throw new Error('PartnerClient not found for callback')
           .createHmac('sha256', client.callbackSecret)
           .update(JSON.stringify(payload))
           .digest('hex')
-
-        axios.post(client.callbackUrl, payload, {
-          headers: { 'X-Callback-Signature': sig },
-          timeout: 5000
-        })
-        .then(() => logger.info('[OY Callback] forwarded to client'))
-        .catch(err => logger.error('[OY Callback] forward failed', err.message))
+        try {
+          await postWithRetry(client.callbackUrl, payload, {
+            headers: { 'X-Callback-Signature': sig },
+            timeout: 5000
+          })
+          logger.info('[OY Callback] forwarded to client')
+        } catch (err: any) {
+          logger.error('[OY Callback] forward failed', err.message)
+        }
       }
     }
 

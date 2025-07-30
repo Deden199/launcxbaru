@@ -7,6 +7,7 @@ import type { Bitmap } from 'jimp';
 
 import QrCode from 'qrcode-reader'
 const Jimp = require('jimp')
+import { postWithRetry } from '../utils/postWithRetry';
 
 import { brevoAxiosInstance } from '../core/brevo.axios';
 import { prisma } from '../core/prisma';
@@ -370,12 +371,15 @@ export async function processHilogatePayload(payload: {
         .createHmac('sha256', partner.callbackSecret)
         .update(JSON.stringify(clientPayload))
         .digest('hex');
-      axios.post(partner.callbackUrl, clientPayload, {
-        headers: { 'X-Callback-Signature': clientSig },
-        timeout: 5000
-      })
-      .then(() => logger.info('[Callback] Forwarded to client'))
-      .catch(err => logger.error('[Callback] Forward failed', err));
+      try {
+        await postWithRetry(partner.callbackUrl, clientPayload, {
+          headers: { 'X-Callback-Signature': clientSig },
+          timeout: 5000,
+        });
+        logger.info('[Callback] Forwarded to client');
+      } catch (err) {
+        logger.error('[Callback] Forward failed', err);
+      }
     }
   }
 }

@@ -23,6 +23,11 @@ jwtSecret: process.env.JWT_SECRET || 'default_jwt_secret',
       process.env.CALLBACK_URL_FINISH ||
       `${process.env.BASE_URL || `http://localhost:${PORT}`}/?status=success`,
     // Netzme configuration
+        // HTTP retry configuration
+    httpRetry: {
+      attempts: Number(process.env.HTTP_RETRY_ATTEMPTS) || 3,
+      intervalMs: Number(process.env.HTTP_RETRY_INTERVAL_MS) || 1000,
+    },
     expectedApiKey:
       process.env.EXPECTED_API_KEY || 'a240f00aba8cdb2d8622ae778fa36598',
       
