@@ -206,10 +206,11 @@ const trxExpirationTime = full.expires_at?.value
       status: pgStatus,
       net_amount,
       total_fee: pgFee,
-      qr_string,
-      settlement_status,
-      amount: grossAmount
-    } = full
+    qr_string,
+    rrn,
+    settlement_status,
+    amount: grossAmount
+  } = full
     if (!orderId)         throw new Error('Missing ref_id')
     if (net_amount == null) throw new Error('Missing net_amount')
 
@@ -256,6 +257,7 @@ await prisma.order.update({
     status: newStatus,   // ← pakai newStatus yang sudah kamu hitung
     settlementStatus: newSetSt,
     qrPayload:        qr_string ?? null,
+    rrn:              rrn ?? null,
     updatedAt:        new Date(),
     fee3rdParty:      pgFee,
     feeLauncx:        isSuccess ? feeLauncxCalc.toNumber() : null,
