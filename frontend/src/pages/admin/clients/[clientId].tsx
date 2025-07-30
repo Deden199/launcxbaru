@@ -118,6 +118,11 @@ export default function EditClientPage() {
     <div className="container">
       <div className="card">
         <h1>Edit Client</h1>
+                <div className="user-action">
+          <button type="button" onClick={() => router.push(`/admin/clients/${clientId}/users`)}>
+            Manage Users
+          </button>
+        </div>
         {error && <div className="error-banner">{error}</div>}
         <form onSubmit={handleSubmit} className="form-grid">
 
@@ -296,6 +301,21 @@ export default function EditClientPage() {
           font-size: 1.75rem;
           margin-bottom: 1rem;
           font-weight: 600;
+        }
+                  .user-action {
+          text-align: right;
+          margin-bottom: 1rem;
+        }
+        .user-action button {
+          background: #0070f3;
+          color: #fff;
+          padding: 0.5rem 1rem;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .user-action button:hover {
+          background: #005bb5;
         }
         .error-banner {
           background: #ffe0e0;
