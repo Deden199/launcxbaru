@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.backend.json",
     "start": "node dist/app.js",
     "dev": "ts-node src/app.ts",
+    "callback-worker": "ts-node src/worker/callbackQueue.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

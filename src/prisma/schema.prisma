@@ -303,6 +303,20 @@ model WithdrawRequest {
   @@index([status])
 
 }
+/// Queue for partner callback delivery
+model CallbackJob {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  url       String
+  payload   Json
+  signature String
+  attempts  Int      @default(0)
+  delivered Boolean  @default(false)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([delivered])
+}
 
 
 model AdminLog {

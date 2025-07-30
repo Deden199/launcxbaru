@@ -28,6 +28,12 @@ jwtSecret: process.env.JWT_SECRET || 'default_jwt_secret',
       attempts: Number(process.env.HTTP_RETRY_ATTEMPTS) || 3,
       intervalMs: Number(process.env.HTTP_RETRY_INTERVAL_MS) || 1000,
     },
+
+        callbackQueue: {
+      intervalMs: Number(process.env.CALLBACK_WORKER_INTERVAL_MS) || 5000,
+      maxAttempts: Number(process.env.CALLBACK_WORKER_MAX_ATTEMPTS) || 5,
+      batchSize: Number(process.env.CALLBACK_WORKER_BATCH_SIZE) || 10,
+    },
     expectedApiKey:
       process.env.EXPECTED_API_KEY || 'a240f00aba8cdb2d8622ae778fa36598',
       

@@ -313,18 +313,15 @@ await prisma.order.update({
         .update(JSON.stringify(clientPayload))
         .digest('hex')
 
-      try {
-        await postWithRetry(partner.callbackUrl, clientPayload, {
-          headers: { 'X-Callback-Signature': clientSig },
-          timeout: 5000,
-        })
-        logger.info('[Callback] Forwarded SUCCESS transaction')
-      } catch (err: any) {
-        logger.error('[Callback] Forward to client failed', {
-          url: partner.callbackUrl,
-          error: err.message,
-        })
-      }
+      // enqueue job for async delivery
+      await prisma.callbackJob.create({
+        data: {
+          url:       partner.callbackUrl,
+          payload:   clientPayload,
+          signature: clientSig,
+        },
+      })
+      logger.info('[Callback] Enqueued transaction callback')
     }
 
     // 13) Kirim sukses ke Hilogate
@@ -479,15 +476,14 @@ if (!pc) throw new Error('PartnerClient not found for callback')
           .createHmac('sha256', client.callbackSecret)
           .update(JSON.stringify(payload))
           .digest('hex')
-        try {
-          await postWithRetry(client.callbackUrl, payload, {
-            headers: { 'X-Callback-Signature': sig },
-            timeout: 5000
-          })
-          logger.info('[OY Callback] forwarded to client')
-        } catch (err: any) {
-          logger.error('[OY Callback] forward failed', err.message)
-        }
+        await prisma.callbackJob.create({
+          data: {
+            url:       client.callbackUrl,
+            payload,
+            signature: sig,
+          },
+        })
+        logger.info('[OY Callback] enqueued to client')
       }
     }
 
