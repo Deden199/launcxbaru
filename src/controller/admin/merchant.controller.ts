@@ -621,48 +621,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       }
     }
 
-     // ─── 3) Aggregate orders & withdrawals ───────────────────
-    const whereOrders: any = {};
-    if (partnerClientId && partnerClientId !== 'all') {
-      whereOrders.partnerClientId = partnerClientId;
-    }
-    if (dateFrom || dateTo) {
-      whereOrders.createdAt = createdAtFilter;
-    }
-
-const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS'];
-const tpvAgg = await prisma.order.aggregate({
-  _sum: { amount: true },
-  where: {
-    ...whereOrders,
-    status: { in: successStatuses },
-  },
-});
-
-    const paidAgg = await prisma.order.aggregate({
-      _sum: { amount: true },
-      where: { ...whereOrders, status: 'PAID' },
-    });
-    const settleAgg = await prisma.order.aggregate({
-      _sum: { settlementAmount: true },
-      where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } },
-    });
-
-    const whereWd: any = { status: DisbursementStatus.COMPLETED };
-    if (partnerClientId && partnerClientId !== 'all') {
-      whereWd.partnerClientId = partnerClientId;
-    }
-    if (dateFrom || dateTo) {
-      whereWd.createdAt = createdAtFilter;
-    }
-    const succWdAgg = await prisma.withdrawRequest.aggregate({
-      _sum: { amount: true },
-      where: whereWd,
-    });
-
-    const totalAvailableWithdraw = total_withdrawal - pending_withdrawal;
-    // ─── 4) Total Client Balance ────────────────────────
-    let clientIds: string[] | undefined
+       let clientIds: string[] | undefined
     if (partnerClientId && partnerClientId !== 'all') {
       clientIds = [partnerClientId]
 
@@ -675,23 +634,63 @@ const tpvAgg = await prisma.order.aggregate({
     }
     const subIds = subs.map(s => s.id)
 
-    const inAgg = await prisma.order.aggregate({
-      _sum: { settlementAmount: true },
-      where: {
-        partnerClientId: { in: clientIds },
-        subMerchantId:   { in: subIds },
-        settlementTime:  { not: null }
-      }
-    })
+    const whereOrders: any = {}
+    if (partnerClientId && partnerClientId !== 'all') {
+      whereOrders.partnerClientId = partnerClientId
+    }
+    if (dateFrom || dateTo) {
+      whereOrders.createdAt = createdAtFilter
+    }
 
-    const outAgg = await prisma.withdrawRequest.aggregate({
-      _sum: { amount: true },
-      where: {
-        partnerClientId: { in: clientIds },
-        subMerchantId:   { in: subIds },
-        status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
+    const whereWd: any = { status: DisbursementStatus.COMPLETED }
+    if (partnerClientId && partnerClientId !== 'all') {
+      whereWd.partnerClientId = partnerClientId
+    }
+    if (dateFrom || dateTo) {
+      whereWd.createdAt = createdAtFilter
+    }
+
+    const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS']
+
+    const [orderGroup, succWdAgg, inAgg, outAgg] = await Promise.all([
+      prisma.order.groupBy({
+        by: ['status'],
+        where: { ...whereOrders, status: { in: successStatuses } },
+        _sum: { amount: true, settlementAmount: true },
+      }),
+      prisma.withdrawRequest.aggregate({
+        _sum: { amount: true },
+        where: whereWd,
+      }),
+      prisma.order.aggregate({
+        _sum: { settlementAmount: true },
+        where: {
+          partnerClientId: { in: clientIds },
+          subMerchantId:   { in: subIds },
+          settlementTime:  { not: null }
+        }
+      }),
+      prisma.withdrawRequest.aggregate({
+        _sum: { amount: true },
+        where: {
+          partnerClientId: { in: clientIds },
+          subMerchantId:   { in: subIds },
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
+        }
+      })
+    ])
+
+    const tpvAgg = orderGroup.reduce((n, g) => n + (g._sum.amount ?? 0), 0);
+    const paidAgg =
+      orderGroup.find(g => g.status === 'PAID')?._sum.amount ?? 0;
+    const settleAgg = orderGroup.reduce((n, g) => {
+      if (['SUCCESS', 'DONE', 'SETTLED'].includes(g.status)) {
+        n += g._sum.settlementAmount ?? 0;
       }
-    })
+      return n;
+    }, 0);
+
+    const totalAvailableWithdraw = total_withdrawal - pending_withdrawal;
 
     const totalClientBalance =
       (inAgg._sum.settlementAmount ?? 0) - (outAgg._sum.amount ?? 0)
@@ -701,9 +700,9 @@ const tpvAgg = await prisma.order.aggregate({
       total_withdrawal,
       pending_withdrawal,
       totalClientBalance,
-      totalPaymentVolume: tpvAgg._sum.amount ?? 0,
-      totalPaid:          paidAgg._sum.amount ?? 0,
-      totalSettlement:    settleAgg._sum.settlementAmount ?? 0,
+      totalPaymentVolume: tpvAgg,
+      totalPaid:          paidAgg,
+      totalSettlement:    settleAgg,
       totalAvailableWithdraw,
       totalSuccessfulWithdraw: succWdAgg._sum.amount ?? 0,
     })
