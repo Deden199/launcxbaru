@@ -11,6 +11,8 @@ import { prisma } from '../core/prisma';
 import logger from '../logger';
 import { generateRandomId, getRandomNumber } from '../util/random';
 import { getCurrentDate } from '../util/util';
+import { wibTimestampString } from '../util/time';
+
 import { sendTelegramMessage } from '../core/telegram.axios';
 import axios from 'axios';
 import crypto from 'crypto';
@@ -349,8 +351,8 @@ export async function processHilogatePayload(payload: {
       where: { id: existing.merchantId },
       select: { callbackUrl: true, callbackSecret: true }
     });
-    if (partner?.callbackUrl && partner.callbackSecret) {
-      const timestamp = new Date().toISOString();
+      if (partner?.callbackUrl && partner.callbackSecret) {
+        const timestamp = wibTimestampString();
       const nonce     = crypto.randomUUID();
       const clientPayload = {
         orderId,

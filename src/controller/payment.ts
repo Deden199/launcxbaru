@@ -18,7 +18,7 @@ import Decimal from 'decimal.js'
 import moment                    from 'moment-timezone'
 import { postWithRetry }                from '../utils/postWithRetry'
 
-import { isJakartaWeekend, wibTimestamp } from '../util/time'
+import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
 
 
 export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
@@ -294,7 +294,7 @@ await prisma.order.update({
 
     // 12) Forward hanya untuk transaksi SUCCESS/DONE
     if (isSuccess && partner?.callbackUrl && partner.callbackSecret) {
-      const timestamp = wibTimestamp()
+      const timestamp = wibTimestampString()
       const nonce     = crypto.randomUUID()
       const clientPayload = {
         orderId,
@@ -459,7 +459,7 @@ if (!pc) throw new Error('PartnerClient not found for callback')
         select: { callbackUrl: true, callbackSecret: true }
       })
         if (client?.callbackUrl && client.callbackSecret) {
-          const timestamp = wibTimestamp()
+          const timestamp = wibTimestampString()
           const nonce     = crypto.randomUUID()
         const payload = {
           orderId,
