@@ -44,7 +44,11 @@ router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
 router.post('/dashboard/withdraw', requireSuperAdminAuth, ctrl.adminWithdraw)
-
+router.post(
+  '/dashboard/validate-account',
+  requireSuperAdminAuth,
+  ctrl.adminValidateAccount
+)
 router.get('/dashboard/export-all',   exportCtrl.exportDashboardAll)
 
 export default router

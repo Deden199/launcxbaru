@@ -438,31 +438,26 @@ export async function retryTransactionCallback(
     return res.status(400).json({ error: 'Callback belum diset' });
   }
 
-  // 4) Bangun payload dari Order
-  const timestamp = new Date().toISOString();
-  const nonce = crypto.randomUUID();
+  // Ambil CallbackJob terbaru untuk order ini
+  const jobs = await prisma.callbackJob.findMany({
+    where: { delivered: false },
+    orderBy: { createdAt: 'desc' },
+  })
+  const job = jobs.find(j => (j.payload as any)?.orderId === orderId)
+  if (!job) {
+    return res.status(404).json({ error: 'Callback job tidak ditemukan' })
+  }
 
-  const clientPayload = {
-    orderId,
-    status: order.status,                     // pakai value dari Order
-    settlementStatus: order.settlementStatus, // pakai value dari Order
-    grossAmount: order.amount,
-    feeLauncx: order.feeLauncx ?? 0,
-    netAmount: order.amount - (order.feeLauncx ?? 0),
-    qrPayload: order.qrPayload,
-    timestamp,
-    nonce
-  };
+  // 4) Gunakan payload dari CallbackJob
+  const clientPayload = job.payload as any
 
   // 5) Sign dan kirim ulang
-  const sig = crypto
-    .createHmac('sha256', partner.callbackSecret)
-    .update(JSON.stringify(clientPayload))
-    .digest('hex');
+  const sig = job.signature
+  const url = job.url
 
   try {
     await retry(() =>
-      axios.post(partner.callbackUrl!, clientPayload, {
+      axios.post(url, clientPayload, {
         headers: { 'X-Callback-Signature': sig },
         timeout: 5000
       })

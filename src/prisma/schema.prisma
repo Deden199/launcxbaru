@@ -278,6 +278,8 @@ model AdminWithdraw {
   id            String             @id @default(uuid()) @map("_id")
   subMerchantId String
   amount        Float
+  bankName      String
+
   bankCode      String
   accountNumber String
   accountName   String

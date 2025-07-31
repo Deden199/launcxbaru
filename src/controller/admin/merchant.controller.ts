@@ -947,6 +947,51 @@ export const getPlatformProfit = async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 };
+export const adminValidateAccount = async (req: Request, res: Response) => {
+  const { subMerchantId, bank_code, account_number } = req.body as {
+    subMerchantId: string
+    bank_code: string
+    account_number: string
+  }
+
+  try {
+    const sub = await prisma.sub_merchant.findUnique({
+      where: { id: subMerchantId },
+      select: { provider: true, credentials: true }
+    })
+    if (!sub) return res.status(404).json({ error: 'Sub-merchant not found' })
+
+    if (sub.provider !== 'hilogate') {
+      return res.status(400).json({ error: 'Validation only supported for Hilogate' })
+    }
+
+    const cfg = sub.credentials as { merchantId: string; secretKey: string; env?: string }
+    const client = new HilogateClient({
+      merchantId: cfg.merchantId,
+      secretKey: cfg.secretKey,
+      env: cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live'
+        ? cfg.env
+        : 'sandbox'
+    })
+
+    const result = await client.validateAccount(account_number, bank_code)
+    if (result.status !== 'valid') {
+      return res.status(400).json({ error: 'Invalid account' })
+    }
+    const banks = await client.getBankCodes()
+    const bankName = banks.find(b => b.code === bank_code)?.name || ''
+
+    return res.json({
+      account_holder: result.account_holder,
+      bank_name: bankName,
+      status: result.status
+    })
+
+  } catch (err: any) {
+    console.error('[adminValidateAccount]', err)
+    return res.status(500).json({ error: err.message || 'Internal server error' })
+  }
+}
 
 export const adminWithdraw = async (req: Request, res: Response) => {
   const { subMerchantId, amount, bank_code, account_number, account_name } = req.body as {
@@ -985,23 +1030,34 @@ env:
         apiKey: cfg.secretKey
       })
     }
+    let acctName = account_name
+    let bankName = ''
 
+    if (provider === 'hilogate') {
+      const valid = await (client as HilogateClient).validateAccount(account_number, bank_code)
+      if (valid.status !== 'valid') {
+        return res.status(400).json({ error: 'Invalid account' })
+      }
+      acctName = valid.account_holder
+      const banks = await (client as HilogateClient).getBankCodes()
+      bankName = banks.find(b => b.code === bank_code)?.name || ''
+    }
     let resp: any
     if (provider === 'hilogate') {
-      resp = await client.createWithdrawal({
+      resp = await (client as HilogateClient).createWithdrawal({
         ref_id:             `adm-${Date.now()}`,
         amount,
         currency:           'IDR',
         account_number,
-        account_name,
-        account_name_alias: account_name,
+        account_name:       acctName,
+        account_name_alias: acctName,
         bank_code,
-        bank_name:          '',
+        bank_name:          bankName,
         branch_name:        '',
         description:        `Admin withdraw Rp ${amount}`
       })
     } else {
-      resp = await client.disburse({
+      resp = await (client as OyClient).disburse({
         recipient_bank:    bank_code,
         recipient_account: account_number,
         amount,
@@ -1009,6 +1065,8 @@ env:
         partner_trx_id:    `adm-${Date.now()}`,
         email:             'admin@launcx.com'
       })
+            bankName = ''
+
     }
 
     const newStatus = provider === 'hilogate'
@@ -1027,9 +1085,10 @@ env:
       data: {
         subMerchant: { connect: { id: subMerchantId } },
         amount,
+        bankName,
         bankCode: bank_code,
         accountNumber: account_number,
-        accountName: account_name,
+        accountName: acctName,
         pgRefId: resp.trx_id || resp.trxId || null,
         status: newStatus
       }
