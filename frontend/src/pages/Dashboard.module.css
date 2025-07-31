@@ -336,6 +336,11 @@
 .withdrawForm button:hover {
   background: #059669;
 }
+.readonlyWrapper { position:relative; display:flex; align-items:center; }
+.readonlyWrapper input { flex:1; padding-right:2.5rem; }
+.validIcon   { position:absolute; right:.75rem; color:#10b981; }
+.error       { color:#b91c1c; font-size:.875rem; width:100%; }
+
 
 
 /* ==== MEDIA QUERIES ================================================== */

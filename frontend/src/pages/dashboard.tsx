@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { Wallet, ListChecks, Clock, FileText, ClipboardCopy, Layers } from 'lucide-react'
+import { Wallet, ListChecks, Clock, FileText, ClipboardCopy, Layers, CheckCircle } from 'lucide-react'
+import Select from 'react-select'
 import styles from './Dashboard.module.css'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -109,6 +110,11 @@ const [wdAmount, setWdAmount] = useState('')
 const [wdAccount, setWdAccount] = useState('')
 const [wdBank, setWdBank] = useState('')
 const [wdName, setWdName] = useState('')
+const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
+const bankOptions = banks.map(b => ({ value: b.code, label: b.name }))
+const [isValid, setIsValid] = useState(false)
+const [busy, setBusy] = useState({ validating: false, submitting: false })
+const [error, setError] = useState('')
   // Filters
   
   const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
@@ -153,6 +159,14 @@ const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('P
       if (payload?.role === 'SUPER_ADMIN') setIsSuperAdmin(true)
     }
   }, [])
+
+    useEffect(() => {
+    api
+      .get<{ banks: { code: string; name: string }[] }>('/banks')
+      .then(res => setBanks(res.data.banks))
+      .catch(console.error)
+  }, [])
+
   // Date helpers
   function toJakartaDate(d: Date): string {
     return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
@@ -338,6 +352,8 @@ async function fetchWithdrawals() {
 
 async function handleAdminWithdraw(e: React.FormEvent) {
   e.preventDefault()
+  if (!isValid || error) return
+  setBusy(b => ({ ...b, submitting: true }))
   try {
     await api.post('/admin/merchants/dashboard/withdraw', {
       subMerchantId: selectedSub,
@@ -350,10 +366,41 @@ async function handleAdminWithdraw(e: React.FormEvent) {
     setWdAccount('')
     setWdBank('')
     setWdName('')
+    setIsValid(false)
     fetchSummary()
     fetchWithdrawals()
   } catch (err: any) {
     alert(err.response?.data?.error || 'Failed')
+     } finally {
+    setBusy(b => ({ ...b, submitting: false }))
+  }
+}
+
+async function validateBankAccount() {
+  setBusy(b => ({ ...b, validating: true }))
+  setError('')
+  try {
+    const res = await api.post(
+      '/admin/merchants/dashboard/validate-account',
+      {
+        subMerchantId: selectedSub,
+        bank_code: wdBank,
+        account_number: wdAccount
+      },
+      { validateStatus: () => true }
+    )
+    if (res.status === 200 && res.data.status === 'valid') {
+      setWdName(res.data.account_holder)
+      setIsValid(true)
+    } else {
+      setIsValid(false)
+      setError(res.data.error || 'Account not valid')
+    }
+  } catch {
+    setIsValid(false)
+    setError('Validation failed')
+  } finally {
+    setBusy(b => ({ ...b, validating: false }))
   }
 }
 
@@ -604,10 +651,28 @@ const filtered = mapped.filter(t => {
         ))}
       </select>
       <input type="number" placeholder="Amount" value={wdAmount} onChange={e => setWdAmount(e.target.value)} required />
-      <input type="text" placeholder="Bank Code" value={wdBank} onChange={e => setWdBank(e.target.value)} required />
-      <input type="text" placeholder="Account No" value={wdAccount} onChange={e => setWdAccount(e.target.value)} required />
-      <input type="text" placeholder="Account Name" value={wdName} onChange={e => setWdName(e.target.value)} required />
-      <button type="submit">Withdraw</button>
+      <div style={{ minWidth: 160 }}>
+        <Select
+          options={bankOptions}
+          value={bankOptions.find(o => o.value === wdBank) || null}
+          onChange={opt => setWdBank(opt?.value || '')}
+          placeholder="Select bank…"
+          isSearchable
+          styles={{ container: b => ({ ...b, width: '100%' }), control: b => ({ ...b, minHeight: '2.5rem' }) }}
+        />
+      </div>
+            <input type="text" placeholder="Account No" value={wdAccount} onChange={e => setWdAccount(e.target.value)} required />
+      <div className={styles.readonlyWrapper}>
+        <input readOnly placeholder="Account Name" value={wdName} />
+        {isValid && <CheckCircle className={styles.validIcon} size={18} />}
+      </div>
+      <button type="button" onClick={validateBankAccount} disabled={busy.validating}>
+        {busy.validating ? 'Validating…' : 'Validate'}
+      </button>
+      <button type="submit" disabled={!isValid || !!error || busy.submitting}>
+        {busy.submitting ? 'Submitting…' : 'Withdraw'}
+      </button>
+      {error && <span className={styles.error}>{error}</span>}
     </form>
   </section>
 )}
