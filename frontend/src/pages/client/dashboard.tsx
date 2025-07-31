@@ -49,7 +49,9 @@ const [startDate, endDate]     = dateRange
   // Transactions
   const [txs, setTxs]                         = useState<Tx[]>([])
   const [totalTrans, setTotalTrans]           = useState(0)
-
+  const [page, setPage]                       = useState(1)
+  const [perPage, setPerPage]                 = useState(10)
+  const [totalPages, setTotalPages]           = useState(1)
   const [loadingSummary, setLoadingSummary]   = useState(true)
   const [loadingTx, setLoadingTx]             = useState(true)
 
@@ -106,6 +108,11 @@ const buildParams = () => {
   if (selectedChild !== 'all') {
     params.clientId = selectedChild
   }
+  if (search.trim()) {
+    params.search = search.trim()
+  }
+  params.page  = page
+  params.limit = perPage
   console.log('buildParams →', params)
   return params
 }
@@ -135,12 +142,14 @@ const buildParams = () => {
   const fetchTransactions = async () => {
     setLoadingTx(true)
     try {
-      const { data } = await api.get<{ transactions: Tx[] }>(
+      const { data } = await api.get<{ transactions: Tx[]; total: number }>(
         '/client/dashboard',
         { params: buildParams() }
       )
       setTxs(data.transactions)
       setTotalTrans(data.transactions.length)
+      setTotalPages(Math.max(1, Math.ceil(data.total / perPage)))
+
     } catch {
       router.push('/client/login')
     } finally {
@@ -189,7 +198,7 @@ const buildParams = () => {
 
   // Trigger fetches when filters change
   useEffect(() => { fetchSummary() }, [range, selectedChild, from, to])
-  useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to])
+  useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to, search, page, perPage])
 
   const filtered = txs.filter(t =>
   (statusFilter === '' || t.status === statusFilter) &&         // <<< REVISI: filter berdasarkan status, bukan settlementStatus
@@ -397,6 +406,24 @@ const totalTransaksiCount = filtered.length // <<< CHANGED
               </table>
             </div>
           )}
+          <div className={styles.pagination}>
+            <div>
+              Rows
+              <select
+                value={perPage}
+                onChange={e => { setPerPage(+e.target.value); setPage(1) }}
+              >
+                {[10, 20, 50].map(n => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹</button>
+              <span>{page}/{totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>›</button>
+            </div>
+          </div>
         </section>
       </main>
     </div>

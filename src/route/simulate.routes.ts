@@ -5,10 +5,10 @@ import apiKeyAuth from '../middleware/apiKeyAuth'
 const router = express.Router();
 
 // Partner memanggil ini untuk “selesai bayar” di staging
-// router.post(
-//   '/simulate-callback',
-//   apiKeyAuth,
-//   simulateCallback
-// );
+router.post(
+  '/simulate-callback',
+  apiKeyAuth,
+  simulateCallback
+);
 
 export default router;

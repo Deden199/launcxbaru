@@ -131,9 +131,20 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     if (Array.isArray(rawStatus)) {
       statuses = rawStatus.map(String).filter(s => allowed.includes(s));
     } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
-      statuses = rawStatus.split(',').map(s => s.trim()).filter(s => allowed.includes(s));
-    }
+      statuses = rawStatus
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => allowed.includes(s)); 
+       }
     if (statuses.length === 0) statuses = [...allowed];
+    // (2c) pagination params
+    const pageNum = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const pageSize = Math.min(100, parseInt(String(req.query.limit || '50'), 10));
+
+    // (2d) search keyword
+    const searchStr = typeof req.query.search === 'string'
+      ? req.query.search.trim()
+      : '';
 
     // (3) build list of IDs to query
     let clientIds: string[];
@@ -165,24 +176,39 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
       .reduce((sum, c) => sum + (c.balance ?? 0), 0);
     const totalActive = parentBal + childrenBal;
 
-    // (4c) ambil transaksi seperti biasa (tetap pakai DASHBOARD_STATUSES biar tabel aman)
-    const orders = await prisma.order.findMany({
-      where: {
-        partnerClientId: { in: clientIds },
-        status: { in: DASHBOARD_STATUSES },
-        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true, qrPayload: true, rrn: true, playerId: true,
-        amount: true, feeLauncx: true, settlementAmount: true,
-        pendingAmount: true, status: true, settlementStatus: true, createdAt: true,
-        paymentReceivedTime: true,
-        settlementTime:      true,
-        trxExpirationTime:   true,
-      }
-    });
+    // (4c) ambil transaksi + total untuk pagination + search
+    const whereOrders: any = {
+      partnerClientId: { in: clientIds },
+      status: { in: DASHBOARD_STATUSES },
+      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+    };
+    if (searchStr) {
+      whereOrders.OR = [
+        { id:       { contains: searchStr, mode: 'insensitive' } },
+        { rrn:      { contains: searchStr, mode: 'insensitive' } },
+        { playerId: { contains: searchStr, mode: 'insensitive' } },
+      ]
+    }
 
+    const [orders, totalRows] = await Promise.all([
+      prisma.order.findMany({
+        where: whereOrders,
+        orderBy: { createdAt: 'desc' },
+        ...(searchStr ? {} : {
+          skip: (pageNum - 1) * pageSize,
+          take: pageSize,
+        }),
+        select: {
+          id: true, qrPayload: true, rrn: true, playerId: true,
+          amount: true, feeLauncx: true, settlementAmount: true,
+          pendingAmount: true, status: true, settlementStatus: true, createdAt: true,
+          paymentReceivedTime: true,
+          settlementTime:      true,
+          trxExpirationTime:   true,
+        }
+      }),
+      prisma.order.count({ where: whereOrders })
+    ]);
 // (5) totalTransaksi -> hitung langsung di DB dengan status filter user
 const totalAgg = await prisma.order.aggregate({
   _sum: { amount: true },
@@ -221,6 +247,7 @@ const totalTransaksi = totalAgg._sum.amount ?? 0;
       totalPending,
       totalTransaksi,
       transactions,
+      total: totalRows,
       children: pc.children
     });
 
