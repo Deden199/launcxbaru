@@ -312,6 +312,32 @@
   cursor: not-allowed;
 }
 
+.withdrawForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: 1rem;
+}
+.withdrawForm input,
+.withdrawForm select {
+  padding: .5rem .75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: .5rem;
+  font-size: .875rem;
+}
+.withdrawForm button {
+  padding: .5rem 1rem;
+  background: #10b981;
+  color: #fff;
+  border: none;
+  border-radius: .5rem;
+  cursor: pointer;
+}
+.withdrawForm button:hover {
+  background: #059669;
+}
+
+
 /* ==== MEDIA QUERIES ================================================== */
 @media (max-width: 640px) {
   .statsGrid {

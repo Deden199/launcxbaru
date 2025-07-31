@@ -37,3 +37,12 @@ export const requireAdminAuth = [
     next();
   }
 ];
+export const requireSuperAdminAuth = [
+  authMiddleware,
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (req.userRole !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Forbidden: Super Admins only' });
+    }
+    next();
+  }
+];

@@ -57,6 +57,8 @@ model sub_merchant {
   updatedAt     DateTime @updatedAt
   merchant merchant @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
   withdrawRequests WithdrawRequest[] @relation("SubMerchantWithdrawals")
+  adminWithdraws   AdminWithdraw[]   @relation("SubMerchantAdminWithdraws")
+
   transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
   orders           Order[]             @relation("OrderSubMerchant")
 
@@ -234,7 +236,7 @@ model PartnerUser {
   name      String
   email     String   @unique
   password  String
-  role      String
+  role      AdminRole @default(ADMIN)
   totpSecret String?
   totpEnabled Boolean @default(false)
   isActive  Boolean  @default(true)
@@ -271,6 +273,23 @@ model ClientUser {
   isActive        Boolean       @default(true)
   partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
 }
+
+model AdminWithdraw {
+  id            String             @id @default(uuid()) @map("_id")
+  subMerchantId String
+  amount        Float
+  bankCode      String
+  accountNumber String
+  accountName   String
+  pgRefId       String?
+  status        DisbursementStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+
+  subMerchant sub_merchant @relation("SubMerchantAdminWithdraws", fields: [subMerchantId], references: [id])
+
+  @@index([subMerchantId])
+}
+
 
 model WithdrawRequest {
   id                String             @id @default(uuid()) @map("_id")
@@ -318,6 +337,10 @@ model CallbackJob {
   @@index([delivered])
 }
 
+enum AdminRole {
+  ADMIN
+  SUPER_ADMIN
+}
 
 model AdminLog {
   id        String   @id @default(uuid()) @map("_id")

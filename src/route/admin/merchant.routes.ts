@@ -2,7 +2,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import * as ctrl from '../../controller/admin/merchant.controller'
 import * as exportCtrl from '../../controller/admin/merchant.controller'
-import { authMiddleware, AuthRequest } from '../../middleware/auth'
+import { authMiddleware, AuthRequest, requireSuperAdminAuth } from '../../middleware/auth'
 import subMerchantRouter from './subMerchant.routes'   // ← import
 
 const router = Router()
@@ -10,7 +10,7 @@ const router = Router()
 // Semua route berikut hanya untuk ADMIN
 router.use(authMiddleware, (req: Request, res: Response, next: NextFunction) => {
   const { userRole } = req as AuthRequest
-  if (userRole !== 'ADMIN') {
+  if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN') {
     return res.status(403).json({ error: 'Forbidden' })
   }
   next()
@@ -43,6 +43,8 @@ router.get('/dashboard/profit',       ctrl.getPlatformProfit)
 router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
+router.post('/dashboard/withdraw', requireSuperAdminAuth, ctrl.adminWithdraw)
+
 router.get('/dashboard/export-all',   exportCtrl.exportDashboardAll)
 
 export default router

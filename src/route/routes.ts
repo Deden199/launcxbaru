@@ -8,7 +8,6 @@ import authRouter           from './auth.routes';
 import transactionsRouter   from './transactions.routes';
 import { authMiddleware }   from '../middleware/auth';
 import apiKeyAuth       from '../middleware/apiKeyAuth';
-import { disburse }         from '../service/ifpDisbursement';
 
 const router = Router();
 
@@ -22,15 +21,6 @@ router.use('/payment',      apiKeyAuth, paymentRouter);
 // 3) Setelah V1, pakai proteksi JWT untuk partner UI/admin
 router.use(authMiddleware);
 
-// 4) IFP Disbursement (requires JWT)
-router.post('/ifp/disburse', async (req, res) => {
-  try {
-    const { data } = await disburse(req.body);
-    res.json(data);
-  } catch (err: any) {
-    res.status(500).json(err.response?.data ?? { message: err.message });
-  }
-});
 
 // 5) Transactions (history) — juga protected JWT
 router.use('/transactions', transactionsRouter);

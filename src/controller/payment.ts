@@ -18,7 +18,7 @@ import Decimal from 'decimal.js'
 import moment                    from 'moment-timezone'
 import { postWithRetry }                from '../utils/postWithRetry'
 
-import { isJakartaWeekend } from '../util/time'
+import { isJakartaWeekend, wibTimestamp } from '../util/time'
 
 
 export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
@@ -163,7 +163,7 @@ export const transactionCallback = async (req: Request, res: Response) => {
     if (gotSig !== expectedSig) {
       throw new Error('Invalid H signature')
     }
-   const paymentReceivedTime = new Date();
+ const paymentReceivedTime = wibTimestamp(); // atau jika butuh Date object: new Date(wibTimestamp())
   // settlementTime ← full.updated_at (gateway’s completion timestamp)
 const settlementTime = full.updated_at?.value
   ? new Date(full.updated_at.value)
@@ -181,7 +181,7 @@ const trxExpirationTime = full.expires_at?.value
       await prisma.transaction_callback.update({
         where: { id: cb.id },
         data: {
-          updatedAt:             new Date(),
+ updatedAt:             wibTimestamp(),
           paymentReceivedTime,
           settlementTime,
           trxExpirationTime,
@@ -258,7 +258,7 @@ await prisma.order.update({
     settlementStatus: newSetSt,
     qrPayload:        qr_string ?? null,
     rrn:              rrn ?? null,
-    updatedAt:        new Date(),
+ updatedAt:        wibTimestamp(),
     fee3rdParty:      pgFee,
     feeLauncx:        isSuccess ? feeLauncxCalc.toNumber() : null,
     pendingAmount:    isSuccess
@@ -294,7 +294,7 @@ await prisma.order.update({
 
     // 12) Forward hanya untuk transaksi SUCCESS/DONE
     if (isSuccess && partner?.callbackUrl && partner.callbackSecret) {
-      const timestamp = new Date().toISOString()
+      const timestamp = wibTimestamp()
       const nonce     = crypto.randomUUID()
       const clientPayload = {
         orderId,
@@ -382,7 +382,7 @@ if (cb) {
   await prisma.transaction_callback.update({
     where: { id: cb.id },
     data: {
-      updatedAt:         new Date(),
+ updatedAt:         wibTimestamp(),
       settlementTime,
       trxExpirationTime,
     }
@@ -444,7 +444,7 @@ if (!pc) throw new Error('PartnerClient not found for callback')
         feeLauncx:        isSuccess ? feeLauncx.toNumber() : null,
         pendingAmount:    pendingAmt,
         settlementAmount: isSuccess ? null : receivedAmt,
-        updatedAt:        new Date(),
+ updatedAt:        wibTimestamp(),
         paymentReceivedTime,
     settlementTime,
     trxExpirationTime,
@@ -458,9 +458,9 @@ if (!pc) throw new Error('PartnerClient not found for callback')
         where: { id: order.userId },
         select: { callbackUrl: true, callbackSecret: true }
       })
-      if (client?.callbackUrl && client.callbackSecret) {
-        const timestamp = new Date().toISOString()
-        const nonce     = crypto.randomUUID()
+        if (client?.callbackUrl && client.callbackSecret) {
+          const timestamp = wibTimestamp()
+          const nonce     = crypto.randomUUID()
         const payload = {
           orderId,
           status:           newStatus,

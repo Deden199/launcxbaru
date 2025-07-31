@@ -2,14 +2,19 @@
  * ISO-8601 dengan zona +07:00 tanpa millisecond.
  * Contoh: 2025-04-28T16:24:30+07:00
  */
-export function wibTimestamp(): string {
-  const now = new Date();
-  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-  return wib.toISOString().replace(/\.\d{3}Z$/, '') + '+07:00';
-}
 
 import moment from 'moment-timezone'
 import { prisma } from '../core/prisma'
+
+export function wibTimestamp(): Date {
+  return moment().tz('Asia/Jakarta').toDate();
+}
+
+// kalau butuh string ISO+07:00 tanpa millisecond (misal untuk signature payload)
+export function wibTimestampString(): string {
+  return moment().tz('Asia/Jakarta').format('YYYY-MM-DDTHH:mm:ss+07:00');
+}
+
 
 let weekendOverrideDates = new Set<string>()
 
@@ -41,12 +46,12 @@ export function setWeekendOverrideDates(dates: string[]): void {
   weekendOverrideDates = new Set(dates.map(d => d.trim()).filter(Boolean))
 }
 
-export function isJakartaHoliday(date: Date = new Date()): boolean {
+export function isJakartaHoliday(date: Date = wibTimestamp()): boolean {
   const dateStr = moment(date).tz('Asia/Jakarta').format('YYYY-MM-DD')
   return weekendOverrideDates.has(dateStr)
 }
 
-export function isJakartaWeekend(date: Date = new Date()): boolean {
+export function isJakartaWeekend(date: Date = wibTimestamp()): boolean {
   if (isJakartaHoliday(date)) return true
   const day = moment(date).tz('Asia/Jakarta').format('ddd')
   return day === 'Fri' || day === 'Sat'

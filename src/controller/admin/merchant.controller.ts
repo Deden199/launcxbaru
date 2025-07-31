@@ -947,3 +947,97 @@ export const getPlatformProfit = async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 };
+
+export const adminWithdraw = async (req: Request, res: Response) => {
+  const { subMerchantId, amount, bank_code, account_number, account_name } = req.body as {
+    subMerchantId: string
+    amount: number
+    bank_code: string
+    account_number: string
+    account_name: string
+  }
+
+  try {
+    const sub = await prisma.sub_merchant.findUnique({
+      where: { id: subMerchantId },
+      select: { credentials: true, provider: true }
+    })
+    if (!sub) return res.status(404).json({ error: 'Sub-merchant not found' })
+
+    const provider = sub.provider as 'hilogate' | 'oy'
+    let client: any
+    if (provider === 'hilogate') {
+      const cfg = sub.credentials as { merchantId: string; secretKey: string; env?: string }
+      client = new HilogateClient({
+        merchantId: cfg.merchantId,
+        secretKey: cfg.secretKey,
+env:
+  cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live'
+    ? cfg.env
+    : 'sandbox',
+
+  })
+    } else {
+      const cfg = sub.credentials as { merchantId: string; secretKey: string }
+      client = new OyClient({
+        baseUrl: 'https://partner.oyindonesia.com',
+        username: cfg.merchantId,
+        apiKey: cfg.secretKey
+      })
+    }
+
+    let resp: any
+    if (provider === 'hilogate') {
+      resp = await client.createWithdrawal({
+        ref_id:             `adm-${Date.now()}`,
+        amount,
+        currency:           'IDR',
+        account_number,
+        account_name,
+        account_name_alias: account_name,
+        bank_code,
+        bank_name:          '',
+        branch_name:        '',
+        description:        `Admin withdraw Rp ${amount}`
+      })
+    } else {
+      resp = await client.disburse({
+        recipient_bank:    bank_code,
+        recipient_account: account_number,
+        amount,
+        note:              `Admin withdraw Rp ${amount}`,
+        partner_trx_id:    `adm-${Date.now()}`,
+        email:             'admin@launcx.com'
+      })
+    }
+
+    const newStatus = provider === 'hilogate'
+      ? (['WAITING','PENDING'].includes(resp.status)
+          ? DisbursementStatus.PENDING
+          : ['COMPLETED','SUCCESS'].includes(resp.status)
+            ? DisbursementStatus.COMPLETED
+            : DisbursementStatus.FAILED)
+      : (resp.status.code === '101'
+          ? DisbursementStatus.PENDING
+          : resp.status.code === '000'
+            ? DisbursementStatus.COMPLETED
+            : DisbursementStatus.FAILED)
+
+    await prisma.adminWithdraw.create({
+      data: {
+        subMerchant: { connect: { id: subMerchantId } },
+        amount,
+        bankCode: bank_code,
+        accountNumber: account_number,
+        accountName: account_name,
+        pgRefId: resp.trx_id || resp.trxId || null,
+        status: newStatus
+      }
+    })
+
+    return res.status(201).json({ status: newStatus })
+  } catch (err: any) {
+    console.error('[adminWithdraw]', err)
+    return res.status(500).json({ error: err.message || 'Internal server error' })
+  }
+}

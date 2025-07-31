@@ -7,6 +7,14 @@ import { Wallet, ListChecks, Clock, FileText, ClipboardCopy, Layers } from 'luci
 import styles from './Dashboard.module.css'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
+
+function parseJwt(t: string) {
+  try {
+    return JSON.parse(atob(t.split('.')[1]))
+  } catch {
+    return null
+  }
+}
 type RawTx = {
   id: string
   date: string
@@ -85,6 +93,7 @@ type TransactionsResponse = {
 
 export default function DashboardPage() {
   useRequireAuth()
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
 
     // ─────────── State withdrawal history ───────────
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
@@ -95,6 +104,11 @@ export default function DashboardPage() {
 const [subBalances, setSubBalances] = useState<SubBalance[]>([])
 const [selectedSub, setSelectedSub] = useState<string>('')
 const [currentBalance, setCurrentBalance] = useState(0)
+
+const [wdAmount, setWdAmount] = useState('')
+const [wdAccount, setWdAccount] = useState('')
+const [wdBank, setWdBank] = useState('')
+const [wdName, setWdName] = useState('')
   // Filters
   
   const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom'>('today')
@@ -131,6 +145,14 @@ const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('P
   const [totalTrans, setTotalTrans] = useState(0)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
+
+    useEffect(() => {
+    const tok = localStorage.getItem('token')
+    if (tok) {
+      const payload = parseJwt(tok)
+      if (payload?.role === 'SUPER_ADMIN') setIsSuperAdmin(true)
+    }
+  }, [])
   // Date helpers
   function toJakartaDate(d: Date): string {
     return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
@@ -311,6 +333,27 @@ async function fetchWithdrawals() {
     }
   } finally {
     setLoadingWd(false)
+  }
+}
+
+async function handleAdminWithdraw(e: React.FormEvent) {
+  e.preventDefault()
+  try {
+    await api.post('/admin/merchants/dashboard/withdraw', {
+      subMerchantId: selectedSub,
+      amount: Number(wdAmount),
+      bank_code: wdBank,
+      account_number: wdAccount,
+      account_name: wdName,
+    })
+    setWdAmount('')
+    setWdAccount('')
+    setWdBank('')
+    setWdName('')
+    fetchSummary()
+    fetchWithdrawals()
+  } catch (err: any) {
+    alert(err.response?.data?.error || 'Failed')
   }
 }
 
@@ -550,6 +593,24 @@ const filtered = mapped.filter(t => {
     ))}
   </div>
 </section>
+
+{isSuperAdmin && (
+  <section className={styles.cardSection} style={{ marginTop: 32 }}>
+    <h2>Withdraw Wallet</h2>
+    <form onSubmit={handleAdminWithdraw} className={styles.withdrawForm}>
+      <select value={selectedSub} onChange={e => setSelectedSub(e.target.value)}>
+        {subBalances.map(s => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
+      <input type="number" placeholder="Amount" value={wdAmount} onChange={e => setWdAmount(e.target.value)} required />
+      <input type="text" placeholder="Bank Code" value={wdBank} onChange={e => setWdBank(e.target.value)} required />
+      <input type="text" placeholder="Account No" value={wdAccount} onChange={e => setWdAccount(e.target.value)} required />
+      <input type="text" placeholder="Account Name" value={wdName} onChange={e => setWdName(e.target.value)} required />
+      <button type="submit">Withdraw</button>
+    </form>
+  </section>
+)}
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
   <h2>Profit per sub</h2>
   {loadingProfitSub ? (

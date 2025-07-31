@@ -1,8 +1,5 @@
 import { Request } from 'express';
-import {
-  netzGetTransactionSignAxiosInstance,
-  netzGetQRAxiosInstance,
-} from '../core/netz.axios';
+
 import type { Bitmap } from 'jimp';
 
 import QrCode from 'qrcode-reader'
@@ -12,7 +9,6 @@ import { postWithRetry } from '../utils/postWithRetry';
 import { brevoAxiosInstance } from '../core/brevo.axios';
 import { prisma } from '../core/prisma';
 import logger from '../logger';
-import TokenService from './token';
 import { generateRandomId, getRandomNumber } from '../util/random';
 import { getCurrentDate } from '../util/util';
 import { sendTelegramMessage } from '../core/telegram.axios';
