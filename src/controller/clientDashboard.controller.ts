@@ -7,6 +7,7 @@ import { ClientAuthRequest } from '../middleware/clientAuth'
 import ExcelJS from 'exceljs'
 import crypto from 'crypto';
 import axios from 'axios';
+import { formatDateJakarta } from '../util/time';
 
 import { retry } from '../utils/retry';
 import { CALLBACK_ALLOWED_STATUSES, isCallbackStatusAllowed } from '../utils/callbackStatus';
@@ -356,10 +357,10 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
       sett:     o.settlementAmount ?? 0,
       fee:      o.feeLauncx ?? 0,
       stat:     o.status,
-      date:     o.createdAt.toISOString(),
-      paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
-      settledAt: o.settlementTime?.toISOString()      ?? '',
-      expiresAt: o.trxExpirationTime?.toISOString()   ?? '',
+      date:     formatDateJakarta(o.createdAt),
+      paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
+      settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
+      expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
     })
   })
 
@@ -378,10 +379,10 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
         sett:     o.settlementAmount ?? 0,
         fee:      o.feeLauncx ?? 0,
         stat:     o.status,
-        date:     o.createdAt.toISOString(),
-        paidAt:    o.paymentReceivedTime?.toISOString() ?? '',
-        settledAt: o.settlementTime?.toISOString()      ?? '',
-        expiresAt: o.trxExpirationTime?.toISOString()   ?? '',
+        date:     formatDateJakarta(o.createdAt),
+        paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
+        settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
+        expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
       })
     })
   }
