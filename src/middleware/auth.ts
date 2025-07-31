@@ -31,12 +31,12 @@ export const authMiddleware = (
 export const requireAdminAuth = [
   authMiddleware,
   (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (req.userRole !== 'ADMIN') {
+    if (req.userRole !== 'ADMIN' && req.userRole !== 'SUPER_ADMIN') {
       return res.status(403).json({ error: 'Forbidden: Admins only' });
     }
     next();
   }
-];
+];      
 export const requireSuperAdminAuth = [
   authMiddleware,
   (req: AuthRequest, res: Response, next: NextFunction) => {
