@@ -168,6 +168,7 @@ export default function ClientDashboardPage() {
     const token = localStorage.getItem('clientToken')
     if (!token) return router.push('/client/login')
 setExporting(true)
+    
 let timeoutId: ReturnType<typeof setTimeout> | null = null
 
 try {
@@ -217,7 +218,7 @@ try {
   }
   setExporting(false)
 }
-
+  }
   // Copy helper
   const copyText = (txt: string) => {
     navigator.clipboard.writeText(txt)
