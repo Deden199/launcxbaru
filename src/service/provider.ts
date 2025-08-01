@@ -70,18 +70,18 @@ export async function getActiveProviders(
 ): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
   const isWeekend = isJakartaWeekend(new Date())
 
-  // full match kedua flag
-  const scheduleFilter = isWeekend
-    ? { weekday: false, weekend: true }
-    : { weekday: true,  weekend: false }
+  const schedulePath = isWeekend ? 'weekend' : 'weekday'
 
   // 1) ambil dari DB
   const subs = await prisma.sub_merchant.findMany({
     where: {
       merchantId,
       provider,
-      schedule: { equals: scheduleFilter }
-    },
+      schedule: {
+        path: [schedulePath],
+        equals: true,
+      } as any,
+        },
     select: {
       id:          true,
       provider:    true,

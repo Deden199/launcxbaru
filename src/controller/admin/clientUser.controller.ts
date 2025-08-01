@@ -50,10 +50,8 @@ export const createClientUser = async (req: AuthRequest, res: Response) => {
 // Deactivate/delete a ClientUser
 export const deleteClientUser = async (req: AuthRequest, res: Response) => {
   const { userId } = req.params
-
-  await prisma.clientUser.update({
-    where: { id: userId },
-    data: { isActive: false }
+  await prisma.clientUser.delete({
+    where: { id: userId }
   })
 
   if (req.userId) {

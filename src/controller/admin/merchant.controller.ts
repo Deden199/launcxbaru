@@ -119,14 +119,15 @@ export const connectPG = async (req: Request, res: Response) => {
       select: { schedule: true },
     });
 
-    const clash = existing.some(
-      s => (s.schedule as any)[flagKey] === true
-    );
-    if (clash) {
-      return res.status(400).json({
-        error: `Sudah ada ${provider} credential untuk ${flagKey}`,
-      });
-    }
+   const clash = existing.some(
+    s => (s.schedule as any)[flagKey] === true
+  )
+
+  if (clash && !(schedule.weekday && schedule.weekend)) {
+    return res.status(400).json({
+      error: `Sudah ada ${provider} credential untuk ${flagKey}`,
+    })
+  }
 
     // 5) Сохраняем
     const created = await prisma.sub_merchant.create({
