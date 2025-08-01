@@ -319,21 +319,6 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
     if (statuses.length === 0) statuses = [...allowed]
     const statusWhere = { in: statuses }
 
-    // optional protection: prevent too-big synchronous export
-    const totalRows = await prisma.order.count({
-      where: {
-        partnerClientId: { in: clientIds },
-        status: statusWhere,
-        ...(dateFrom || dateTo ? { createdAt } : {})
-      }
-    })
-    const MAX_SYNC_EXPORT = 200_000
-    if (totalRows > MAX_SYNC_EXPORT) {
-      return res.status(400).json({
-        error: `Data terlalu banyak untuk diexport langsung (${totalRows} baris). Persempit range atau gunakan export background.`
-      })
-    }
-
     // 5) id->name map
     const idToName: Record<string,string> = {}
     pc.children.forEach(c => { idToName[c.id] = c.name })
@@ -367,9 +352,9 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
       { header: 'Expires At', key: 'expiresAt', width: 20 },
     ]
 
-    // 8) chunked fetch + write
+    // 8) offset-based chunked fetch & write
     const CHUNK_SIZE = 1000
-    let cursor: { id: string } | undefined = undefined
+    let skipped = 0
 
     while (true) {
       const batch = await prisma.order.findMany({
@@ -380,7 +365,7 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
         },
         orderBy: { createdAt: 'desc' as const },
         take: CHUNK_SIZE,
-        ...(cursor ? { cursor, skip: 1 } : {}),
+        skip: skipped,
         select: {
           partnerClientId:  true,
           id:               true,
@@ -418,10 +403,10 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
         }).commit()
       }
 
-      cursor = { id: batch[batch.length - 1].id }
+      skipped += batch.length
     }
 
-    // 9) finalize
+    // 9) finalize workbook
     await all.commit()
     await wb.commit()
     res.end()
@@ -430,7 +415,6 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to export data' })
     } else {
-      // if headers already sent, we can't change status; just end
       try { res.end() } catch {}
     }
   }
