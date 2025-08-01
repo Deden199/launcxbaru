@@ -76,6 +76,11 @@ export default function ClientDashboardPage() {
     return s
   }
 
+    const handleApply = () => {
+    fetchSummary()
+    fetchTransactions()
+  }
+
   const buildParams = () => {
     const tz = 'Asia/Jakarta'
     const params: any = {}
@@ -333,7 +338,7 @@ try {
                 <button
                   type="button"
                   className={styles.applyBtn}
-                  onClick={fetchTransactions}
+                  onClick={handleApply}
                   disabled={!startDate || !endDate}
                 >
                   Terapkan
