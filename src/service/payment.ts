@@ -65,12 +65,21 @@ export const createTransaction = async (
   let forced = config.api.forceProvider?.toLowerCase() || null;
 
   // 2) Kalau ENV nggak set, ambil defaultProvider dari PartnerClient
+    let forceSchedule: string | null = null;
+
   if (!forced) {
     const pc = await prisma.partnerClient.findUnique({
       where: { id: buyerId },
-      select: { defaultProvider: true }
+      select: { defaultProvider: true, forceSchedule: true }
     });
     forced = pc?.defaultProvider?.toLowerCase() || null;
+        forceSchedule = pc?.forceSchedule ?? null;
+  } else {
+    const pc = await prisma.partnerClient.findUnique({
+      where: { id: buyerId },
+      select: { forceSchedule: true }
+    });
+    forceSchedule = pc?.forceSchedule ?? null;
   }
 
   // 3) Tentukan provider akhir (forced > request.merchantName)
@@ -102,7 +111,9 @@ export const createTransaction = async (
     const refId = trx.id;
 
     // 3) Ambil kredensial aktif & instansiasi client
-const hilSubs = await getActiveProviders(merchantRec.id, 'hilogate');
+    const hilSubs = await getActiveProviders(merchantRec.id, 'hilogate', {
+  schedule: forceSchedule as any || undefined,
+});
 if (!hilSubs.length) throw new Error('No active Hilogate credentials');
 
 // ambil HilogateConfig dari properti `config`
@@ -194,7 +205,9 @@ if (mName === 'oy') {
   const refId = trx.id
 
   // 2) Panggil API OY
-const oySubs = await getActiveProviders(merchantRec.id, 'oy');
+const oySubs = await getActiveProviders(merchantRec.id, 'oy', {
+  schedule: forceSchedule as any || undefined,
+});
 if (!oySubs.length) throw new Error('No active OY credentials');
 
 // ambil config dari properti `config`, bukan `credentials`
@@ -460,7 +473,13 @@ export const checkPaymentStatus = async (req: Request) => {
   const order = await prisma.order.findUnique({ where: { id: refId } });
   if (order) {
     if (order.status === 'PENDING') {
-      const providers = await getActiveProvidersForClient(order.userId);
+      const pc = await prisma.partnerClient.findUnique({
+        where: { id: order.userId },
+        select: { forceSchedule: true },
+      });
+      const providers = await getActiveProvidersForClient(order.userId, {
+        schedule: pc?.forceSchedule as any || undefined,
+      });
       const prov = providers.find(p => p.name === order.channel) as any;
       if (prov?.checkStatus) {
         const newStat = await prov.checkStatus({ providerInvoice: order.id });
@@ -476,119 +495,6 @@ export const checkPaymentStatus = async (req: Request) => {
   return { status: cb ? 'DONE' : 'IN_PROGRESS' };
 };
 
-/* ═════════════ 4. Create Aggregated Order ═════════════ */
-// export const createOrder = async (
-//   payload: OrderRequest
-// ): Promise<OrderResponse> => {
-//   // 0) Tentukan pid: fallback ke userId jika playerId tidak dikirim
-//   const pid         = payload.playerId ?? payload.userId;
-//   const totalAmount = payload.amount;
-//   const forced      = config.api.forceProvider?.toLowerCase() || null;
-
-//   // List of internal checkout hosts
-//   const checkoutHosts = [
-//     'https://checkout1.launcx.com',
-//     'https://altcheckout.launcx.com',
-//     'https://payment.launcx.com',
-//     'https://c1.launcx.com',
-//   ];
-//   const pickRandomHost = () =>
-//     checkoutHosts[Math.floor(Math.random() * checkoutHosts.length)];
-
-//   // ─── Forced = Hilogate ───────────────────────────────
-//   if (forced === 'hilogate') {
-//     // 1) Direct Transaction via Hilogate
-//     const direct = await createTransaction({
-//       merchantName: 'hilogate',
-//       price:        totalAmount,
-//       buyer:        payload.userId,
-//       playerId:     pid,
-//       flow:         'embed',  // kita embed, build URL manual
-//     });
-
-//     const { orderId, qrPayload } = direct;
-//     const host        = pickRandomHost();
-//     const checkoutUrl = `${host}/order/${orderId}`;
-
-//     // 2) Hitung fee & settlement
-//     const pc = await prisma.partnerClient.findUnique({ where: { id: payload.userId } });
-//     if (!pc) throw new Error('PartnerClient tidak ditemukan');
-//     const feeLauncx        = Math.round(totalAmount * (pc.feePercent / 100) + pc.feeFlat);
-//     const settlementAmount = totalAmount - feeLauncx;
-
-//     // 3) Simpan ke tabel order (termasuk playerId)
-//     await prisma.order.create({
-//       data: {
-//         id:               orderId,
-//         userId:           payload.userId,
-//         merchantId:       payload.userId,
-//         playerId:         pid,
-//         amount:           totalAmount,
-//         channel:          'hilogate',
-//         status:           'PENDING',
-//         qrPayload,
-//         checkoutUrl,
-//         feeLauncx,
-//         fee3rdParty:      0,
-//         settlementAmount,
-//       },
-//     });
-
-//     // 4) Kembalikan response
-//     return { orderId, checkoutUrl, qrPayload, playerId: pid, totalAmount };
-//   }
-
-//   // ─── Aggregated flow ─────────────────────────────────
-//   // 1) Ambil provider aktif
-//   const providers = await getActiveProvidersForClient(payload.userId);
-//   if (!providers.length)
-//     throw new Error(`No active payment channels for user ${payload.userId}`);
-
-//   // 2) Pilih provider (override / random)
-//   const channel = forced
-//     ? providers.find(p => p.name.toLowerCase() === forced)
-//     : providers[Math.floor(Math.random() * providers.length)]!;
-//   if (!channel)
-//     throw new Error(`Provider override "${forced}" tidak tersedia`);
-
-//   // 3) Generate orderId & QR/URL
-//   const orderId = generateRandomId();
-//   let qrPayload: string | undefined;
-//   let checkoutUrl: string;
-//   if (channel.supportsQR && channel.generateQR) {
-//     qrPayload   = await channel.generateQR({ orderId, amount: totalAmount });
-//     checkoutUrl = `${pickRandomHost()}/order/${orderId}`;
-//   } else {
-//     checkoutUrl = await channel.generateCheckoutUrl({ orderId, amount: totalAmount });
-//   }
-
-//   // 4) Hitung fee & settlement
-//   const pc2 = await prisma.partnerClient.findUnique({ where: { id: payload.userId } });
-//   if (!pc2) throw new Error('PartnerClient tidak ditemukan');
-//   const feeLauncx2        = Math.round(totalAmount * (pc2.feePercent / 100) + pc2.feeFlat);
-//   const settlementAmount2 = totalAmount - feeLauncx2;
-
-//   // 5) Simpan ke tabel order
-//   await prisma.order.create({
-//     data: {
-//       id:               orderId,
-//       userId:           payload.userId,
-//       merchantId:       payload.userId,
-//       playerId:         pid,
-//       amount:           totalAmount,
-//       channel:          channel.name,
-//       status:           'PENDING',
-//       qrPayload,
-//       checkoutUrl,
-//       feeLauncx:        feeLauncx2,
-//       fee3rdParty:      0,
-//       settlementAmount: settlementAmount2,
-//     },
-//   });
-
-//   // 6) Kembalikan response
-//   return { orderId, checkoutUrl, qrPayload, playerId: pid, totalAmount };
-// };
 
 /* ═════════════ 5. Get Order ═════════════ */
 export const getOrder = async (id: string) => prisma.order.findUnique({ where: { id } });

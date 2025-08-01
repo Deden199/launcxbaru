@@ -21,6 +21,8 @@ interface Client {
   defaultProvider?: string
     weekendFeePercent: number
   weekendFeeFlat: number
+  forceSchedule?: string
+
 }
 
 type Option = { id: string; name: string }
@@ -43,6 +45,7 @@ export default function EditClientPage() {
   const [parentClientId, setParentClientId] = useState<string>('')
   const [childrenIds, setChildrenIds]     = useState<string[]>([])
   const [defaultProvider, setDefaultProvider] = useState<string>('')
+  const [forceSchedule, setForceSchedule] = useState<string>('')
   const [loading, setLoading]             = useState(false)
   const [error, setError]                 = useState('')
 
@@ -64,6 +67,8 @@ export default function EditClientPage() {
         setParentClientId(c.parentClientId || '')
         setChildrenIds(c.childrenIds || [])
         setDefaultProvider(c.defaultProvider || '')
+        setForceSchedule(c.forceSchedule || '')
+
       })
       .catch(() => setError('Gagal memuat data client'))
   }, [clientId])
@@ -100,8 +105,9 @@ export default function EditClientPage() {
         withdrawFeeFlat,     // new
         parentClientId: parentClientId || null,
         childrenIds,
-        defaultProvider
-      })
+        defaultProvider,
+        forceSchedule: forceSchedule || null
+            })
       router.push('/admin/clients')
     } catch (e: any) {
       setError(e.response?.data?.error || 'Gagal menyimpan perubahan')
@@ -146,6 +152,19 @@ export default function EditClientPage() {
                 <option value="">-- Select Provider --</option>
                 <option value="hilogate">Hilogate</option>
                 <option value="oy">OY Indonesia</option>
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label>Force Schedule</label>
+            <div className="default-select-wrapper">
+              <select
+                value={forceSchedule}
+                onChange={e => setForceSchedule(e.target.value)}
+              >
+                <option value="">Auto</option>
+                <option value="weekday">Weekday</option>
+                <option value="weekend">Weekend</option>
               </select>
             </div>
           </div>

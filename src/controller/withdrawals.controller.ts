@@ -348,7 +348,13 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
     }
 
     // 2) Ambil kredensial aktif (weekday/weekend) dari DB
-    const subs = await getActiveProviders(merchant.id, 'hilogate');
+    const pc = await prisma.partnerClient.findUnique({
+      where: { id: req.partnerClientId! },
+      select: { forceSchedule: true },
+    });
+    const subs = await getActiveProviders(merchant.id, 'hilogate', {
+      schedule: pc?.forceSchedule as any || undefined,
+    });
     if (subs.length === 0) {
       return res.status(500).json({ error: 'No active Hilogate credentials today' });
     }

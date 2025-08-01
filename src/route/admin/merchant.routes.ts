@@ -49,6 +49,11 @@ router.post(
   requireSuperAdminAuth,
   ctrl.adminValidateAccount
 )
+router.get(
+  '/dashboard/admin-withdrawals',
+  requireSuperAdminAuth,
+  ctrl.getAdminWithdrawals
+)
 router.get('/dashboard/export-all',   exportCtrl.exportDashboardAll)
 
 export default router

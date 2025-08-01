@@ -15,6 +15,7 @@ interface Client {
   feePercent: number
   feeFlat: number
   defaultProvider: string           // ← tambahkan ini
+  forceSchedule?: string
   parentClient?: { id: string; name: string }
   children?: { id: string; name: string }[]
 }
@@ -37,6 +38,7 @@ export default function ApiClientsPage() {
   const [loading, setLoading] = useState(false)
   const [creds, setCreds] = useState<CreateResp | null>(null)
 const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
+const [newForceSchedule, setNewForceSchedule] = useState<string>('')
 
   useEffect(() => { loadClients() }, [])
 
@@ -63,13 +65,15 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
         feePercent: newFeePercent,
         feeFlat: newFeeFlat,
         defaultProvider: newDefaultProvider,  // ← tambahkan ini
+        forceSchedule: newForceSchedule || null,
+
 
       }
       if (newParentId) payload.parentClientId = newParentId
       const res = await api.post<CreateResp>('/admin/clients', payload)
       setClients(cs => [res.data.client, ...cs])
       setCreds(res.data)
-      setNewName(''); setNewEmail(''); setNewFeePercent(0.5); setNewFeeFlat(0); setNewParentId('')
+      setNewName(''); setNewEmail(''); setNewFeePercent(0.5); setNewFeeFlat(0); setNewParentId(''); setNewForceSchedule('')
     } catch (e: any) {
       setErr(e.response?.data?.error || 'Gagal menambah client')
     } finally {
@@ -104,6 +108,14 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
 >
   <option value="hilogate">Hilogate</option>
   <option value="oy">OY Indonesia</option>
+  </select>
+          <select
+  value={newForceSchedule}
+  onChange={e => setNewForceSchedule(e.target.value)}
+>
+  <option value="">Auto</option>
+  <option value="weekday">Weekday</option>
+  <option value="weekend">Weekend</option>
 </select>
           {/* <select value={newParentId} onChange={e => setNewParentId(e.target.value)}>
             <option value="">No Parent</option>
@@ -157,6 +169,9 @@ const [newDefaultProvider, setNewDefaultProvider] = useState<string>('hilogate')
                 <ClipboardCopy onClick={() => copy(c.apiSecret)} />
               </p> */}
               <p><strong>Default PG:</strong> {c.defaultProvider}</p>
+                            {c.forceSchedule && (
+                <p><strong>Force Schedule:</strong> {c.forceSchedule}</p>
+              )}
               <p><strong>Parent:</strong> {c.parentClient?.name || '-'}</p>
               <p><strong>Children:</strong> {c.children?.length || 0}</p>
               <p><strong>Fee %:</strong> {c.feePercent.toFixed(3)}</p>

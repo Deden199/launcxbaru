@@ -61,6 +61,20 @@ interface Withdrawal {
 
 }
 
+interface AdminWithdrawal {
+  id: string
+  bankName: string
+  bankCode: string
+  accountNumber: string
+  accountName: string
+  amount: number
+  pgRefId?: string | null
+  status: string
+  createdAt: string
+  wallet: string
+}
+
+
 type Tx = {
   id: string
   date: string
@@ -105,7 +119,8 @@ export default function DashboardPage() {
 const [subBalances, setSubBalances] = useState<SubBalance[]>([])
 const [selectedSub, setSelectedSub] = useState<string>('')
 const [currentBalance, setCurrentBalance] = useState(0)
-
+  const [adminWithdrawals, setAdminWithdrawals] = useState<AdminWithdrawal[]>([])
+  const [loadingAdminWd, setLoadingAdminWd] = useState(true)
 const [wdAmount, setWdAmount] = useState('')
 const [wdAccount, setWdAccount] = useState('')
 const [wdBank, setWdBank] = useState('')
@@ -349,6 +364,21 @@ async function fetchWithdrawals() {
     setLoadingWd(false)
   }
 }
+async function fetchAdminWithdrawals() {
+  setLoadingAdminWd(true)
+  try {
+    const params = buildParams()
+    const { data } = await api.get<{ data: AdminWithdrawal[] }>(
+      '/admin/merchants/dashboard/admin-withdrawals',
+      { params }
+    )
+    setAdminWithdrawals(data.data)
+  } catch (err: any) {
+    console.error('fetchAdminWithdrawals error', err)
+  } finally {
+    setLoadingAdminWd(false)
+  }
+}
 
 async function handleAdminWithdraw(e: React.FormEvent) {
   e.preventDefault()
@@ -369,6 +399,8 @@ async function handleAdminWithdraw(e: React.FormEvent) {
     setIsValid(false)
     fetchSummary()
     fetchWithdrawals()
+    fetchAdminWithdrawals()
+
   } catch (err: any) {
     alert(err.response?.data?.error || 'Failed')
      } finally {
@@ -492,6 +524,7 @@ const filtered = mapped.filter(t => {
     fetchSummary()
     fetchProfit()
     fetchProfitSub()
+    fetchAdminWithdrawals()
 
     fetchWithdrawals()
   }, [range, from, to, selectedMerchant])
@@ -561,6 +594,7 @@ const filtered = mapped.filter(t => {
                     fetchSummary()
                     fetchProfit()
                     fetchProfitSub()
+                    fetchAdminWithdrawals()
                     fetchWithdrawals()
                     fetchTransactions()
                   }}
@@ -757,6 +791,7 @@ const filtered = mapped.filter(t => {
                     fetchSummary()
                     fetchProfit()
                     fetchProfitSub()
+                    fetchAdminWithdrawals()
                     fetchWithdrawals()
                     fetchTransactions()
                   }}
@@ -1019,6 +1054,65 @@ const filtered = mapped.filter(t => {
           </div>
         )}
       </section>
+
+            {/* === ADMIN WITHDRAWAL HISTORY ======================================= */}
+      {isSuperAdmin && (
+        <section className={styles.tableSection} style={{ marginTop: 32 }}>
+          <h2>Admin Withdrawals</h2>
+          {loadingAdminWd ? (
+            <div className={styles.loader}>Loading withdrawals…</div>
+          ) : (
+            <div className={styles.tableWrapper}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Wallet</th>
+                    <th>Bank</th>
+                    <th>Account No.</th>
+                    <th>Account Name</th>
+                    <th>Amount</th>
+                    <th>PG Ref ID</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminWithdrawals.length ? (
+                    adminWithdrawals.map(a => (
+                      <tr key={a.id}>
+                        <td>
+                          {new Date(a.createdAt).toLocaleString('id-ID', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })}
+                        </td>
+                        <td>{a.wallet}</td>
+                        <td>{a.bankName}</td>
+                        <td>{a.accountNumber}</td>
+                        <td>{a.accountName}</td>
+                        <td>
+                          {a.amount.toLocaleString('id-ID', {
+                            style: 'currency',
+                            currency: 'IDR',
+                          })}
+                        </td>
+                        <td>{a.pgRefId ?? '-'}</td>
+                        <td>{a.status}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className={styles.noData}>
+                        No withdrawals
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
       </main>
     </div>
   )

@@ -23,7 +23,9 @@ export const getAllClients = async (_: Request, res: Response) => {
       weekendFeeFlat:    true,
       withdrawFeePercent: true,
       withdrawFeeFlat:    true,
+      forceSchedule:      true,
       defaultProvider:    true,
+      
       parentClient: {
         select: { id: true, name: true }
       },
@@ -63,7 +65,11 @@ export const createClient = async (req: AuthRequest, res: Response) => {
   const withdrawFeeFlat = req.body.withdrawFeeFlat != null
     ? Number(req.body.withdrawFeeFlat)
     : 0
-
+  const forceSchedule =
+    typeof req.body.forceSchedule === 'string' &&
+    ['weekday', 'weekend'].includes(req.body.forceSchedule)
+      ? req.body.forceSchedule
+      : null
   if (isNaN(feePercent) || feePercent < 0 || feePercent > 100) {
     return res.status(400).json({ error: 'feePercent must be between 0 and 100' })
   }
@@ -98,6 +104,7 @@ export const createClient = async (req: AuthRequest, res: Response) => {
       weekendFeeFlat,
       withdrawFeePercent,
       withdrawFeeFlat,
+      forceSchedule,
       defaultProvider: 'hilogate',
     }
   })
@@ -156,6 +163,7 @@ export const getClientById = async (req: Request, res: Response) => {
     weekendFeeFlat: client.weekendFeeFlat,
     withdrawFeePercent: client.withdrawFeePercent,
     withdrawFeeFlat: client.withdrawFeeFlat,
+    forceSchedule:  client.forceSchedule,
     defaultProvider:  client.defaultProvider,
     createdAt: client.createdAt,
     parentClientId: client.parentClient?.id ?? null,
@@ -176,6 +184,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     withdrawFeePercent,
     withdrawFeeFlat,
     defaultProvider,
+    forceSchedule,
     parentClientId = null,
     childrenIds = []
   } = req.body as {
@@ -188,6 +197,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     withdrawFeePercent?: number
     withdrawFeeFlat?: number
     defaultProvider?: string
+    forceSchedule?: string
     parentClientId?: string | null
     childrenIds?: string[]
   }
@@ -219,6 +229,12 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     if (isNaN(wf) || wf < 0)
       return res.status(400).json({ error: 'weekendFeeFlat must be >= 0' })
     data.weekendFeeFlat = wf
+  }
+    if (forceSchedule != null) {
+    const fs = String(forceSchedule).trim().toLowerCase()
+    if (!['weekday', 'weekend'].includes(fs))
+      return res.status(400).json({ error: 'forceSchedule must be weekday or weekend' })
+    data.forceSchedule = fs
   }
   if (withdrawFeePercent != null) {
     const wf = Number(withdrawFeePercent)

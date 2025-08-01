@@ -195,6 +195,8 @@ model PartnerClient {
   withdrawFeeFlat    Float @default(0)
   weekendFeePercent  Float @default(0)
   weekendFeeFlat     Float @default(0)
+    /// Force credential schedule: "weekday" or "weekend"
+  forceSchedule      String?
 }
 
 model Order {

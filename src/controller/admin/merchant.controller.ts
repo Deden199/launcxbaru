@@ -45,6 +45,66 @@ export const getAllClient = async (_req: Request, res: Response) => {
   res.json(list);
 };
 
+export async function getAdminWithdrawals(req: Request, res: Response) {
+  try {
+    const { date_from, date_to, page = '1', limit = '50' } = req.query as any
+
+    const pageNum = Math.max(1, parseInt(page as string, 10))
+    const pageSize = Math.min(100, parseInt(limit as string, 10))
+
+    const dateFrom = date_from ? new Date(String(date_from)) : undefined
+    const dateTo   = date_to   ? new Date(String(date_to))   : undefined
+    const createdAtFilter: any = {}
+    if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom
+    if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo
+
+    const where: any = {}
+    if (dateFrom || dateTo) {
+      where.createdAt = createdAtFilter
+    }
+
+    const [rows, total] = await Promise.all([
+      prisma.adminWithdraw.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id:            true,
+          amount:        true,
+          bankName:      true,
+          bankCode:      true,
+          accountNumber: true,
+          accountName:   true,
+          pgRefId:       true,
+          status:        true,
+          createdAt:     true,
+          subMerchant: { select: { name: true, provider: true } },
+        },
+      }),
+      prisma.adminWithdraw.count({ where }),
+    ])
+
+    const data = rows.map(r => ({
+      id:            r.id,
+      amount:        r.amount,
+      bankName:      r.bankName,
+      bankCode:      r.bankCode,
+      accountNumber: r.accountNumber,
+      accountName:   r.accountName,
+      pgRefId:       r.pgRefId ?? null,
+      status:        r.status,
+      createdAt:     r.createdAt.toISOString(),
+      wallet:        r.subMerchant?.name || r.subMerchant?.provider,
+    }))
+
+    return res.json({ data, total })
+  } catch (err: any) {
+    console.error('[getAdminWithdrawals]', err)
+    return res.status(500).json({ error: 'Failed to fetch admin withdrawals' })
+  }
+}
+
 
 // 3. Get merchant by ID
 export const getMerchantById = async (req: Request, res: Response) => {

@@ -54,22 +54,26 @@ const extractQR = (p: any): string | null =>
 // overload untuk Hilogate
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate'
+  provider: 'hilogate',
+  opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<HilogateConfig>[]>
 
 // overload untuk OY
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'oy'
+  provider: 'oy',
+  opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<OyConfig>[]>
 
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy'
+  provider: 'hilogate' | 'oy',
+  opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
-  const isWeekend = isJakartaWeekend(new Date())
-
+  const isWeekend = opts.schedule
+    ? opts.schedule === 'weekend'
+    : isJakartaWeekend(new Date())
   const schedulePath = isWeekend ? 'weekend' : 'weekday'
 
   // 1) ambil dari DB
@@ -143,11 +147,11 @@ export interface Provider {
 /* ═══════════ List provider aktif ═══════════ */
 
 export async function getActiveProvidersForClient(
-  merchantId: string
+  merchantId: string,
+  opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<Provider[]> {
-  const hilogateSubs = await getActiveProviders(merchantId, 'hilogate');
-  const oySubs = await getActiveProviders(merchantId, 'oy');
-
+  const hilogateSubs = await getActiveProviders(merchantId, 'hilogate', opts);
+  const oySubs = await getActiveProviders(merchantId, 'oy', opts);
   return [
     /* ──── Hilogate ──── */
     {
