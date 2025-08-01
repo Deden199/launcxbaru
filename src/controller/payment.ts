@@ -46,7 +46,7 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     }
     const client = await prisma.partnerClient.findUnique({
       where: { id: clientId },
-      select: { defaultProvider: true }
+      select: { defaultProvider: true, forceSchedule: true }
 
     })
     if (!client) {
@@ -56,6 +56,8 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     }
     const partnerClientId = clientId
     const defaultProvider = (client.defaultProvider ?? 'hilogate').toLowerCase()
+   const forceSchedule = client.forceSchedule ?? null
+
     if (defaultProvider !== 'hilogate' && defaultProvider !== 'oy') {
       return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
@@ -73,10 +75,14 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
 // 2) Ambil kredensial sub‐merchant untuk provider itu
  let subs;
  if (defaultProvider === 'hilogate') {
-   subs = await getActiveProviders(merchant.id, 'hilogate');
- } else {
-   subs = await getActiveProviders(merchant.id, 'oy');
- }
+   subs = await getActiveProviders(merchant.id, 'hilogate', {
+     schedule: forceSchedule as any || undefined,
+   });
+   } else {
+   subs = await getActiveProviders(merchant.id, 'oy', {
+     schedule: forceSchedule as any || undefined,
+   });
+   }
     if (!subs.length) return res.status(400).json(createErrorResponse('sno'))
     const selectedSubMerchantId = subs[0].id
 
