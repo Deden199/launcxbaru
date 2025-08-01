@@ -47,7 +47,7 @@ export default function ClientDashboardPage() {
   const [balance, setBalance]                 = useState(0)
   const [totalPend, setTotalPend]             = useState(0)
   const [totalTrans, setTotalTrans]           = useState(0) // from backend (count)
-
+  const [exporting, setExporting]             = useState(false)
   // Transactions
   const [txs, setTxs]                         = useState<Tx[]>([])
   const [page, setPage]                       = useState(1)
@@ -167,24 +167,56 @@ export default function ClientDashboardPage() {
   const handleExport = async () => {
     const token = localStorage.getItem('clientToken')
     if (!token) return router.push('/client/login')
-    try {
-      const resp = await api.get('/client/dashboard/export', {
-        params: buildParams(),
-        responseType: 'blob'
-      })
-      const blob = new Blob([resp.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'client-transactions.xlsx'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      alert('Gagal export data')
-    }
+setExporting(true)
+let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+try {
+  const controller = new AbortController()
+  timeoutId = setTimeout(() => controller.abort(), 60000) // 60s safety
+
+  const resp = await api.get('/client/dashboard/export', {
+    params: buildParams(),
+    responseType: 'blob',
+    signal: controller.signal,
+    timeout: 0, // override default axios timeout if any
+  })
+
+  // kalau sudah berhasil, bersihkan timeout
+  if (timeoutId) {
+    clearTimeout(timeoutId)
+    timeoutId = null
   }
+
+  const contentDisp = resp.headers['content-disposition'] || ''
+  const match = /filename="?([^"]+)"?/.exec(contentDisp)
+  const filename = match ? match[1] : 'client-transactions.xlsx'
+
+  const blob = new Blob([resp.data], {
+    type: resp.headers['content-type'] || undefined,
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+} catch (e: any) {
+  if (e?.name === 'CanceledError' || e?.name === 'AbortError') {
+    alert('Export timeout. Coba range lebih kecil atau gunakan export background.')
+  } else {
+    console.error('Export failed', e)
+    alert('Gagal export data: ' + (e?.message || 'Unknown error'))
+  }
+} finally {
+  // pastikan timeout selalu dibersihkan
+  if (timeoutId) {
+    clearTimeout(timeoutId)
+    timeoutId = null
+  }
+  setExporting(false)
+}
 
   // Copy helper
   const copyText = (txt: string) => {
@@ -290,9 +322,21 @@ export default function ClientDashboardPage() {
               </div>
             )}
 
-            <button className={styles.exportBtn} onClick={handleExport}>
-              <FileText size={16} /> Export Excel
-            </button>
+<button
+  type="button"
+  className={styles.exportBtn}
+  onClick={handleExport}
+  disabled={exporting}
+  aria-busy={exporting}
+  aria-label="Export to Excel"
+>
+  {exporting ? 'Exporting…' : (
+    <>
+      <FileText size={16} aria-hidden="true" /> Export Excel
+    </>
+  )}
+</button>
+
           </div>
 
           <select
