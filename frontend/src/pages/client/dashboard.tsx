@@ -291,16 +291,20 @@ try {
             <h2>Pending Settlement</h2>
                         <p>{totalPend.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
           </div>
-                    <div className={`${styles.card} ${styles.settledBalance}`}>
+                    <div className={`${styles.card} ${styles.paidBalance}`}>
             <Wallet className={styles.cardIcon} />
             <h2>Total Settlement</h2>
             <p>{totalSettlement.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
           </div>
-          <div className={`${styles.card} ${styles.paidBalance}`}>
-            <Wallet className={styles.cardIcon} />
-            <h2>Total Paid</h2>
-            <p>{totalPaid.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
-          </div>
+{/* <div className={`${styles.card} ${styles.paidBalance}`}>
+  <Wallet className={styles.cardIcon} />
+  <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <h2 style={{ margin: 0 }}>Total Paid</h2>
+    <small style={{ fontSize: 12, color: '#666' }}>after fee</small>
+  </div>
+  <p>{totalPaid.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
+</div> */}
+
         </section>
       </aside>
 
