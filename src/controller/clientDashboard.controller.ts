@@ -175,8 +175,30 @@ if (statuses.length === 0) statuses = [...allowed];
         status: 'PAID',
         ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       }
-    });
-    const totalPending = pendingAgg._sum.pendingAmount ?? 0;
+    })
+    const totalPending = pendingAgg._sum.pendingAmount ?? 0
+
+    // total nominal transaksi berstatus PAID
+    const paidAgg = await prisma.order.aggregate({
+      _sum: { amount: true },
+      where: {
+        partnerClientId: { in: clientIds },
+        status: 'PAID',
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+      }
+    })
+    const totalPaid = paidAgg._sum.amount ?? 0
+
+    // total nominal settlement sukses
+    const settleAgg = await prisma.order.aggregate({
+      _sum: { settlementAmount: true },
+      where: {
+        partnerClientId: { in: clientIds },
+        status: { in: ['SUCCESS', 'DONE', 'SETTLED'] },
+        ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
+      }
+    })
+    const totalSettlement = settleAgg._sum.settlementAmount ?? 0
 
     // (4b) HITUNG TOTAL ACTIVE BALANCE BERDASARKAN clientIds
     const parentBal = clientIds.includes(pc.id) ? pc.balance ?? 0 : 0;
@@ -259,6 +281,8 @@ return res.json({
   totalPending,
   totalAmount,      // baru: sum of amount
   totalCount,       // baru: jumlah transaksi (dipakai di summary)
+  totalSettlement,
+  totalPaid,
   // backward compatibility jika frontend lama masih pakai:
   totalTransaksi: totalCount, // kalau summary mau count, biarkan ini jadi count
   total: totalCount,          // pagination logic masih bisa pakai ini

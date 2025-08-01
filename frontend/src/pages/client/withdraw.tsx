@@ -126,27 +126,46 @@ useEffect(() => {
     .catch(console.error)
 }, [selectedChild])
 
-
+  async function fetchAllWithdrawals(cid: string | 'all') {
+    let pageNum = 1
+    const limit = 100
+    const first = await apiClient.get<{ data: Withdrawal[]; total: number }>(
+      '/client/withdrawals',
+      { params: { clientId: cid, page: pageNum, limit } }
+    )
+    let all = first.data.data
+    const total = first.data.total
+    while (all.length < total) {
+      pageNum += 1
+      const res = await apiClient.get<{ data: Withdrawal[]; total: number }>(
+        '/client/withdrawals',
+        { params: { clientId: cid, page: pageNum, limit } }
+      )
+      all = all.concat(res.data.data)
+    }
+    return all
+  }
   useEffect(() => {
     setLoading(true)
     setPageError('')
 
-    Promise.all([
-      apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>('/client/dashboard', {
-        params: { clientId: selectedChild }
-      }),
-      apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
-        params: { clientId: selectedChild }
-      }),
-    ])
-      .then(([dash, hist]) => {
+    const load = async () => {
+      try {
+        const dash = await apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>('/client/dashboard', {
+          params: { clientId: selectedChild }
+        })
+        const all = await fetchAllWithdrawals(selectedChild)
         setBalance(dash.data.balance)
         setPending(dash.data.totalPending ?? 0)
         if (children.length === 0) setChildren(dash.data.children)
-        setWithdrawals(hist.data.data)
-      })
-      .catch(err => setPageError('Failed to load data'))
-      .finally(() => setLoading(false))
+        setWithdrawals(all)
+      } catch {
+        setPageError('Failed to load data')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [selectedChild])
 
   /* ──────────────── Helpers ──────────────── */
@@ -258,15 +277,11 @@ const submit = async (e: React.FormEvent) => {
     // 4) Tangani berdasarkan HTTP status
     if (res.status === 201) {
       // sukses: refresh data & tutup modal
-      const [dash, hist] = await Promise.all([
-        apiClient.get('/client/dashboard'),
-        apiClient.get<{ data: Withdrawal[] }>('/client/withdrawals', {
-          params: { clientId: selectedChild }
-        }),
-      ]);
-      setBalance(dash.data.balance);
-      setPending(dash.data.totalPending ?? 0);
-      setWithdrawals(hist.data.data);
+      const dash = await apiClient.get('/client/dashboard')
+      const all = await fetchAllWithdrawals(selectedChild)
+      setBalance(dash.data.balance)
+      setPending(dash.data.totalPending ?? 0)
+      setWithdrawals(all)
       setForm(f => ({
         ...f,
         amount: '',
@@ -369,19 +384,20 @@ if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
           </div>
         </div> */}
       {subs.length > 0 && (
-        <div className={`${styles.statCard} ${styles.activeCard}`}>
+        <div className={`${styles.statCard} ${styles.activeCard} ${styles.subWalletContainer}`}>
           {subs.map(s => (
             <div
               key={s.id}
-              className={s.id === selectedSub ? `${styles.statCard} ${styles.selected}` : styles.statCard}
-             onClick={() => setSelectedSub(s.id)}
-           >
- <h4>
-   {s.name || (s.provider
-     ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1)
-     : `Sub-wallet ${s.id.substring(0,6)}`)}<br></br>
- </h4>             
- <p>Rp {s.balance.toLocaleString()}</p>           </div>
+             className={s.id === selectedSub ? `${styles.subWalletCard} ${styles.selected}` : styles.subWalletCard}
+              onClick={() => setSelectedSub(s.id)}
+            >
+              <h4>
+                {s.name || (s.provider
+                  ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1)
+                  : `Sub-wallet ${s.id.substring(0,6)}`)}
+              </h4>
+              <p>Rp {s.balance.toLocaleString()}</p>
+            </div>
           ))}
         </div>
       )}

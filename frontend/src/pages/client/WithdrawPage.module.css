@@ -120,6 +120,9 @@
 .sPENDING   { color:#d97706; font-weight:600; }
 .sCOMPLETED { color:#059669; font-weight:600; }
 .sFAILED    { color:#b91c1c; font-weight:600; }
+/* Layout for list of sub-wallet cards */
+.subWalletContainer { display:flex; flex-wrap:wrap; gap:.75rem; }
+.subWalletCard { display:flex; flex-direction:column; flex:0 0 auto; min-width:160px; }
 
 .pagination { display:flex; justify-content:space-between; align-items:center;
               font-size:.875rem; margin-top:1rem; }

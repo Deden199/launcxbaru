@@ -47,6 +47,8 @@ export default function ClientDashboardPage() {
   const [balance, setBalance]                 = useState(0)
   const [totalPend, setTotalPend]             = useState(0)
   const [totalTrans, setTotalTrans]           = useState(0) // from backend (count)
+    const [totalSettlement, setTotalSettlement] = useState(0)
+  const [totalPaid, setTotalPaid]             = useState(0)
   const [exporting, setExporting]             = useState(false)
   // Transactions
   const [txs, setTxs]                         = useState<Tx[]>([])
@@ -132,11 +134,15 @@ export default function ClientDashboardPage() {
         balance: number
         totalPending: number
         totalCount: number
+        totalSettlement?: number
+        totalPaid?: number
         children: ClientOption[]
       }>('/client/dashboard', { params: buildParams() })
 
       setBalance(data.balance)
       setTotalPend(data.totalPending)
+      setTotalSettlement(data.totalSettlement || 0)
+      setTotalPaid(data.totalPaid || 0)
       setChildren(data.children)
       setTotalTrans(data.totalCount)
     } catch {
@@ -271,12 +277,24 @@ try {
       <aside className={styles.sidebar}>
         <section className={styles.statsGrid}>
           <div className={styles.card}>
-            <ListChecks className={styles.cardIcon} /><h2>Transactions</h2>
-            <p>{totalTrans.toLocaleString()}</p>
+            <ListChecks className={styles.cardIcon} />
+            <h2>Transactions</h2>
+                        <p>{totalTrans.toLocaleString()}</p>
           </div>
           <div className={`${styles.card} ${styles.pendingBalance}`}>
-            <Clock className={styles.cardIcon} /><h2>Pending Settlement</h2>
-            <p>{totalPend.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
+            <Clock className={styles.cardIcon} />
+            <h2>Pending Settlement</h2>
+                        <p>{totalPend.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
+          </div>
+                    <div className={`${styles.card} ${styles.settledBalance}`}>
+            <Wallet className={styles.cardIcon} />
+            <h2>Total Settlement</h2>
+            <p>{totalSettlement.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
+          </div>
+          <div className={`${styles.card} ${styles.paidBalance}`}>
+            <Wallet className={styles.cardIcon} />
+            <h2>Total Paid</h2>
+            <p>{totalPaid.toLocaleString('id-ID',{ style:'currency', currency:'IDR' })}</p>
           </div>
         </section>
       </aside>

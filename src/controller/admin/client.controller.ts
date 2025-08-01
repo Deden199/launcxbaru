@@ -230,11 +230,16 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'weekendFeeFlat must be >= 0' })
     data.weekendFeeFlat = wf
   }
-    if (forceSchedule != null) {
+  if (forceSchedule !== undefined) {
     const fs = String(forceSchedule).trim().toLowerCase()
-    if (!['weekday', 'weekend'].includes(fs))
-      return res.status(400).json({ error: 'forceSchedule must be weekday or weekend' })
-    data.forceSchedule = fs
+    if (fs === '' || forceSchedule === null) {
+      data.forceSchedule = null
+    } else {
+      if (!['weekday', 'weekend'].includes(fs)) {
+        return res.status(400).json({ error: 'forceSchedule must be weekday or weekend' })
+      }
+      data.forceSchedule = fs
+    }
   }
   if (withdrawFeePercent != null) {
     const wf = Number(withdrawFeePercent)
