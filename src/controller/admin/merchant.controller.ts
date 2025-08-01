@@ -1146,6 +1146,7 @@ env:
 
     await prisma.adminWithdraw.create({
       data: {
+        refId, // <<-- wajib, sebelumnya hilang
         subMerchant: { connect: { id: subMerchantId } },
         amount,
         bankName,
