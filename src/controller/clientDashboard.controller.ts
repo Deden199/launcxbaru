@@ -271,149 +271,171 @@ return res.json({
 }
 
 export async function exportClientTransactions(req: ClientAuthRequest, res: Response) {
-  // 1) load user + children (sama seperti sebelumnya)
-  const user = await prisma.clientUser.findUnique({
-    where: { id: req.clientUserId! },
-    include: {
-      partnerClient: {
-        include: { children: { select: { id: true, name: true } } }
+  try {
+    // 1) load user + children
+    const user = await prisma.clientUser.findUnique({
+      where: { id: req.clientUserId! },
+      include: {
+        partnerClient: {
+          include: { children: { select: { id: true, name: true } } }
+        }
       }
+    })
+    if (!user) return res.status(404).json({ error: 'User tidak ditemukan' })
+    const pc = user.partnerClient!
+
+    // 2) tanggal
+    const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined
+    const dateTo   = req.query.date_to ? new Date(String(req.query.date_to)) : undefined
+    const createdAt: any = {}
+    if (dateFrom) createdAt.gte = dateFrom
+    if (dateTo)   createdAt.lte = dateTo
+
+    // 3) clientIds override
+    const isParent = pc.children.length > 0
+    let clientIds = isParent
+      ? [pc.id, ...pc.children.map(c => c.id)]
+      : [pc.id]
+    if (typeof req.query.clientId === 'string' && req.query.clientId !== 'all' && req.query.clientId.trim()) {
+      clientIds = [String(req.query.clientId)]
     }
-  })
-  if (!user) return res.status(404).json({ error: 'User tidak ditemukan' })
-  const pc = user.partnerClient!
 
-  // 2) tanggal
-  const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined
-  const dateTo   = req.query.date_to ? new Date(String(req.query.date_to)) : undefined
-  const createdAt: any = {}
-  if (dateFrom) createdAt.gte = dateFrom
-  if (dateTo)   createdAt.lte = dateTo
+    // 4) status filter expansion
+    const rawStatus = req.query.status
+    const allowed = DASHBOARD_STATUSES as readonly string[]
+    let statuses: string[] = []
+    if (Array.isArray(rawStatus)) {
+      statuses = rawStatus
+        .map(String)
+        .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+        .filter(s => allowed.includes(s))
+    } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
+      statuses = rawStatus
+        .split(',')
+        .map(s => s.trim())
+        .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+        .filter(s => allowed.includes(s))
+    }
+    if (statuses.length === 0) statuses = [...allowed]
+    const statusWhere = { in: statuses }
 
-  // 3) clientIds override logic (sama)
-  const isParent = pc.children.length > 0
-  let clientIds = isParent
-    ? [pc.id, ...pc.children.map(c => c.id)]
-    : [pc.id]
-
-  if (typeof req.query.clientId === 'string' && req.query.clientId !== 'all' && req.query.clientId.trim()) {
-    clientIds = [String(req.query.clientId)]
-  }
-
-  // 4) status filter — support array / comma / SUCCESS expansion (sama seperti yang sudah kamu punya)
-  const rawStatus = req.query.status
-  const allowed = DASHBOARD_STATUSES as readonly string[]
-  let statuses: string[] = []
-
-  if (Array.isArray(rawStatus)) {
-    statuses = rawStatus
-      .map(String)
-      .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
-      .filter(s => allowed.includes(s))
-  } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
-    statuses = rawStatus
-      .split(',')
-      .map(s => s.trim())
-      .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
-      .filter(s => allowed.includes(s))
-  }
-  if (statuses.length === 0) statuses = [...allowed]
-  const statusWhere = { in: statuses }
-
-  // 5) prepare mapping id->name
-  const idToName: Record<string,string> = {}
-  pc.children.forEach(c => { idToName[c.id] = c.name })
-  idToName[pc.id] = pc.name
-
-  // 6) set headers before streaming
-  res.setHeader('Content-Disposition', 'attachment; filename=client-transactions.xlsx')
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-  // 7) streaming workbook
-  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({
-    stream: res,
-    useStyles: false,
-    useSharedStrings: true,
-  })
-
-  const all = wb.addWorksheet('All Transactions')
-  all.columns = [
-    { header: 'Child Name', key: 'name',     width: 30 },
-    { header: 'Order ID',   key: 'id',       width: 36 },
-    { header: 'RRN',        key: 'rrn',      width: 24 },
-    { header: 'Player ID',  key: 'player',   width: 20 },
-    { header: 'Amount',     key: 'amt',      width: 15 },
-    { header: 'Pending',    key: 'pend',     width: 15 },
-    { header: 'Settled',    key: 'sett',     width: 15 },
-    { header: 'Fee',        key: 'fee',      width: 15 },
-    { header: 'Status',     key: 'stat',     width: 16 },
-    { header: 'Date',       key: 'date',     width: 20 },
-    { header: 'Paid At',    key: 'paidAt',    width: 20 },
-    { header: 'Settled At', key: 'settledAt', width: 20 },
-    { header: 'Expires At', key: 'expiresAt', width: 20 },
-  ]
-
-  // Optional: buat sheet per child jika dibutuhkan (dengan cara serupa setelah loop utama)
-
-  // 8) pagination loop: ambil batch demi batch
-  const batchSize = 1000
-  let cursor: { id: string } | undefined = undefined
-
-  while (true) {
-    const batch = await prisma.order.findMany({
+    // optional protection: prevent too-big synchronous export
+    const totalRows = await prisma.order.count({
       where: {
         partnerClientId: { in: clientIds },
         status: statusWhere,
-        ...(dateFrom || dateTo ? { createdAt } : {}),
-      },
-      orderBy: { createdAt: 'desc' as const },
-      take: batchSize,
-      ...(cursor ? { cursor, skip: 1 } : {}),
-      select: {
-        partnerClientId:  true,
-        id:               true,
-        rrn:              true,
-        playerId:         true,
-        amount:           true,
-        pendingAmount:    true,
-        settlementAmount: true,
-        feeLauncx:        true,
-        status:           true,
-        createdAt:        true,
-        paymentReceivedTime: true,
-        settlementTime:      true,
-        trxExpirationTime:   true,
+        ...(dateFrom || dateTo ? { createdAt } : {})
       }
     })
-
-    if (batch.length === 0) break
-
-    for (const o of batch) {
-      all.addRow({
-        name:     idToName[o.partnerClientId] || o.partnerClientId,
-        id:       o.id,
-        rrn:      o.rrn ?? '',
-        player:   o.playerId,
-        amt:      o.amount,
-        pend:     o.pendingAmount ?? 0,
-        sett:     o.settlementAmount ?? 0,
-        fee:      o.feeLauncx ?? 0,
-        stat:     o.status,
-        date:     formatDateJakarta(o.createdAt),
-        paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
-        settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
-        expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
-      }).commit()
+    const MAX_SYNC_EXPORT = 200_000
+    if (totalRows > MAX_SYNC_EXPORT) {
+      return res.status(400).json({
+        error: `Data terlalu banyak untuk diexport langsung (${totalRows} baris). Persempit range atau gunakan export background.`
+      })
     }
 
-    cursor = { id: batch[batch.length - 1].id }
-  }
+    // 5) id->name map
+    const idToName: Record<string,string> = {}
+    pc.children.forEach(c => { idToName[c.id] = c.name })
+    idToName[pc.id] = pc.name
 
-  // 9) finalize workbook
-  await all.commit()
-  await wb.commit()
-  res.end()
+    // 6) headers
+    res.setHeader('Content-Disposition', 'attachment; filename=client-transactions.xlsx')
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    // 7) streaming workbook
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({
+      stream: res,
+      useStyles: false,
+      useSharedStrings: true,
+    })
+
+    const all = wb.addWorksheet('All Transactions')
+    all.columns = [
+      { header: 'Child Name', key: 'name',     width: 30 },
+      { header: 'Order ID',   key: 'id',       width: 36 },
+      { header: 'RRN',        key: 'rrn',      width: 24 },
+      { header: 'Player ID',  key: 'player',   width: 20 },
+      { header: 'Amount',     key: 'amt',      width: 15 },
+      { header: 'Pending',    key: 'pend',     width: 15 },
+      { header: 'Settled',    key: 'sett',     width: 15 },
+      { header: 'Fee',        key: 'fee',      width: 15 },
+      { header: 'Status',     key: 'stat',     width: 16 },
+      { header: 'Date',       key: 'date',     width: 20 },
+      { header: 'Paid At',    key: 'paidAt',    width: 20 },
+      { header: 'Settled At', key: 'settledAt', width: 20 },
+      { header: 'Expires At', key: 'expiresAt', width: 20 },
+    ]
+
+    // 8) chunked fetch + write
+    const CHUNK_SIZE = 1000
+    let cursor: { id: string } | undefined = undefined
+
+    while (true) {
+      const batch = await prisma.order.findMany({
+        where: {
+          partnerClientId: { in: clientIds },
+          status: statusWhere,
+          ...(dateFrom || dateTo ? { createdAt } : {}),
+        },
+        orderBy: { createdAt: 'desc' as const },
+        take: CHUNK_SIZE,
+        ...(cursor ? { cursor, skip: 1 } : {}),
+        select: {
+          partnerClientId:  true,
+          id:               true,
+          rrn:              true,
+          playerId:         true,
+          amount:           true,
+          pendingAmount:    true,
+          settlementAmount: true,
+          feeLauncx:        true,
+          status:           true,
+          createdAt:        true,
+          paymentReceivedTime: true,
+          settlementTime:      true,
+          trxExpirationTime:   true,
+        }
+      })
+
+      if (batch.length === 0) break
+
+      for (const o of batch) {
+        all.addRow({
+          name:     idToName[o.partnerClientId] || o.partnerClientId,
+          id:       o.id,
+          rrn:      o.rrn ?? '',
+          player:   o.playerId,
+          amt:      o.amount,
+          pend:     o.pendingAmount ?? 0,
+          sett:     o.settlementAmount ?? 0,
+          fee:      o.feeLauncx ?? 0,
+          stat:     o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+          date:     formatDateJakarta(o.createdAt),
+          paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
+          settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
+          expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
+        }).commit()
+      }
+
+      cursor = { id: batch[batch.length - 1].id }
+    }
+
+    // 9) finalize
+    await all.commit()
+    await wb.commit()
+    res.end()
+  } catch (err: any) {
+    console.error('[exportClientTransactions]', err)
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to export data' })
+    } else {
+      // if headers already sent, we can't change status; just end
+      try { res.end() } catch {}
+    }
+  }
 }
+
 export async function retryTransactionCallback(
   req: ClientAuthRequest,
   res: Response
