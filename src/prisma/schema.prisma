@@ -281,6 +281,9 @@ model AdminWithdraw {
   subMerchantId String
   amount        Float
   bankName      String
+  refId         String             @unique
+  pgFee         Float?
+  completedAt   DateTime?
 
   bankCode      String
   accountNumber String

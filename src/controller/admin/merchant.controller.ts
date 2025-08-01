@@ -1064,6 +1064,8 @@ export const adminWithdraw = async (req: Request, res: Response) => {
   }
 
   try {
+        const refId = `adm-${Date.now()}`
+
     const sub = await prisma.sub_merchant.findUnique({
       where: { id: subMerchantId },
       select: { credentials: true, provider: true }
@@ -1106,7 +1108,7 @@ env:
     let resp: any
     if (provider === 'hilogate') {
       resp = await (client as HilogateClient).createWithdrawal({
-        ref_id:             `adm-${Date.now()}`,
+        ref_id:             refId,
         amount,
         currency:           'IDR',
         account_number,
@@ -1123,7 +1125,7 @@ env:
         recipient_account: account_number,
         amount,
         note:              `Admin withdraw Rp ${amount}`,
-        partner_trx_id:    `adm-${Date.now()}`,
+        partner_trx_id:    refId,
         email:             'admin@launcx.com'
       })
             bankName = ''

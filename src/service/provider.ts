@@ -81,22 +81,22 @@ export async function getActiveProviders(
     where: {
       merchantId,
       provider,
-      schedule: {
-        path: [schedulePath],
-        equals: true,
-      } as any,
-        },
+   },
     select: {
       id:          true,
       provider:    true,
       fee:         true,
       credentials: true,
-      schedule:    true
-    }
+      schedule:    true,
+    },
   })
 
- // 2) map & cast
-return subs.map(s => {
+  const activeSubs = subs.filter(s => {
+    const sch = (s.schedule as any) || {}
+    return !!sch[schedulePath]
+  })
+  // 3) map & cast
+  return activeSubs.map(s => {
   // common fields untuk kedua provider
   const common = {
     id:       s.id,

@@ -257,13 +257,21 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid payload' })
     }
 
-    // 4) Fetch record awal untuk cek refund
+    // 4) Fetch withdrawal record
     const wr = await prisma.withdrawRequest.findUnique({
       where: { refId },
       select: { amount: true, partnerClientId: true, status: true }
     })
-    if (!wr) return res.status(404).send('Not found')
-
+    let adminW: { status: DisbursementStatus } | null = null
+    let isAdmin = false
+    if (!wr) {
+      adminW = await prisma.adminWithdraw.findUnique({
+        where: { refId },
+        select: { status: true }
+      })
+      if (!adminW) return res.status(404).send('Not found')
+      isAdmin = true
+    }
     // 5) Tentukan newStatus + completedAt
     let newStatus: DisbursementStatus
     let completedAt: Date | undefined
@@ -305,6 +313,9 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
     if (feeRaw != null) {
       updateData.pgFee = feeRaw
     }
+        if (data.trx_id || data.trxId) {
+      updateData.pgRefId = data.trx_id || data.trxId
+    }
     if (completedAt) {
       updateData.completedAt = completedAt
     } else if (data.last_updated_date) {
@@ -312,19 +323,24 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
     }
 
     const { count } = await retry(() =>
-      prisma.withdrawRequest.updateMany({
-        where: { refId, status: DisbursementStatus.PENDING },
-        data: updateData,
+      (isAdmin
+        ? prisma.adminWithdraw.updateMany({
+            where: { refId, status: DisbursementStatus.PENDING },
+            data: updateData,
+          })
+        : prisma.withdrawRequest.updateMany({
+            where: { refId, status: DisbursementStatus.PENDING },
+            data: updateData,
 
-      })
+          }))
     )
 
     // 7) Jika gagal & memang pertama kali gagal, refund
-    if (count > 0 && newStatus === DisbursementStatus.FAILED) {
+    if (!isAdmin && count > 0 && newStatus === DisbursementStatus.FAILED) {
       await retry(() =>
         prisma.partnerClient.update({
-          where: { id: wr.partnerClientId },
-          data: { balance: { increment: wr.amount } },
+          where: { id: wr!.partnerClientId },
+          data: { balance: { increment: wr!.amount } },
         })
       )
     }
