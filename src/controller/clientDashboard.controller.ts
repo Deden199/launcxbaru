@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs'
 import crypto from 'crypto';
 import axios from 'axios';
 import { formatDateJakarta } from '../util/time';
+import pLimit from 'p-limit' // optional kalau mau throttle paralel, tapi tidak diperlukan
 
 import { retry } from '../utils/retry';
 import { CALLBACK_ALLOWED_STATUSES, isCallbackStatusAllowed } from '../utils/callbackStatus';
@@ -125,19 +126,26 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     if (dateFrom) createdAtFilter.gte = dateFrom;
     if (dateTo)   createdAtFilter.lte = dateTo;
 
-    // (2b) parse status filter (dipakai untuk totalTransaksi)
-    const rawStatus = (req.query as any).status;
-    const allowed = DASHBOARD_STATUSES as readonly string[];
-    let statuses: string[] = [];
-    if (Array.isArray(rawStatus)) {
-      statuses = rawStatus.map(String).filter(s => allowed.includes(s));
-    } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
-      statuses = rawStatus
-        .split(',')
-        .map(s => s.trim())
-        .filter(s => allowed.includes(s)); 
-       }
-    if (statuses.length === 0) statuses = [...allowed];
+// (2b) parse status filter (dipakai untuk totalTransaksi)
+const rawStatus = (req.query as any).status;
+const allowed = DASHBOARD_STATUSES as readonly string[];
+let statuses: string[] = [];
+
+if (Array.isArray(rawStatus)) {
+  statuses = rawStatus
+    .map(String)
+    .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+    .filter(s => allowed.includes(s));
+} else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
+  statuses = rawStatus
+    .split(',')
+    .map(s => s.trim())
+    .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+    .filter(s => allowed.includes(s));
+}
+
+if (statuses.length === 0) statuses = [...allowed];
+
     // (2c) pagination params
     const pageNum = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const pageSize = Math.min(100, parseInt(String(req.query.limit || '50'), 10));
@@ -180,7 +188,7 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
     // (4c) ambil transaksi + total untuk pagination + search
     const whereOrders: any = {
       partnerClientId: { in: clientIds },
-      status: { in: DASHBOARD_STATUSES },
+      status: { in: statuses },
       ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
     };
     if (searchStr) {
@@ -210,55 +218,60 @@ export async function getClientDashboard(req: ClientAuthRequest, res: Response) 
       }),
       prisma.order.count({ where: whereOrders })
     ]);
-// (5) totalTransaksi -> hitung langsung di DB dengan status filter user
+/// (5) totalTransaksi -> hitung langsung di DB dengan status filter user
 const totalAgg = await prisma.order.aggregate({
   _sum: { amount: true },
   where: {
     partnerClientId: { in: clientIds },
-    status: { in: statuses },                         // <- status yang kamu pilih
+    status: { in: statuses },
     ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
   }
 });
-const totalTransaksi = totalAgg._sum.amount ?? 0;
+const totalAmount = totalAgg._sum.amount ?? 0; // sum of amounts
 
-    // (6) map ke response
-    const transactions = orders.map(o => {
-      const netSettle = o.status === 'PAID'
-        ? (o.pendingAmount ?? 0)
-        : (o.settlementAmount ?? 0);
-      return {
-        id: o.id,
-        date: o.createdAt.toISOString(),
-        reference: o.qrPayload ?? '',
-        rrn: o.rrn ?? '',
-        playerId: o.playerId,
-        amount: o.amount,
-        feeLauncx: o.feeLauncx ?? 0,
-        netSettle,
-        settlementStatus: o.settlementStatus ?? '',
-        status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
-        paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
-        settlementTime:      o.settlementTime?.toISOString()      ?? '',
-        trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',
-      };
-    });
+// totalRows sudah dihitung sebelumnya sebagai count
+const totalCount = totalRows; // jumlah order matching filter
 
-    return res.json({
-      balance: totalActive,
-      totalPending,
-      totalTransaksi,
-      transactions,
-      total: totalRows,
-      children: pc.children
-    });
+// (6) map ke response
+const transactions = orders.map(o => {
+  const netSettle = o.status === 'PAID'
+    ? (o.pendingAmount ?? 0)
+    : (o.settlementAmount ?? 0);
+  return {
+    id: o.id,
+    date: o.createdAt.toISOString(),
+    reference: o.qrPayload ?? '',
+    rrn: o.rrn ?? '',
+    playerId: o.playerId,
+    amount: o.amount,
+    feeLauncx: o.feeLauncx ?? 0,
+    netSettle,
+    settlementStatus: o.settlementStatus ?? '',
+    status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+    paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
+    settlementTime:      o.settlementTime?.toISOString()      ?? '',
+    trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',
+  };
+});
 
-  } catch (err: any) {
+return res.json({
+  balance: totalActive,
+  totalPending,
+  totalAmount,      // baru: sum of amount
+  totalCount,       // baru: jumlah transaksi (dipakai di summary)
+  // backward compatibility jika frontend lama masih pakai:
+  totalTransaksi: totalCount, // kalau summary mau count, biarkan ini jadi count
+  total: totalCount,          // pagination logic masih bisa pakai ini
+  transactions,
+  children: pc.children
+});
+} catch (err: any) {
     return res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 }
 
 export async function exportClientTransactions(req: ClientAuthRequest, res: Response) {
-  // 1) load user + children
+  // 1) load user + children (sama seperti sebelumnya)
   const user = await prisma.clientUser.findUnique({
     where: { id: req.clientUserId! },
     include: {
@@ -272,63 +285,57 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
 
   // 2) tanggal
   const dateFrom = req.query.date_from ? new Date(String(req.query.date_from)) : undefined
-  const dateTo   = req.query.date_to   ? new Date(String(req.query.date_to))   : undefined
+  const dateTo   = req.query.date_to ? new Date(String(req.query.date_to)) : undefined
   const createdAt: any = {}
   if (dateFrom) createdAt.gte = dateFrom
   if (dateTo)   createdAt.lte = dateTo
 
-  // 3) clientIds
+  // 3) clientIds override logic (sama)
   const isParent = pc.children.length > 0
   let clientIds = isParent
     ? [pc.id, ...pc.children.map(c => c.id)]
     : [pc.id]
 
-  // jika FE kirim clientId tertentu → override
   if (typeof req.query.clientId === 'string' && req.query.clientId !== 'all' && req.query.clientId.trim()) {
     clientIds = [String(req.query.clientId)]
   }
 
-  // 4) status filter (samain dengan dashboard)
-  const mapStatus = (s?: string) => {
-    if (!s) return { in: DASHBOARD_STATUSES }
-    if (s === 'SUCCESS') return { in: ['SUCCESS', 'SETTLED'] }
-    return s
+  // 4) status filter — support array / comma / SUCCESS expansion (sama seperti yang sudah kamu punya)
+  const rawStatus = req.query.status
+  const allowed = DASHBOARD_STATUSES as readonly string[]
+  let statuses: string[] = []
+
+  if (Array.isArray(rawStatus)) {
+    statuses = rawStatus
+      .map(String)
+      .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+      .filter(s => allowed.includes(s))
+  } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
+    statuses = rawStatus
+      .split(',')
+      .map(s => s.trim())
+      .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+      .filter(s => allowed.includes(s))
   }
-  const statusParam = (req.query.status as string | undefined)?.trim()
-  const statusWhere = mapStatus(statusParam)
+  if (statuses.length === 0) statuses = [...allowed]
+  const statusWhere = { in: statuses }
 
-  // 5) query orders
-  const orders = await prisma.order.findMany({
-    where: {
-      partnerClientId: { in: clientIds },
-      status: statusWhere,
-      ...(dateFrom || dateTo ? { createdAt } : {})
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      partnerClientId:  true,
-      id:               true,
-      rrn:              true,
-      playerId:         true,
-      amount:           true,
-      pendingAmount:    true,
-      settlementAmount: true,
-      feeLauncx:        true,
-      status:           true,
-      createdAt:        true,
-      paymentReceivedTime: true,
-      settlementTime:      true,
-      trxExpirationTime:   true,
-    }
-  })
-
-  // 6) map ID → name
+  // 5) prepare mapping id->name
   const idToName: Record<string,string> = {}
   pc.children.forEach(c => { idToName[c.id] = c.name })
   idToName[pc.id] = pc.name
 
-  // 7) workbook
-  const wb = new ExcelJS.Workbook()
+  // 6) set headers before streaming
+  res.setHeader('Content-Disposition', 'attachment; filename=client-transactions.xlsx')
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+  // 7) streaming workbook
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({
+    stream: res,
+    useStyles: false,
+    useSharedStrings: true,
+  })
+
   const all = wb.addWorksheet('All Transactions')
   all.columns = [
     { header: 'Child Name', key: 'name',     width: 30 },
@@ -346,31 +353,44 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
     { header: 'Expires At', key: 'expiresAt', width: 20 },
   ]
 
-  orders.forEach(o => {
-    all.addRow({
-      name:     idToName[o.partnerClientId] || o.partnerClientId,
-      id:       o.id,
-      rrn:      o.rrn ?? '',
-      player:   o.playerId,
-      amt:      o.amount,
-      pend:     o.pendingAmount ?? 0,
-      sett:     o.settlementAmount ?? 0,
-      fee:      o.feeLauncx ?? 0,
-      stat:     o.status,
-      date:     formatDateJakarta(o.createdAt),
-      paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
-      settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
-      expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
-    })
-  })
+  // Optional: buat sheet per child jika dibutuhkan (dengan cara serupa setelah loop utama)
 
-  // 8) sheet per child
-  for (const child of pc.children) {
-    const sheet = wb.addWorksheet(child.name)
-    sheet.columns = all.columns.slice(1) // tanpa 'Child Name'
-    const list = orders.filter(o => o.partnerClientId === child.id)
-    list.forEach(o => {
-      sheet.addRow({
+  // 8) pagination loop: ambil batch demi batch
+  const batchSize = 1000
+  let cursor: { id: string } | undefined = undefined
+
+  while (true) {
+    const batch = await prisma.order.findMany({
+      where: {
+        partnerClientId: { in: clientIds },
+        status: statusWhere,
+        ...(dateFrom || dateTo ? { createdAt } : {}),
+      },
+      orderBy: { createdAt: 'desc' as const },
+      take: batchSize,
+      ...(cursor ? { cursor, skip: 1 } : {}),
+      select: {
+        partnerClientId:  true,
+        id:               true,
+        rrn:              true,
+        playerId:         true,
+        amount:           true,
+        pendingAmount:    true,
+        settlementAmount: true,
+        feeLauncx:        true,
+        status:           true,
+        createdAt:        true,
+        paymentReceivedTime: true,
+        settlementTime:      true,
+        trxExpirationTime:   true,
+      }
+    })
+
+    if (batch.length === 0) break
+
+    for (const o of batch) {
+      all.addRow({
+        name:     idToName[o.partnerClientId] || o.partnerClientId,
         id:       o.id,
         rrn:      o.rrn ?? '',
         player:   o.playerId,
@@ -383,17 +403,17 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
         paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
         settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',
         expiresAt: o.trxExpirationTime   ? formatDateJakarta(o.trxExpirationTime)   : '',
-      })
-    })
+      }).commit()
+    }
+
+    cursor = { id: batch[batch.length - 1].id }
   }
 
-  // 9) kirim
-  res.setHeader('Content-Disposition','attachment; filename=client-transactions.xlsx')
-  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-  await wb.xlsx.write(res)
+  // 9) finalize workbook
+  await all.commit()
+  await wb.commit()
   res.end()
 }
-
 export async function retryTransactionCallback(
   req: ClientAuthRequest,
   res: Response

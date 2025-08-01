@@ -390,8 +390,11 @@ export const getClientDashboardAdmin = async (req: Request, res: Response) => {
         feeLauncx: o.feeLauncx ?? 0,
         netSettle,
         settlementStatus: o.settlementStatus ?? '',
-        status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
-        paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
+        status:
+          o.status === 'SETTLED' ? 'SUCCESS'
+          : o.status === 'DONE'   ? 'PAID'
+          : o.status,
+                  paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
         settlementTime: o.settlementTime?.toISOString() ?? '',
         trxExpirationTime: o.trxExpirationTime?.toISOString() ?? '',
       }

@@ -122,9 +122,8 @@ const AdminClientDashboard = () => {
     }
   }
 
-  useEffect(() => { fetchSummary() }, [clientId, range, selectedChild, from, to])
-  useEffect(() => { fetchTransactions() }, [clientId, range, selectedChild, from, to])
-
+  useEffect(() => { fetchSummary() }, [clientId, range, selectedChild, from, to, statusFilter])
+  useEffect(() => { fetchTransactions() }, [clientId, range, selectedChild, from, to, statusFilter])
   const filtered = txs.filter(t =>
     (statusFilter === '' || t.status === statusFilter) &&
     (
