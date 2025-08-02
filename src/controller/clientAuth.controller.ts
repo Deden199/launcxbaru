@@ -50,7 +50,7 @@ export async function clientLogin(req: Request, res: Response) {
   const token = jwt.sign(
     { sub: user.id, role: user.role },
     config.api.jwtSecret,      // ← PASTIKAN pakai config.api.jwtSecret
-    { expiresIn: '1h' }
+    { expiresIn: '12h' }
   )
   res.json({ token })
 }
