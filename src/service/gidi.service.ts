@@ -13,7 +13,7 @@ export interface GidiConfig {
 
 export interface GenerateDynamicQrisParams {
   amount: number;
-  datetimeExpired?: string; // "YYYY-MM-DD HH:mm:ss" or ISO depending doc (use their format if specified)
+  datetimeExpired?: string; // "YYYY-MM-DD HH:mm:ss" or ISO depending doc
 }
 
 export interface GidiQrisResult {
@@ -24,33 +24,73 @@ export interface GidiQrisResult {
 }
 
 /**
- * compute signature for generateDynamic / queryDynamic:
- * sha256(merchantId + sha256(requestId + transactionId + credentialKey))
- * :contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15}
+ * Normalize raw Gidi response into structured shape.
  */
-function computeDynamicSignature(
-  merchantId: string,
-  requestId: string,
-  transactionId: string,
-  credentialKey: string
-): string {
-  const inner = crypto
-    .createHash('sha256')
-    .update(`${requestId}${transactionId}${credentialKey}`)
-    .digest('hex')
-    .toLowerCase();
-  return crypto
-    .createHash('sha256')
-    .update(`${merchantId}${inner}`)
-    .digest('hex')
-    .toLowerCase();
+function normalizeGidiResponse(rawResponse: any): {
+  qrPayload: string;
+  expiredTs?: string;
+  checkoutUrl?: string;
+} {
+  const data: any = rawResponse?.data || rawResponse || {};
+
+  let expiredTs =
+    data.expiredTs || data.expired_ts || data.expiration_time || undefined;
+
+  if (!expiredTs) {
+    const candidate =
+      rawResponse?.responseDetail?.datetimeExpired ||
+      data?.responseDetail?.datetimeExpired ||
+      rawResponse?.data?.responseDetail?.datetimeExpired ||
+      data?.data?.responseDetail?.datetimeExpired;
+
+    if (candidate) {
+      const parsed = new Date(candidate);
+      if (!isNaN(parsed.getTime())) {
+        expiredTs = parsed.toISOString();
+      }
+    }
+  }
+
+  const detail =
+    rawResponse?.responseDetail ||
+    data?.responseDetail ||
+    rawResponse?.data?.responseDetail ||
+    data?.data?.responseDetail ||
+    {};
+
+  let qrPayload =
+    detail?.rawData ||
+    data?.qrString ||
+    data?.qr_string ||
+    data?.qr_payload ||
+    data?.qrPayload ||
+    '';
+
+  if (!qrPayload) {
+    const altDetail =
+      rawResponse?.data?.responseDetail ||
+      data?.data?.responseDetail ||
+      undefined;
+    if (altDetail) {
+      qrPayload = altDetail.rawData || '';
+    }
+  }
+
+  const checkoutUrl = data.checkoutUrl || data.checkout_url || undefined;
+
+  return {
+    qrPayload: String(qrPayload || '').trim(),
+    expiredTs: expiredTs ? String(expiredTs) : undefined,
+    checkoutUrl: checkoutUrl ? String(checkoutUrl) : undefined,
+  };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Generate Dynamic QRIS MPM
- * Follows documented endpoint and signature. :contentReference[oaicite:16]{index=16}
+ * Signature per doc: sha256(merchantId + sha256(requestId + transactionId + credentialKey))
+ * Fallback: try uppercase variant if lowercase rejected with INVALID_SIGNATURE.
  */
 export async function generateDynamicQris(
   config: GidiConfig,
@@ -64,74 +104,151 @@ export async function generateDynamicQris(
     timeout: 7000,
   });
 
-  const signature = computeDynamicSignature(
-    config.merchantId,
-    config.requestId,
-    config.transactionId,
-    config.credentialKey
-  );
-
-  const body: Record<string, any> = {
-    merchantId: config.merchantId,
-    subMerchantId: config.subMerchantId,
-    requestId: config.requestId,
-    transactionId: config.transactionId,
-    amount: params.amount,
-    signature,
-  };
-  if (params.datetimeExpired) {
-    body.datetimeExpired = params.datetimeExpired;
+  // coercion & validation: API expects numeric merchantId / subMerchantId
+  const merchantIdInt = parseInt(config.merchantId, 10);
+  if (isNaN(merchantIdInt)) {
+    throw new Error(`Invalid Gidi merchantId, must be integer-like: ${config.merchantId}`);
   }
+  const subMerchantIdInt = parseInt(config.subMerchantId, 10);
+  if (isNaN(subMerchantIdInt)) {
+    throw new Error(`Invalid Gidi subMerchantId, must be integer-like: ${config.subMerchantId}`);
+  }
+
+  // prepare and trim inputs
+  const clean = (s: string) => String(s).trim();
+  const m = clean(config.merchantId);
+  const r = clean(config.requestId);
+  const t = clean(config.transactionId);
+  const k = clean(config.credentialKey);
+
+  // compute canonical signature (lowercase)
+  const innerRaw = `${r}${t}${k}`;
+  const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex'); // lowercase
+  const outerRaw = `${m}${innerHash}`;
+  const signatureLower = crypto.createHash('sha256').update(outerRaw, 'utf8').digest('hex'); // lowercase
+  const signatureUpper = signatureLower.toUpperCase(); // fallback
+
+  // debug breakdown (always log)
+  console.debug('[Gidi][generateDynamicQris] signature components', {
+    requestId: r,
+    transactionId: t,
+    credentialKeySnippet: k.slice(0, 6) + '…',
+    innerRaw,
+    innerHash,
+    outerRaw,
+    signatureLower,
+    signatureUpper,
+    merchantIdSentInBody: merchantIdInt,
+    subMerchantIdSentInBody: subMerchantIdInt,
+    amount: params.amount,
+    datetimeExpired: params.datetimeExpired,
+  });
 
   const maxRetries = 2;
   let attempt = 0;
   let lastErr: any = null;
+  let triedUpper = false;
 
   while (attempt <= maxRetries) {
-    try {
-      const res = await client.post('/QrisMpm/generateDynamic', body);
-      const data = res.data?.data || res.data || {};
-
-      return {
-        qrPayload:
-          data.qrString ||
-          data.qr_string ||
-          data.qr_payload ||
-          data.qrPayload ||
-          '',
-        expiredTs:
-          data.expiredTs ||
-          data.expired_ts ||
-          data.expiration_time ||
-          undefined,
-        checkoutUrl:
-          data.checkoutUrl || data.checkout_url || undefined,
-        raw: res.data,
-      };
-    } catch (err) {
-      lastErr = err as AxiosError;
-      const status = lastErr.response?.status || null;
-      const isRetryable =
-        !status || (status >= 500 && status < 600) || status === 429;
-
-      console.error(
-        `[SettlementCron] generateDynamicQris for ${config.transactionId} attempt #${
-          attempt + 1
-        } failed: ${lastErr.message} status=${status} signature=${signature}`
-      );
-
-      if (!isRetryable) break;
-
-      if (status === 429) {
-        if (attempt === maxRetries) break;
-        await sleep(500);
-      } else {
-        const backoff = 200 * Math.pow(2, attempt);
-        await sleep(backoff);
+    // try lowercase first
+    for (const sig of [signatureLower, signatureUpper]) {
+      // if uppercase already tried and it wasn’t due to invalid signature, skip
+      if (sig === signatureUpper && triedUpper && attempt === 0) {
+        continue;
       }
 
-      attempt += 1;
+      const body: Record<string, any> = {
+        merchantId: merchantIdInt,
+        subMerchantId: subMerchantIdInt,
+        requestId: r,
+        transactionId: t,
+        amount: params.amount,
+        signature: sig,
+      };
+      if (params.datetimeExpired) {
+        body.datetimeExpired = params.datetimeExpired;
+      }
+
+      console.debug('[Gidi][generateDynamicQris] trying signature', {
+        signature: sig,
+        body: { ...body, signature: '[redacted]' },
+      });
+
+      try {
+        const res = await client.post('/QrisMpm/generateDynamic', body);
+        const rawResponse = res.data || {};
+        const normalized = normalizeGidiResponse(rawResponse);
+
+        if (!normalized.qrPayload) {
+          console.error(
+            `[Gidi][generateDynamicQris] Missing qrPayload for transactionId=${config.transactionId}. Full response:`,
+            JSON.stringify(rawResponse)
+          );
+          throw new Error(
+            `Gidi response missing qrPayload/rawData. response was: ${JSON.stringify(
+              rawResponse
+            )}`
+          );
+        }
+
+        return {
+          qrPayload: normalized.qrPayload,
+          expiredTs: normalized.expiredTs,
+          checkoutUrl: normalized.checkoutUrl,
+          raw: rawResponse,
+        };
+      } catch (err) {
+        lastErr = err as AxiosError;
+        const status = lastErr.response?.status || null;
+
+        let respMsg = '';
+        let respCode = '';
+        if (lastErr.response?.data) {
+          const d = lastErr.response.data;
+          respCode = (d.responseCode || '').toString();
+          if (d.responseMessage) {
+            respMsg =
+              typeof d.responseMessage === 'object'
+                ? JSON.stringify(d.responseMessage)
+                : d.responseMessage;
+          } else if (d.message) {
+            respMsg = d.message;
+          } else {
+            respMsg = JSON.stringify(d);
+          }
+        } else {
+          respMsg = lastErr.message;
+        }
+
+        console.error(
+          `[Gidi][generateDynamicQris] signature attempt failed for ${config.transactionId} signature=${sig} status=${status} responseCode=${respCode} responseMessage=${respMsg}`
+        );
+
+        const isInvalidSignature =
+          respMsg.toLowerCase().includes('invalid signature') ||
+          respCode.toUpperCase() === 'INVALID_SIGNATURE';
+        const isRetryable =
+          !status || (status >= 500 && status < 600) || status === 429;
+
+        if (sig === signatureLower && isInvalidSignature) {
+          // mark to allow trying uppercase fallback next
+          triedUpper = true;
+          continue; // try uppercase
+        }
+
+        if (!isRetryable && !(sig === signatureLower && isInvalidSignature)) {
+          // unrecoverable non-signature error
+          break;
+        }
+
+        // if was invalid signature on uppercase or retryable server error, will loop
+      }
     }
+
+    if (attempt >= maxRetries) break;
+    const backoff = 200 * Math.pow(2, attempt);
+    await sleep(backoff);
+    attempt += 1;
   }
 
   const msg =
@@ -141,63 +258,4 @@ export async function generateDynamicQris(
       msg
     )}`
   );
-}
-
-/**
- * Verify Notification (callback) signature for QRIS MPM.
- * Formula per doc:
- * sha256(merchantId + sha256(subMerchantId + channelType + invoiceNo + transactionId +
- * datetimePayment + amount + mdr + fee + isSettlementRealtime + settlementDate + credentialKey))
- * fileciteturn2file3L81-L85:contentReference[oaicite:17]{index=17}
- */
-export function verifyGidiQrisMpmCallbackSignature(
-  payload: any
-): boolean {
-  const {
-    merchantId,
-    subMerchantId,
-    channelType,
-    invoiceNo,
-    transactionId,
-    datetimePayment,
-    amount,
-    mdr,
-    fee,
-    isSettlementRealtime,
-    settlementDate,
-    signature: receivedSig,
-  } = payload;
-
-  if (
-    !merchantId ||
-    !subMerchantId ||
-    !channelType ||
-    !invoiceNo ||
-    !transactionId ||
-    datetimePayment == null ||
-    amount == null ||
-    mdr == null ||
-    fee == null ||
-    isSettlementRealtime == null ||
-    settlementDate == null ||
-    !payload.credentialKey
-  ) {
-    return false; // missing required pieces
-  }
-
-  // inner concatenation order per doc, no delimiters
-  const innerRaw = `${subMerchantId}${channelType}${invoiceNo}${transactionId}${datetimePayment}${amount}${mdr}${fee}${isSettlementRealtime}${settlementDate}${payload.credentialKey}`;
-  const innerHash = crypto
-    .createHash('sha256')
-    .update(innerRaw)
-    .digest('hex')
-    .toLowerCase();
-  const expected = crypto
-    .createHash('sha256')
-    .update(`${merchantId}${innerHash}`)
-    .digest('hex')
-    .toLowerCase();
-
-  // for debugging mismatches, caller can log both expected and received
-  return expected === (receivedSig || '').toLowerCase();
 }

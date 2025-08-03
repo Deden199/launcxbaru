@@ -299,12 +299,15 @@ if (mName === 'gidi') {
   // validasi minimal
   if (!rawCfg.baseUrl) throw new Error('Gidi credential missing baseUrl');
   if (!rawCfg.credentialKey) throw new Error('Gidi credential missing credentialKey');
+    if (!rawCfg.subMerchantId || isNaN(Number(rawCfg.subMerchantId))) {
+    throw new Error('Gidi credential subMerchantId missing or non-numeric');
+  }
 
   // 4) Bentuk GidiConfig lengkap sesuai dokumentasi
   const gidiCfg: GidiConfig = {
     baseUrl: rawCfg.baseUrl,
     merchantId: String(rawCfg.merchantId || merchantRec.id),
-    subMerchantId: String(request.subMerchantId),
+    subMerchantId: String(rawCfg.subMerchantId),
     requestId: refId,
     transactionId: refId,
     credentialKey: rawCfg.credentialKey,
