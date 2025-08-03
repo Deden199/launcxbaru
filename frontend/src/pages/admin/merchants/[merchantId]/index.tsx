@@ -2,15 +2,24 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 
-interface ProviderEntry {
-  id: string
+type HilogateOyCredentials = {
+  merchantId: string
+  env: string
+  secretKey: string
+}
+
+type GidiCredentials = {
+  baseUrl: string
+  credentialKey: string
+  merchantId?: string
+  subMerchantId?: string
+}
+
+type ProviderEntry = {
+    id: string
   name: string
-  provider: string
-  credentials: {
-    merchantId: string
-    env: string
-    secretKey: string
-  }
+  provider: 'hilogate' | 'oy' | 'gidi'
+  credentials: HilogateOyCredentials | GidiCredentials
   schedule: {
     weekday: boolean
     weekend: boolean
@@ -54,27 +63,48 @@ export default function PaymentProvidersPage() {
     if (!merchantId) return
     setErrorMsg('')
 
-    const creds = form.credentials
-    if (!creds?.merchantId || !creds.secretKey) {
-      setErrorMsg('Semua field kredensial harus diisi.')
-      return
+    const provider = form.provider
+    let payloadCreds: any = {}
+
+    if (provider === 'gidi') {
+      const creds = form.credentials as GidiCredentials
+      if (!creds?.baseUrl || !creds.credentialKey) {
+        setErrorMsg('Semua field kredensial harus diisi.')
+        return
+      }
+      payloadCreds = {
+        baseUrl: creds.baseUrl,
+        credentialKey: creds.credentialKey,
+      }
+      if (creds.merchantId) payloadCreds.merchantId = creds.merchantId
+      if (creds.subMerchantId) payloadCreds.subMerchantId = creds.subMerchantId
+    } else {
+      const creds = form.credentials as HilogateOyCredentials
+      if (!creds?.merchantId || !creds.secretKey) {
+        setErrorMsg('Semua field kredensial harus diisi.')
+        return
+      }
+      payloadCreds = {
+        merchantId: creds.merchantId,
+        env: creds.env,
+        secretKey: creds.secretKey,
+      }
     }
 
     try {
+            const payload = {
+        provider,
+        name: form.name,
+        credentials: payloadCreds,
+        schedule: form.schedule,
+      }
+
       if (editId) {
-        await api.patch(`/admin/merchants/${merchantId}/pg/${editId}`, {
-          provider: form.provider,
-          name: form.name,
-          credentials: creds,
-          schedule: form.schedule,
-        })
+        await api.patch(`/admin/merchants/${merchantId}/pg/${editId}`, payload)
+
       } else {
-        await api.post(`/admin/merchants/${merchantId}/pg`, {
-          provider: form.provider,
-          name: form.name,
-          credentials: creds,
-          schedule: form.schedule,
-        })
+        await api.post(`/admin/merchants/${merchantId}/pg`, payload)
+
       }
       setShowForm(false)
       setEditId(null)
@@ -130,7 +160,7 @@ export default function PaymentProvidersPage() {
             <tr>
               <th>Provider</th>
               <th>Name</th>
-              <th>Merchant ID</th>
+              <th>Merchant ID / Base URL</th>
               <th>Env</th>
               <th>Weekday</th>
               <th>Weekend</th>
@@ -142,8 +172,8 @@ export default function PaymentProvidersPage() {
               <tr key={e.id}>
                 <td className="cell-bold">{e.provider}</td>
                 <td className="cell-bold">{e.name}</td>
-                <td>{e.credentials.merchantId}</td>
-                <td>{e.credentials.env}</td>
+                <td>{'merchantId' in e.credentials ? e.credentials.merchantId : ('baseUrl' in e.credentials ? e.credentials.baseUrl : '')}</td>
+                <td>{'env' in e.credentials ? e.credentials.env : ''}</td>
                 <td>{e.schedule.weekday ? '✔' : '–'}</td>
                 <td>{e.schedule.weekend ? '✔' : '–'}</td>
                 {/* use client */}
@@ -169,30 +199,151 @@ export default function PaymentProvidersPage() {
             <form>
               <div className="form-group">
                 <label>Provider</label>
-                <select value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
+                <select
+                  value={form.provider}
+                  onChange={e => {
+                    const provider = e.target.value as ProviderEntry['provider']
+                    const creds =
+                      provider === 'gidi'
+                        ? { baseUrl: '', credentialKey: '', merchantId: '', subMerchantId: '' }
+                        : { merchantId: '', env: 'sandbox', secretKey: '' }
+                    setForm(f => ({ ...f, provider, credentials: creds }))
+                  }}
+                >
                   <option value="hilogate">Hilogate</option>
                   <option value="oy">OY</option>
+                   <option value="gidi">Gidi</option>
+
                 </select>
               </div>
               <div className="form-group">
                 <label>Name</label>
                 <input type="text" value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
-              <div className="form-group">
-                <label>Environment</label>
-                <select value={form.credentials?.env} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, env: e.target.value } }))}>
-                  <option value="sandbox">Sandbox</option>
-                  <option value="production">Production</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Merchant ID</label>
-                <input type="text" value={form.credentials?.merchantId || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, merchantId: e.target.value } }))} />
-              </div>
-              <div className="form-group">
-                <label>Secret Key</label>
-                <input type="text" value={form.credentials?.secretKey || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials!, secretKey: e.target.value } }))} />
-              </div>
+
+              {(form.provider === 'hilogate' || form.provider === 'oy') && (
+                <>
+                  <div className="form-group">
+                    <label>Environment</label>
+                    <select
+                      value={(form.credentials as HilogateOyCredentials)?.env}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as HilogateOyCredentials),
+                            env: e.target.value,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="sandbox">Sandbox</option>
+                      <option value="production">Production</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Merchant ID</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as HilogateOyCredentials)?.merchantId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as HilogateOyCredentials),
+                            merchantId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Secret Key</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as HilogateOyCredentials)?.secretKey || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as HilogateOyCredentials),
+                            secretKey: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                </>
+              )}
+
+              {form.provider === 'gidi' && (
+                <>
+                  <div className="form-group">
+                    <label>Base URL</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as GidiCredentials)?.baseUrl || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as GidiCredentials),
+                            baseUrl: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Credential Key</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as GidiCredentials)?.credentialKey || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as GidiCredentials),
+                            credentialKey: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Merchant ID (optional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as GidiCredentials)?.merchantId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as GidiCredentials),
+                            merchantId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Sub Merchant ID (optional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as GidiCredentials)?.subMerchantId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as GidiCredentials),
+                            subMerchantId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                </>
+              )}
               <div className="checkbox-group">
                 <label>
                   <input type="checkbox" checked={form.schedule?.weekday ?? false} onChange={e => setForm(f => ({ ...f, schedule: { ...f.schedule!, weekday: e.target.checked } }))} /> Weekday
@@ -333,19 +484,47 @@ export default function PaymentProvidersPage() {
 }
 
 .modal {
-  background: #ffffff;             /* putih cerah */
-  border-radius: 16px;             /* sudut lebih halus */
-  padding: 2rem;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 1.5rem;                  /* sedikit dipadatkan */
   width: 380px;
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.3); /* shadow lebih pekat */
-  border: 1px solid rgba(0, 0, 0, 0.1);      /* garis tipis pembeda */
-  z-index: 1001;                    /* di atas overlay */
+  max-width: 100%;                  /* aman di layar kecil */
+  max-height: 90vh;                /* batasi tinggi supaya nggak melewati viewport */
+  overflow-y: auto;                /* scroll kalau isinya melebihi tinggi */
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25); /* sedikit lebih halus supaya tidak terlalu “berat” */
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 0; /* gap diatur di dalam form, bukan di container utama */
 }
-/* Bungkus semua field dalam <form> agar mudah atur gap */
-.modal form {
+
+/* Jika ingin header / footer tetap terlihat, bisa bungkus isi yang scrollable: */
+.modal .content {
+  overflow-y: auto;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Form di dalam modal */
+.modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem; /* sedikit rapatkan antar field */
+  margin: 0;    /* pastikan nggak ada margin ekstra */
+}
+
+/* Opsional: kecilkan spacing di layar sempit */
+@media (max-height: 600px) {
+  .modal {
+    padding: 1rem;
+    max-height: 85vh;
+  }
+  .modal form {
+    gap: 0.5rem;
+  }
 }
 
 /* Berikan latar dan border untuk tiap form‐group */

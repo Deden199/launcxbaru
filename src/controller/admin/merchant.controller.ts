@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
 import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
+import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
 
 
 import { prisma } from '../../core/prisma';
@@ -152,16 +153,19 @@ export const setFeeRate = async (req: Request, res: Response) => {
 export const connectPG = async (req: Request, res: Response) => {
   try {
     const merchantId = req.params.id;
-  const { provider, credentials, fee, name } = req.body;
+  const { provider, credentials: inputCreds, fee, name } = req.body;
 
     // 1) Обязательные поля
-    if (!provider || !credentials?.merchantId || !credentials?.secretKey || !name) {
+    if (!provider || !inputCreds || !name) {
       return res
         .status(400)
-        .json({ error: 'provider, merchantId, secretKey, and name required' });
+        .json({ error: 'provider, credentials, and name required' });
     }
 
-    // 2) Дефолт для schedule
+    const rawCred = parseRawCredential(provider, inputCreds)
+    const credentials = normalizeCredentials(provider, rawCred)
+
+    // 2) Default untuk schedule
     const rawSched = req.body.schedule;
     const schedule =
       rawSched &&
@@ -203,10 +207,13 @@ export const connectPG = async (req: Request, res: Response) => {
 
     return res.status(201).json(created);
   } catch (err: any) {
-    console.error('[connectPG]', err);
-    return res
+    console.error('[connectPG]', err)
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ error: err.errors?.map((e: any) => e.message).join(', ') })
+    }
+        return res
       .status(500)
-      .json({ error: 'Gagal connect PG, silakan coba lagi nanti.' });
+      .json({ error: 'Gagal connect PG, silakan coba lagi nanti.' })
   }
 };
 // 8. List koneksi PG untuk satu merchant
@@ -223,12 +230,12 @@ export const updatePGFee = async (req: Request, res: Response) => {
    try {
      const merchantId = req.params.id
     const subId       = req.params.subId
-    const { provider, credentials, fee, name, schedule: rawSched } = req.body
+    const { provider, credentials: inputCreds, fee, name, schedule: rawSched } = req.body
 
     // 1) Pastikan record ada dan milik merchant yang sama
     const existing = await prisma.sub_merchant.findUnique({
       where: { id: subId },
-      select: { merchantId: true }
+      select: { merchantId: true, provider: true }
     })
     if (!existing) {
       return res.status(404).json({ error: 'Sub-merchant tidak ditemukan.' })
@@ -239,15 +246,19 @@ export const updatePGFee = async (req: Request, res: Response) => {
 
     // 2) Build objek `data` hanya dari field yang dikirim
     const data: any = {}
+        let currentProvider = existing.provider
+
     if (provider) {
       data.provider = provider
     }
     if (name) {
       data.name = name
     }
-    if (credentials?.merchantId && credentials?.secretKey) {
-      data.credentials = credentials
+    if (inputCreds) {
+      const raw = parseRawCredential(currentProvider, inputCreds)
+      data.credentials = normalizeCredentials(currentProvider, raw)
     }
+
     if (typeof fee !== 'undefined') {
       data.fee = Number(fee)
     }
@@ -268,6 +279,9 @@ export const updatePGFee = async (req: Request, res: Response) => {
     return res.json(updated)
   } catch (err: any) {
     console.error('[updateSubMerchant]', err)
+        if (err.name === 'ZodError') {
+      return res.status(400).json({ error: err.errors?.map((e: any) => e.message).join(', ') })
+    }
     return res
       .status(500)
       .json({ error: 'Gagal memperbarui koneksi PG, silakan coba lagi nanti.' })
@@ -626,7 +640,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     const subs = await prisma.sub_merchant.findMany({
       where: {
         merchantId,
-        provider: { in: ['hilogate', 'oy'] },
+        provider: { in: ['hilogate', 'oy', 'gidi'] },
       },
       select: { id: true, name: true, provider: true, credentials: true }
     })

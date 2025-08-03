@@ -152,6 +152,8 @@ export default function EditClientPage() {
                 <option value="">-- Select Provider --</option>
                 <option value="hilogate">Hilogate</option>
                 <option value="oy">OY Indonesia</option>
+               <option value="gidi">Gidi</option>
+
               </select>
             </div>
           </div>

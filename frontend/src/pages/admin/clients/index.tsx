@@ -108,6 +108,8 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
 >
   <option value="hilogate">Hilogate</option>
   <option value="oy">OY Indonesia</option>
+ <option value="gidi">Gidi</option>
+
   </select>
           <select
   value={newForceSchedule}

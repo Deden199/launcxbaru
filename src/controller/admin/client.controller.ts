@@ -70,6 +70,15 @@ export const createClient = async (req: AuthRequest, res: Response) => {
     ['weekday', 'weekend'].includes(req.body.forceSchedule)
       ? req.body.forceSchedule
       : null
+
+        const defaultProvider =
+    typeof req.body.defaultProvider === 'string'
+      ? req.body.defaultProvider.trim().toLowerCase()
+      : 'hilogate'
+  const allowedDp = ['hilogate', 'oy', 'gv', 'gidi']
+  if (!allowedDp.includes(defaultProvider)) {
+    return res.status(400).json({ error: `defaultProvider must be one of ${allowedDp.join(', ')}` })
+  }
   if (isNaN(feePercent) || feePercent < 0 || feePercent > 100) {
     return res.status(400).json({ error: 'feePercent must be between 0 and 100' })
   }
@@ -105,7 +114,7 @@ export const createClient = async (req: AuthRequest, res: Response) => {
       withdrawFeePercent,
       withdrawFeeFlat,
       forceSchedule,
-      defaultProvider: 'hilogate',
+      defaultProvider,
     }
   })
 
@@ -255,7 +264,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
   }
   if (defaultProvider != null) {
     const dp = String(defaultProvider).trim().toLowerCase()
-    const allowed = ['hilogate', 'oy', 'gv']
+    const allowed = ['hilogate', 'oy', 'gv', 'gidi']
     if (!allowed.includes(dp)) {
       return res.status(400).json({ error: `defaultProvider must be one of ${allowed.join(', ')}` })
     }
