@@ -2,26 +2,26 @@
 import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
 import { config } from '../config';
-import { prisma } from '../core/prisma';  // tambahkan ini
+import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
-import { GidiConfig } from '../service/gidiClient';
-import { isJakartaWeekend } from '../util/time'
+import { GidiConfig } from '../service/gidi.service';
+import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
-  id: string
-  provider: 'hilogate' | 'oy' | 'gidi'
-  fee: number
-  credentials: unknown    // nanti kita cast
-  schedule: unknown       // nanti kita cast
+  id: string;
+  provider: 'hilogate' | 'oy' | 'gidi';
+  fee: number;
+  credentials: unknown;
+  schedule: unknown;
 }
 
 export interface ResultSub<C> {
-  id:       string        // ← ID sub_merchant
-  provider: string
-  fee: number
-  config: C
+  id: string; // sub_merchant.id
+  provider: string;
+  fee: number;
+  config: C;
 }
 
 const decode2c2p = (raw: any, secret: string): any =>
@@ -30,10 +30,7 @@ const decode2c2p = (raw: any, secret: string): any =>
 const firstQRGroup = (opt: any) => {
   for (const cat of opt.channelCategories ?? [])
     for (const grp of cat.groups ?? [])
-      if (
-        typeof grp.code === 'string' &&
-        grp.code.toUpperCase().includes('QR')
-      )
+      if (typeof grp.code === 'string' && grp.code.toUpperCase().includes('QR'))
         return { category: cat, group: grp };
   return null;
 };
@@ -56,117 +53,116 @@ export async function getActiveProviders(
   merchantId: string,
   provider: 'hilogate',
   opts?: { schedule?: 'weekday' | 'weekend' }
-): Promise<ResultSub<HilogateConfig>[]>
+): Promise<ResultSub<HilogateConfig>[]>;
 
 // overload untuk OY
 export async function getActiveProviders(
   merchantId: string,
   provider: 'oy',
   opts?: { schedule?: 'weekday' | 'weekend' }
-): Promise<ResultSub<OyConfig>[]>
+): Promise<ResultSub<OyConfig>[]>;
+
 // overload untuk Gidi
 export async function getActiveProviders(
   merchantId: string,
   provider: 'gidi',
   opts?: { schedule?: 'weekday' | 'weekend' }
-): Promise<ResultSub<GidiConfig>[]>
+): Promise<ResultSub<GidiConfig>[]>;
 
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
   provider: 'hilogate' | 'oy' | 'gidi',
-  opts: { schedule?: 'weekday' | 'weekend' } = {},
+  opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
-  Array<
-    ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig>
-  >
+  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig>>
 > {
   const isWeekend = opts.schedule
     ? opts.schedule === 'weekend'
-    : isJakartaWeekend(new Date())
-  const schedulePath = isWeekend ? 'weekend' : 'weekday'
+    : isJakartaWeekend(new Date());
+  const schedulePath = isWeekend ? 'weekend' : 'weekday';
 
   // 1) ambil dari DB
   const subs = await prisma.sub_merchant.findMany({
     where: {
       merchantId,
       provider,
-   },
-    select: {
-      id:          true,
-      provider:    true,
-      fee:         true,
-      credentials: true,
-      schedule:    true,
     },
-  })
+    select: {
+      id: true,
+      provider: true,
+      fee: true,
+      credentials: true,
+      schedule: true,
+    },
+  });
 
-  const activeSubs = subs.filter(s => {
-    const sch = (s.schedule as any) || {}
-    return !!sch[schedulePath]
-  })
-  // 3) map & cast
-  return activeSubs.map(s => {
-  // common fields untuk kedua provider
-  const common = {
-    id:       s.id,
-    provider: s.provider,
-    fee:      s.fee,
-  }
+  // 2) filter schedule aktif
+  const activeSubs = subs.filter((s) => {
+    const sch = (s.schedule as any) || {};
+    return !!sch[schedulePath];
+  });
+
+  // 3) map & cast dengan validasi minimal
+  return activeSubs.map((s) => {
+    const common = {
+      id: s.id,
+      provider: s.provider,
+      fee: s.fee,
+    };
 
     if (provider === 'hilogate') {
-      const raw = s.credentials as unknown as {
-        merchantId: string
-        env?:       'sandbox' | 'live' | 'production'
-        secretKey:  string
+      const raw = s.credentials as any;
+      if (!raw?.merchantId || !raw?.secretKey) {
+        throw new Error(`Invalid Hilogate credentials for sub_merchant ${s.id}`);
       }
       const cfg: HilogateConfig = {
         merchantId: raw.merchantId,
-        env:        raw.env ?? 'sandbox',
-        secretKey:  raw.secretKey,
-      }
-      return {
-        ...common,
-        config: cfg
-      } as ResultSub<HilogateConfig>
-    } else if (provider === 'oy') {
-      const raw = s.credentials as unknown as {
-        merchantId: string
-        secretKey:  string
-      }
-      const cfg: OyConfig = {
-        baseUrl:  process.env.OY_BASE_URL!,
-        username: raw.merchantId,
-        apiKey:   raw.secretKey,
-      }
-      return {
-        ...common,
-        config: cfg
-      } as ResultSub<OyConfig>
-    } else {
-      const raw = s.credentials as unknown as {
-        merchantId: string
-        subMerchantId: string
-        credentialKey: string
-        baseUrl: string
-      }
-      const cfg: GidiConfig = {
-        merchantId: raw.merchantId,
-        subMerchantId: raw.subMerchantId,
-        credentialKey: raw.credentialKey,
-        baseUrl: raw.baseUrl,
-      }
+        env: raw.env ?? 'sandbox',
+        secretKey: raw.secretKey,
+      };
       return {
         ...common,
         config: cfg,
-      } as ResultSub<GidiConfig>
+      } as ResultSub<HilogateConfig>;
+    } else if (provider === 'oy') {
+      const raw = s.credentials as any;
+      if (!raw?.merchantId || !raw?.secretKey) {
+        throw new Error(`Invalid OY credentials for sub_merchant ${s.id}`);
+      }
+      const cfg: OyConfig = {
+        baseUrl: process.env.OY_BASE_URL!,
+        username: raw.merchantId,
+        apiKey: raw.secretKey,
+      };
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<OyConfig>;
+    } else {
+      // gidi
+      const raw = s.credentials as any;
+      if (!raw?.baseUrl || !raw?.credentialKey) {
+        throw new Error(`Invalid Gidi credentials for sub_merchant ${s.id}`);
+      }
+      // merchantId and subMerchantId might be provided; fallback to internal if missing
+      const cfg: GidiConfig = {
+        baseUrl: raw.baseUrl,
+        merchantId: String(raw.merchantId ?? merchantId),
+        subMerchantId: String(raw.subMerchantId ?? ''), // caller should supply a proper one if needed
+        requestId: '', // caller must fill before use
+        transactionId: '', // caller must fill before use
+        credentialKey: raw.credentialKey,
+      };
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<GidiConfig>;
     }
-})
+  });
 }
 
-
 /* ═════════════ Interface Provider ═════════════ */
-
 export interface Provider {
   name: string;
   supportsQR: boolean;
@@ -175,7 +171,6 @@ export interface Provider {
 }
 
 /* ═══════════ List provider aktif ═══════════ */
-
 export async function getActiveProvidersForClient(
   merchantId: string,
   opts: { schedule?: 'weekday' | 'weekend' } = {}
@@ -191,27 +186,22 @@ export async function getActiveProvidersForClient(
       supportsQR: true,
       async generateQR({ orderId, amount }) {
         if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
-const raw = hilogateSubs[0].config as {
-  merchantId: string;
-  env:        'sandbox' | 'live';
-  secretKey:  string;
-};
-
-const cfg: HilogateConfig = {
-  merchantId: raw.merchantId,
-  secretKey:  raw.secretKey,
-  env:        raw.env,
-};
-const client = new HilogateClient(cfg);
+        const raw = hilogateSubs[0].config as HilogateConfig;
+        const cfg: HilogateConfig = {
+          merchantId: raw.merchantId,
+          secretKey: raw.secretKey,
+          env: raw.env,
+        };
+        const client = new HilogateClient(cfg);
         const res = await client.createTransaction({ ref_id: orderId, amount });
-        return res.qr_code;
+        return (res as any).qr_code;
       },
       async generateCheckoutUrl({ orderId, amount }) {
         if (!hilogateSubs.length) throw new Error('No active Hilogate credentials');
         const cfg = hilogateSubs[0].config as unknown as HilogateConfig;
         const client = new HilogateClient(cfg);
         const res = await client.createTransaction({ ref_id: orderId, amount });
-        return res.checkout_url;
+        return (res as any).checkout_url;
       },
     },
 

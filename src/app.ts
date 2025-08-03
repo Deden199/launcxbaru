@@ -34,7 +34,7 @@ import { proxyOyQris } from './controller/qr.controller'
 
 // import disbursementRouter from './route/disbursement.routes';
 import paymentController, { transactionCallback } from './controller/payment';
-import { oyTransactionCallback } from './controller/payment'
+import { oyTransactionCallback, gidiTransactionCallback } from './controller/payment'
 
 import merchantDashRoutes from './route/merchant/dashboard.routes';
 import clientWebRoutes from './route/client/web.routes';    // partner-client routes
@@ -84,6 +84,16 @@ app.post(
     },
   }),
   withdrawalCallback           // ⛔ TANPA express.json()
+);
+app.post(
+  '/api/v1/transaction/callback/gidi',
+  express.raw({
+    limit: '20kb',
+    type: () => true,
+    verify: (req, _res, buf: Buffer) => { (req as any).rawBody = buf }
+  }),
+  express.json(),
+  gidiTransactionCallback
 );
 app.post(
   '/api/v1/transaction/callback/oy',
@@ -146,7 +156,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 /* ========== 6. SCHEDULED TASKS ========== */
-scheduleSettlementChecker()
+// scheduleSettlementChecker()
 scheduleDashboardSummary()
 
 // Start server

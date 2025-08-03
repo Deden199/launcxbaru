@@ -31,6 +31,10 @@ paymentRouter.get(
   apiKeyAuth,
   paymentController.getOrder
 )
+paymentRouter.post(
+  '/transaction/callback/gidi',
+  paymentController.gidiTransactionCallback,
+)
 
 // Check payment status by order ID
 paymentRouter.get(

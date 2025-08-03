@@ -241,7 +241,8 @@ const qrResp = await oyClient.createQRISTransaction({
     data: {
       id:            refId,
       userId:        request.buyer,
-      merchantId:    merchantRec.id,
+       merchantId:    merchantRec.id, // merchantId now references internal merchant
+      // NOTE: future Gidi callbacks should fetch partner config via `order.userId`
       subMerchant:     { connect: { id: request.subMerchantId } }, // ← connect di order juga
       partnerClient: { connect: { id: request.buyer } },
       playerId:      pid,
@@ -266,67 +267,95 @@ const qrResp = await oyClient.createQRISTransaction({
 }
 
 
-// ─── Gidi QRIS branch ───────────────────────────────────
+// potongan khusus Gidi di createTransaction service (ganti bagian if (mName === 'gidi') {...})
 if (mName === 'gidi') {
-  const merchantRec = await prisma.merchant.findFirst({ where: { name: 'gidi' } })
-  if (!merchantRec) throw new Error('Internal Gidi merchant not found')
+  // 1) Cari internal merchant Gidi
+  const merchantRec = await prisma.merchant.findFirst({ where: { name: 'gidi' } });
+  if (!merchantRec) throw new Error('Internal Gidi merchant not found');
 
-  // Simpan request
+  // 2) Simpan transaction_request
   const trx = await prisma.transaction_request.create({
     data: {
-      merchantId:    merchantRec.id,
-      subMerchantId: request.subMerchantId,
-      buyerId:       request.buyer,
-      playerId:      pid,
+      merchantId:       merchantRec.id,          // internal merchant
+      subMerchantId:    request.subMerchantId,   // incoming subMerchantId
+      buyerId:          request.buyer,           // partner-client
+      playerId:         pid,
       amount,
-      status:        'PENDING',
+      status:           'PENDING',
       settlementAmount: amount,
     },
-  })
-  const refId = trx.id
+  });
+  const refId = trx.id;
 
-  // Ambil kredensial aktif
+  // 3) Ambil kredensial aktif untuk Gidi
   const gidiSubs = await getActiveProviders(merchantRec.id, 'gidi', {
     schedule: forceSchedule as any || undefined,
-  })
-  if (!gidiSubs.length) throw new Error('No active Gidi credentials')
-  const gidiCfg = gidiSubs[0].config as GidiConfig
+  });
+  if (!gidiSubs.length) throw new Error('No active Gidi credentials');
 
-  // Panggil API generate QRIS
-  const apiResp = await generateDynamicQris(gidiCfg, { amount, refId })
-  const qrPayload = apiResp.qrPayload
-  const expiredTs = apiResp.expiredTs
+  // asumsi ResultSub<GidiConfig> memberikan config dengan placeholders kosong untuk requestId/transactionId
+  const rawCfg = gidiSubs[0].config as any;
 
+  // validasi minimal
+  if (!rawCfg.baseUrl) throw new Error('Gidi credential missing baseUrl');
+  if (!rawCfg.credentialKey) throw new Error('Gidi credential missing credentialKey');
+
+  // 4) Bentuk GidiConfig lengkap sesuai dokumentasi
+  const gidiCfg: GidiConfig = {
+    baseUrl: rawCfg.baseUrl,
+    merchantId: String(rawCfg.merchantId || merchantRec.id),
+    subMerchantId: String(request.subMerchantId),
+    requestId: refId,
+    transactionId: refId,
+    credentialKey: rawCfg.credentialKey,
+  };
+
+  // 5) Panggil API generate QRIS dengan signature layer
+  let apiResp;
+  try {
+    apiResp = await generateDynamicQris(gidiCfg, { amount });
+  } catch (err: any) {
+    logger.error(`[Gidi] generateDynamicQris failed for ${refId}`, err);
+    throw new Error(`Gidi QRIS generation failed: ${err.message || 'unknown'}`);
+  }
+
+  const qrPayload = apiResp.qrPayload;
+  const expiredTs = apiResp.expiredTs;
+
+  // 6) Simpan audit log
   await prisma.transaction_response.create({
     data: {
-      referenceId: refId,
+      referenceId:  refId,
       responseBody: apiResp.raw ?? apiResp,
-      playerId: pid,
+      playerId:     pid,
     },
-  })
+  });
 
-  const host = pickRandomHost()
-  const checkoutUrl = `${host}/order/${refId}`
+  // 7) Build checkout URL
+  const host = pickRandomHost();
+  const checkoutUrl = `${host}/order/${refId}`;
 
+  // 8) Simpan order (internal merchantId + partnerClient)
   await prisma.order.create({
     data: {
-      id:            refId,
-      userId:        request.buyer,
-      merchantId:    request.buyer,
-      subMerchant:   { connect: { id: request.subMerchantId } },
-      partnerClient: { connect: { id: request.buyer } },
-      playerId:      pid,
+      id:               refId,
+      userId:           request.buyer,         // partner-client
+      merchantId:       merchantRec.id,        // internal merchant
+      subMerchant:      { connect: { id: request.subMerchantId } },
+      partnerClient:    { connect: { id: request.buyer } },
+      playerId:         pid,
       amount,
-      channel:       'gidi',
-      status:        'PENDING',
+      channel:          'gidi',
+      status:           'PENDING',
       qrPayload,
       checkoutUrl,
-      fee3rdParty:   0,
+      fee3rdParty:      0,
       settlementAmount: null,
       trxExpirationTime: expiredTs ? new Date(expiredTs) : undefined,
     },
-  })
+  });
 
+  // 9) Return
   return {
     orderId:     refId,
     checkoutUrl,
@@ -334,7 +363,7 @@ if (mName === 'gidi') {
     playerId:    pid,
     totalAmount: amount,
     expiredTs,
-  }
+  };
 }
   // —— GV branch —— 
   if (mName === 'gv' || mName === 'gudangvoucher') {

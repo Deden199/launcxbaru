@@ -19,6 +19,7 @@ import moment                    from 'moment-timezone'
 import { postWithRetry }                from '../utils/postWithRetry'
 
 import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
+import { verifyQrisMpmCallbackSignature } from '../service/gidiQrisIntegration'
 
 
 export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
@@ -58,8 +59,12 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     const defaultProvider = (client.defaultProvider ?? 'hilogate').toLowerCase()
    const forceSchedule = client.forceSchedule ?? null
 
-    if (defaultProvider !== 'hilogate' && defaultProvider !== 'oy') {
-      return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
+   if (
+      defaultProvider !== 'hilogate' &&
+      defaultProvider !== 'oy' &&
+      defaultProvider !== 'gidi'
+    ) {
+            return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
 
         // Fetch internal merchant for the selected provider
@@ -76,13 +81,17 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
  let subs;
  if (defaultProvider === 'hilogate') {
    subs = await getActiveProviders(merchant.id, 'hilogate', {
-     schedule: forceSchedule as any || undefined,
+     schedule: (forceSchedule as any) || undefined,
    });
-   } else {
+ } else if (defaultProvider === 'oy') {
    subs = await getActiveProviders(merchant.id, 'oy', {
-     schedule: forceSchedule as any || undefined,
+     schedule: (forceSchedule as any) || undefined,
    });
-   }
+ } else {
+   subs = await getActiveProviders(merchant.id, 'gidi', {
+     schedule: (forceSchedule as any) || undefined,
+   });
+ }
     if (!subs.length) return res.status(400).json(createErrorResponse('sno'))
     const selectedSubMerchantId = subs[0].id
 
@@ -94,7 +103,7 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
       playerId,
       flow,
       subMerchantId: selectedSubMerchantId,     // ← ambil dari logic kamu
-      sourceProvider: defaultProvider.toUpperCase() // atau lowercase sesuai enum
+      sourceProvider: defaultProvider
     }
 
     // 6) Call service
@@ -502,6 +511,178 @@ if (!pc) throw new Error('PartnerClient not found for callback')
   }
 }
 
+export const gidiTransactionCallback = async (req: Request, res: Response) => {
+  let rawBody = '';
+  try {
+    rawBody = (req as any).rawBody.toString('utf8');
+    logger.debug('[Gidi Callback] rawBody:', rawBody);
+
+    const full = JSON.parse(rawBody);
+
+    // 1. Resolve canonical orderId
+    const orderId = full.invoiceId || full.ref_id || full.refId;
+    if (!orderId) throw new Error('Missing invoiceId/ref_id');
+
+    // 2. Load order to get subMerchantId, merchantId, userId
+    const orderRec = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { subMerchantId: true, merchantId: true, userId: true },
+    });
+    if (!orderRec) throw new Error(`Order ${orderId} not found`);
+    if (!orderRec.subMerchantId) throw new Error(`Order ${orderId} missing subMerchantId`);
+
+    // 3. Fetch Gidi sub-merchant credentials to get credentialKey
+    const sub = await prisma.sub_merchant.findUnique({
+      where: { id: orderRec.subMerchantId },
+      select: { credentials: true },
+    });
+    if (!sub) throw new Error(`Gidi sub-merchant ${orderRec.subMerchantId} not found`);
+    const rawCred = sub.credentials as any;
+    const credentialKey = rawCred?.credentialKey;
+    if (!credentialKey) throw new Error('Missing credentialKey for Gidi callback verification');
+
+    // 4. Ensure merchantId is present for signature verification (some implementations expect it in payload)
+    full.merchantId = full.merchantId || String(orderRec.merchantId);
+
+    // 5. Verify signature using the correct credentialKey
+    const isValid = verifyQrisMpmCallbackSignature({
+      ...full,
+      credentialKey,
+    });
+    if (!isValid) throw new Error('Invalid Gidi signature');
+
+    // 6. Parse amounts / timestamps
+    const grossAmount = Number(full.amount ?? full.gross_amount);
+    if (isNaN(grossAmount)) throw new Error('Missing amount');
+
+    const paymentReceivedTime = full.payment_time
+      ? new Date(full.payment_time)
+      : wibTimestamp();
+    const settlementTime = full.settlement_time
+      ? new Date(full.settlement_time)
+      : null;
+    const trxExpirationTime = full.expiration_time
+      ? new Date(full.expiration_time)
+      : null;
+
+    // 7. Upsert callback record
+    const existingCb = await prisma.transaction_callback.findFirst({
+      where: { referenceId: orderId },
+    });
+    if (existingCb) {
+      await prisma.transaction_callback.update({
+        where: { id: existingCb.id },
+        data: {
+          updatedAt: wibTimestamp(),
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime,
+        },
+      });
+    } else {
+      await prisma.transaction_callback.create({
+        data: {
+          referenceId: orderId,
+          requestBody: full,
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime,
+        },
+      });
+    }
+
+    // 8. Status mapping
+    const upStatus = (full.status || '').toUpperCase();
+    const isSuccess = ['SUCCESS', 'PAID', 'DONE', 'COMPLETED', 'SETTLED'].includes(upStatus);
+    const newStatus = isSuccess ? 'PAID' : upStatus;
+    const newSetSt =
+      (full.settlement_status || '').toUpperCase() || (isSuccess ? 'PENDING' : null);
+
+    // 9. Fetch partner for forwarding using userId (partnerClient)
+    const partnerLookupId = orderRec.userId;
+    if (!partnerLookupId) throw new Error(`Order ${orderId} missing userId for callback forwarding`);
+
+    const partner = await prisma.partnerClient.findUnique({
+      where: { id: partnerLookupId },
+      select: {
+        feePercent: true,
+        feeFlat: true,
+        weekendFeePercent: true,
+        weekendFeeFlat: true,
+        callbackUrl: true,
+        callbackSecret: true,
+      },
+    });
+    if (!partner) throw new Error(`PartnerClient ${partnerLookupId} not found`);
+
+    // 10. Fee calculation
+    const weekend = isJakartaWeekend(paymentReceivedTime);
+    const pctFee = weekend ? partner.weekendFeePercent ?? 0 : partner.feePercent ?? 0;
+    const flatFee = weekend ? partner.weekendFeeFlat ?? 0 : partner.feeFlat ?? 0;
+
+    const grossDec = new Decimal(grossAmount);
+    const rawFee = grossDec.times(pctFee).dividedBy(100);
+    const feeLauncx = rawFee
+      .toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
+      .plus(new Decimal(flatFee));
+    const pendingAmt = isSuccess ? grossDec.minus(feeLauncx).toNumber() : null;
+
+    // 11. Update order
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: newStatus,
+        settlementStatus: newSetSt,
+        fee3rdParty: 0,
+        feeLauncx: isSuccess ? feeLauncx.toNumber() : null,
+        pendingAmount: pendingAmt,
+        settlementAmount: isSuccess ? null : grossAmount,
+        updatedAt: wibTimestamp(),
+        paymentReceivedTime,
+        settlementTime,
+        trxExpirationTime,
+      },
+    });
+
+    // 12. Enqueue partner callback if success
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (isSuccess && order && partner.callbackUrl && partner.callbackSecret) {
+      const timestamp = wibTimestampString();
+      const nonce = crypto.randomUUID();
+      const payload = {
+        orderId,
+        status: newStatus,
+        settlementStatus: newSetSt,
+        grossAmount: order.amount,
+        feeLauncx: order.feeLauncx,
+        netAmount: order.pendingAmount,
+        qrPayload: order.qrPayload,
+        timestamp,
+        nonce,
+      };
+      const sig = crypto
+        .createHmac('sha256', partner.callbackSecret)
+        .update(JSON.stringify(payload))
+        .digest('hex');
+      await prisma.callbackJob.create({
+        data: {
+          url: partner.callbackUrl,
+          payload,
+          signature: sig,
+        },
+      });
+      logger.info('[Gidi Callback] Enqueued transaction callback');
+    }
+
+    return res.status(200).json(createSuccessResponse({ message: 'OK' }));
+  } catch (err: any) {
+    logger.error('[Gidi Callback] Error:', err);
+    if (rawBody && !err.message.includes('Invalid')) {
+      logger.debug('[Gidi Callback] rawBody on error:', rawBody);
+    }
+    return res.status(400).json(createErrorResponse(err.message || 'Unknown error'));
+  }
+};
 /* ═════════════════ 3. Inquiry status ═════════════════ */
 export const checkPaymentStatus = async (req: AuthRequest, res: Response) => {
   try {
@@ -592,6 +773,7 @@ export const getOrder = async (req: AuthRequest, res: Response) => {
 export default {
   createTransaction,
   transactionCallback,
+  gidiTransactionCallback,
   checkPaymentStatus,
   createOrder,
   retryOyCallback,        // ← tambahkan ini
