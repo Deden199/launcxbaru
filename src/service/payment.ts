@@ -19,8 +19,9 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { getActiveProvidersForClient, Provider } from './provider';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
-import {OyClient, OyConfig} from './oyClient';
+import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
+import { generateDynamicQris, GidiConfig } from './gidi.service';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -261,6 +262,78 @@ const qrResp = await oyClient.createQRISTransaction({
     qrPayload:   proxyUrl,
     playerId:    pid,
     totalAmount: amount,
+  }
+}
+
+
+// ─── Gidi QRIS branch ───────────────────────────────────
+if (mName === 'gidi') {
+  const merchantRec = await prisma.merchant.findFirst({ where: { name: 'gidi' } })
+  if (!merchantRec) throw new Error('Internal Gidi merchant not found')
+
+  // Simpan request
+  const trx = await prisma.transaction_request.create({
+    data: {
+      merchantId:    merchantRec.id,
+      subMerchantId: request.subMerchantId,
+      buyerId:       request.buyer,
+      playerId:      pid,
+      amount,
+      status:        'PENDING',
+      settlementAmount: amount,
+    },
+  })
+  const refId = trx.id
+
+  // Ambil kredensial aktif
+  const gidiSubs = await getActiveProviders(merchantRec.id, 'gidi', {
+    schedule: forceSchedule as any || undefined,
+  })
+  if (!gidiSubs.length) throw new Error('No active Gidi credentials')
+  const gidiCfg = gidiSubs[0].config as GidiConfig
+
+  // Panggil API generate QRIS
+  const apiResp = await generateDynamicQris(gidiCfg, { amount, refId })
+  const qrPayload = apiResp.qrPayload
+  const expiredTs = apiResp.expiredTs
+
+  await prisma.transaction_response.create({
+    data: {
+      referenceId: refId,
+      responseBody: apiResp.raw ?? apiResp,
+      playerId: pid,
+    },
+  })
+
+  const host = pickRandomHost()
+  const checkoutUrl = `${host}/order/${refId}`
+
+  await prisma.order.create({
+    data: {
+      id:            refId,
+      userId:        request.buyer,
+      merchantId:    request.buyer,
+      subMerchant:   { connect: { id: request.subMerchantId } },
+      partnerClient: { connect: { id: request.buyer } },
+      playerId:      pid,
+      amount,
+      channel:       'gidi',
+      status:        'PENDING',
+      qrPayload,
+      checkoutUrl,
+      fee3rdParty:   0,
+      settlementAmount: null,
+      trxExpirationTime: expiredTs ? new Date(expiredTs) : undefined,
+    },
+  })
+
+  return {
+    orderId:     refId,
+    checkoutUrl,
+    qrPayload,
+    playerId:    pid,
+    totalAmount: amount,
+    expiredTs,
   }
 }
   // —— GV branch —— 

@@ -5,13 +5,13 @@ import { config } from '../config';
 import { prisma } from '../core/prisma';  // tambahkan ini
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
-import { sub_merchant as SubMerchant } from '@prisma/client';
+import { GidiConfig } from '../service/gidiClient';
 import { isJakartaWeekend } from '../util/time'
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
   id: string
-  provider: 'hilogate' | 'oy'
+  provider: 'hilogate' | 'oy' | 'gidi'
   fee: number
   credentials: unknown    // nanti kita cast
   schedule: unknown       // nanti kita cast
@@ -64,13 +64,23 @@ export async function getActiveProviders(
   provider: 'oy',
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<OyConfig>[]>
+// overload untuk Gidi
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'gidi',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<GidiConfig>[]>
 
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy',
-  opts: { schedule?: 'weekday' | 'weekend' } = {}
-): Promise<Array<ResultSub<HilogateConfig> | ResultSub<OyConfig>>> {
+  provider: 'hilogate' | 'oy' | 'gidi',
+  opts: { schedule?: 'weekday' | 'weekend' } = {},
+): Promise<
+  Array<
+    ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig>
+  >
+> {
   const isWeekend = opts.schedule
     ? opts.schedule === 'weekend'
     : isJakartaWeekend(new Date())
@@ -104,33 +114,53 @@ export async function getActiveProviders(
     fee:      s.fee,
   }
 
-  const raw = s.credentials as unknown as {
-    merchantId: string
-    env?:       'sandbox' | 'live' | 'production'
-    secretKey:  string
-  }
-
-  if (provider === 'hilogate') {
-    const cfg: HilogateConfig = {
-      merchantId: raw.merchantId,
-      env:        raw.env ?? 'sandbox',
-      secretKey:  raw.secretKey,
+    if (provider === 'hilogate') {
+      const raw = s.credentials as unknown as {
+        merchantId: string
+        env?:       'sandbox' | 'live' | 'production'
+        secretKey:  string
+      }
+      const cfg: HilogateConfig = {
+        merchantId: raw.merchantId,
+        env:        raw.env ?? 'sandbox',
+        secretKey:  raw.secretKey,
+      }
+      return {
+        ...common,
+        config: cfg
+      } as ResultSub<HilogateConfig>
+    } else if (provider === 'oy') {
+      const raw = s.credentials as unknown as {
+        merchantId: string
+        secretKey:  string
+      }
+      const cfg: OyConfig = {
+        baseUrl:  process.env.OY_BASE_URL!,
+        username: raw.merchantId,
+        apiKey:   raw.secretKey,
+      }
+      return {
+        ...common,
+        config: cfg
+      } as ResultSub<OyConfig>
+    } else {
+      const raw = s.credentials as unknown as {
+        merchantId: string
+        subMerchantId: string
+        credentialKey: string
+        baseUrl: string
+      }
+      const cfg: GidiConfig = {
+        merchantId: raw.merchantId,
+        subMerchantId: raw.subMerchantId,
+        credentialKey: raw.credentialKey,
+        baseUrl: raw.baseUrl,
+      }
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<GidiConfig>
     }
-    return {
-      ...common,
-      config: cfg
-    } as ResultSub<HilogateConfig>
-  } else {
-    const cfg: OyConfig = {
-      baseUrl:  process.env.OY_BASE_URL!,
-      username: raw.merchantId,
-      apiKey:   raw.secretKey,
-    }
-    return {
-      ...common,
-      config: cfg
-    } as ResultSub<OyConfig>
-  }
 })
 }
 
@@ -152,6 +182,8 @@ export async function getActiveProvidersForClient(
 ): Promise<Provider[]> {
   const hilogateSubs = await getActiveProviders(merchantId, 'hilogate', opts);
   const oySubs = await getActiveProviders(merchantId, 'oy', opts);
+  const gidiSubs = await getActiveProviders(merchantId, 'gidi', opts);
+
   return [
     /* ──── Hilogate ──── */
     {
