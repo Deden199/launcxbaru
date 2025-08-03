@@ -1,83 +1,97 @@
-// src/util/credentials.ts
+// File: src/util/credentials.ts
 import { z } from 'zod'
 
-/** Schema per provider */
-export const hilogateCredSchema = z.object({
-  merchantId: z.string(),
+/** Schema per provider untuk parsing awal dan validasi */
+const hilogateCredSchema = z.object({
+  merchantId: z.string().min(1),
   env: z.enum(['sandbox', 'production', 'live']).optional().default('sandbox'),
-  secretKey: z.string(),
+  secretKey: z.string().min(1),
 })
 
-export const oyCredSchema = z.object({
-  username: z.string(),
-  apiKey: z.string(),
+const oyCredSchema = z.object({
+  baseUrl: z.string().url().optional().default(process.env.OY_BASE_URL || ''),
+  username: z.string().min(1),
+  apiKey: z.string().min(1),
 })
 
-export const gidiCredSchema = z.object({
+const gidiCredSchema = z.object({
   baseUrl: z.string().url(),
-  clientId: z.string(),
-  clientSecret: z.string(),
-  credentialKey: z.string(),
+  credentialKey: z.string().min(1),
   merchantId: z.string().optional(),
+  subMerchantId: z.string().optional(),
 })
 
-export type NormalizedCred = {
-  provider: 'hilogate' | 'oy' | 'gidi' | string
-  merchantId?: string        // Hilogate: merchantId, OY: username, Gidi: optional merchantId
-  secretKey?: string        // Hilogate: secretKey, OY: apiKey
-  env?: 'sandbox' | 'production' | 'live'
-  baseUrl?: string          // Gidi override
-  extra?: Record<string, any> // untuk tambahan spesifik (clientSecret, credentialKey, dsb)
-}
+/** Tipe hasil normalisasi per provider (tidak di‐flatten berlebihan) */
+export type NormalizedHilogate = z.infer<typeof hilogateCredSchema>
+export type NormalizedOy = z.infer<typeof oyCredSchema>
+export type NormalizedGidi = z.infer<typeof gidiCredSchema>
 
-/** Kembalikan parsed credential sesuai provider (validasi) */
-export function parseRawCredential(provider: string, raw: any): any {
-  switch (provider) {
-    case 'hilogate':
-      return hilogateCredSchema.parse(raw)
-    case 'oy':
-      return oyCredSchema.parse(raw)
-    case 'gidi':
-      return gidiCredSchema.parse(raw)
-    default:
-      return raw
-  }
-}
+export type NormalizedCred =
+  | ({ provider: 'hilogate' } & NormalizedHilogate)
+  | ({ provider: 'oy' } & NormalizedOy)
+  | ({ provider: 'gidi' } & NormalizedGidi)
+  | ({ provider: string; extra: any })
 
-/** Normalisasi jadi bentuk internal konsisten */
-export function normalizeCredentials(provider: string, parsed: any): NormalizedCred {
+/** Ambil dan parse raw credential sesuai provider */
+export function parseRawCredential(provider: string, input: any): any {
+  if (!input || typeof input !== 'object') return {}
   switch (provider) {
     case 'hilogate': {
-      const p = parsed as z.infer<typeof hilogateCredSchema>
+      // Bisa menerima variasi key jika diperlukan di masa depan
+      const { merchantId, merchant_id, env, environment, secretKey, secret_key } = input
       return {
-        provider,
-        merchantId: p.merchantId,
-        secretKey: p.secretKey,
-        env: p.env,
+        merchantId: merchantId ?? merchant_id,
+        env: env ?? environment,
+        secretKey: secretKey ?? secret_key,
       }
     }
     case 'oy': {
-      const p = parsed as z.infer<typeof oyCredSchema>
+      const { username, user, apiKey, api_key, baseUrl, base_url } = input
       return {
-        provider,
-        merchantId: p.username,
-        secretKey: p.apiKey,
+        baseUrl: baseUrl ?? base_url,
+        username: username ?? user,
+        apiKey: apiKey ?? api_key,
       }
     }
     case 'gidi': {
-      const p = parsed as z.infer<typeof gidiCredSchema>
+      const {
+        baseUrl,
+        base_url,
+        credentialKey,
+        credential_key,
+        merchantId,
+        merchant_id,
+        subMerchantId,
+        sub_merchant_id,
+      } = input
       return {
-        provider,
-        baseUrl: p.baseUrl,
-        merchantId: p.merchantId, // optional
-        extra: {
-          clientId: p.clientId,
-          clientSecret: p.clientSecret,
-          credentialKey: p.credentialKey,
-        },
+        baseUrl: baseUrl ?? base_url,
+        credentialKey: credentialKey ?? credential_key,
+        merchantId: merchantId ?? merchant_id,
+        subMerchantId: subMerchantId ?? sub_merchant_id,
       }
     }
     default:
-      return { provider, extra: parsed }
+      return input
+  }
+}
+
+/** Validasi & normalisasi sesuai shape yang disimpan / dikonsumsi downstream */
+export function normalizeCredentials(provider: string, raw: any): NormalizedCred {
+  switch (provider) {
+    case 'hilogate': {
+      const parsed = hilogateCredSchema.parse(raw)
+      return { provider, ...parsed }
+    }
+    case 'oy': {
+      const parsed = oyCredSchema.parse(raw)
+      return { provider, ...parsed }
+    }
+    case 'gidi': {
+      const parsed = gidiCredSchema.parse(raw)
+      return { provider, ...parsed }
+    }
+    default:
+      return { provider, extra: raw }
   }
 }
