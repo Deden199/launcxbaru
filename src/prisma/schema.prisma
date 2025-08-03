@@ -358,3 +358,11 @@ model AdminLog {
 
   admin PartnerUser @relation(fields: [adminId], references: [id])
 }
+model HilogateCallbackWatcher {
+  refId       String   @id @map("_id")
+  attemptCount Int      @default(0)
+  processed    Boolean  @default(false)
+  nextRetryAt  DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

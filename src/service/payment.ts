@@ -11,7 +11,7 @@ import { prisma } from '../core/prisma';
 import logger from '../logger';
 import { generateRandomId, getRandomNumber } from '../util/random';
 import { getCurrentDate } from '../util/util';
-import { wibTimestampString } from '../util/time';
+import { wibTimestampString, wibTimestamp, formatDateJakarta } from '../util/time';
 
 import { sendTelegramMessage } from '../core/telegram.axios';
 import axios from 'axios';
@@ -22,6 +22,7 @@ import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQris, GidiConfig } from './gidi.service';
+import { scheduleHilogateFallback } from './hilogate.service';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -174,6 +175,7 @@ const apiResp = await hilClient.createTransaction({
         settlementAmount: null,
       },
     });
+    await scheduleHilogateFallback(refId, hilCfg);
 
     // 8) Return response ke client
     return {
@@ -314,9 +316,14 @@ if (mName === 'gidi') {
   };
 
   // 5) Panggil API generate QRIS dengan signature layer
+    //    Sertakan waktu kedaluwarsa ~30 menit dari sekarang dalam format GIDI
+  const now = wibTimestamp();
+  const expireDate = new Date(now.getTime() + 30 * 60 * 1000);
+  const datetimeExpired = formatDateJakarta(expireDate);
+
   let apiResp;
   try {
-    apiResp = await generateDynamicQris(gidiCfg, { amount });
+    apiResp = await generateDynamicQris(gidiCfg, { amount, datetimeExpired });
   } catch (err: any) {
     logger.error(`[Gidi] generateDynamicQris failed for ${refId}`, err);
     throw new Error(`Gidi QRIS generation failed: ${err.message || 'unknown'}`);

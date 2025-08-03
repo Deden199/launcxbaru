@@ -1,6 +1,7 @@
 import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { getActiveProviders } from './provider';  // fungsi fetch sub_merchant
+import logger from '../logger';
 
 export async function syncWithHilogate(refId: string, subMerchantId: string) {
   // 1) Ambil kredensial sub-merchant yang tersimpan
@@ -93,4 +94,17 @@ export async function retryDisbursement(refId: string, merchantId: string) {
       status:            result.status,
     },
   });
+}
+export async function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
+  try {
+    await (prisma as any).hilogateCallbackWatcher.create({
+      data: {
+        referenceId: refId,
+        config: cfg,
+        processed: false,
+      },
+    });
+  } catch (err: any) {
+    logger.error('[scheduleHilogateFallback] error scheduling fallback', err);
+  }
 }

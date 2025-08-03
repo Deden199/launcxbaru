@@ -73,6 +73,10 @@ export class HilogateClient {
   ): Promise<any> {
     return this.request('post', '/api/v1/bank-accounts/validate', { account_number, bank_code });
   }
+  /** Resend callback for a transaction */
+  public async resendCallback(ref_id: string): Promise<any> {
+    return this.request('patch', `/api/v1/transactions/resend-callback/${ref_id}`);
+  }
 
   /** Buat transaksi QRIS */
   public async createTransaction(opts: {

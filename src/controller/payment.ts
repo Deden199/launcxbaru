@@ -214,6 +214,10 @@ const trxExpirationTime = full.expires_at?.value
       });
     }
 
+    await (prisma as any).hilogateCallbackWatcher.updateMany({
+      where: { referenceId: full.ref_id },
+      data: { processed: true },
+    });
 
     // 4) Extract fields
     const {
