@@ -8,6 +8,9 @@ const {
   GIDI_SUB_MERCHANT_ID = '',
   GIDI_CREDENTIAL_KEY = '',
 } = process.env;
+function sha256(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
 
 /**
  * Create a preconfigured Axios instance for Gidi API
@@ -34,22 +37,26 @@ export function normalizeAxiosError(err: any) {
 }
 
 /**
- * Build signature string for generating dynamic QRIS
- */
+ * Build signature string for generating dynamic QRIS.
+ * Uses a nested SHA-256 hash as required by Gidi. */
 export function buildGenerateDynamicSignature(
   invoiceId: string,
   amount: number
 ): string {
-  const payload = `${GIDI_MERCHANT_ID}${GIDI_SUB_MERCHANT_ID}${invoiceId}${amount}`;
-  return crypto.createHmac('sha256', GIDI_CREDENTIAL_KEY).update(payload).digest('hex');
+  const inner = sha256(
+    `${GIDI_SUB_MERCHANT_ID}${invoiceId}${amount}${GIDI_CREDENTIAL_KEY}`
+  );
+  return sha256(`${GIDI_MERCHANT_ID}${inner}`);
 }
 
 /**
  * Build signature string for querying dynamic QRIS
  */
 export function buildQueryDynamicSignature(invoiceId: string): string {
-  const payload = `${GIDI_MERCHANT_ID}${GIDI_SUB_MERCHANT_ID}${invoiceId}`;
-  return crypto.createHmac('sha256', GIDI_CREDENTIAL_KEY).update(payload).digest('hex');
+  const inner = sha256(
+    `${GIDI_SUB_MERCHANT_ID}${invoiceId}${GIDI_CREDENTIAL_KEY}`
+  );
+  return sha256(`${GIDI_MERCHANT_ID}${inner}`);
 }
 
 /**
@@ -132,10 +139,10 @@ export async function handleQrisMpmCallback(payload: any): Promise<any> {
 export function verifyQrisMpmCallbackSignature(payload: any): boolean {
   const signature = payload?.signature || payload?.sign || '';
   const { invoiceId, amount, status } = payload;
-  const expected = crypto
-    .createHmac('sha256', GIDI_CREDENTIAL_KEY)
-    .update(`${invoiceId}${amount}${status}`)
-    .digest('hex');
+  const inner = sha256(
+    `${GIDI_SUB_MERCHANT_ID}${invoiceId}${amount}${status}${GIDI_CREDENTIAL_KEY}`
+  );
+  const expected = sha256(`${GIDI_MERCHANT_ID}${inner}`);
   return signature === expected;
 }
 

@@ -88,9 +88,13 @@ function normalizeGidiResponse(rawResponse: any): {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Generate Dynamic QRIS MPM
- * Signature per doc: sha256(merchantId + sha256(requestId + transactionId + credentialKey))
- * Fallback: try uppercase variant if lowercase rejected with INVALID_SIGNATURE.
+ * Signature per doc:
+ *   const s = clean(subMerchantId);
+ *   const amt = String(amount);
+ *   const innerRaw = `${s}${r}${t}${amt}${k}`;
+ *   const innerHash = sha256(innerRaw);
+ *   const outerRaw = `${m}${innerHash}`;
+ *   const signature = sha256(outerRaw);
  */
 export async function generateDynamicQris(
   config: GidiConfig,
@@ -117,145 +121,111 @@ export async function generateDynamicQris(
   // prepare and trim inputs
   const clean = (s: string) => String(s).trim();
   const m = clean(config.merchantId);
+  const s = clean(config.subMerchantId);
   const r = clean(config.requestId);
   const t = clean(config.transactionId);
   const k = clean(config.credentialKey);
+  const amt = String(params.amount);
 
-  // compute canonical signature (lowercase)
-  const innerRaw = `${r}${t}${k}`;
-  const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex'); // lowercase
+  // compute canonical signature (lowercase hex)
+  const innerRaw = `${s}${r}${t}${amt}${k}`;
+  const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex');
   const outerRaw = `${m}${innerHash}`;
-  const signatureLower = crypto.createHash('sha256').update(outerRaw, 'utf8').digest('hex'); // lowercase
-  const signatureUpper = signatureLower.toUpperCase(); // fallback
+  const signature = crypto.createHash('sha256').update(outerRaw, 'utf8').digest('hex');
+
 
   // debug breakdown (always log)
   console.debug('[Gidi][generateDynamicQris] signature components', {
+    merchantId: m,
+    subMerchantId: s,
     requestId: r,
     transactionId: t,
+    amount: amt,
     credentialKeySnippet: k.slice(0, 6) + '…',
     innerRaw,
     innerHash,
     outerRaw,
-    signatureLower,
-    signatureUpper,
     merchantIdSentInBody: merchantIdInt,
     subMerchantIdSentInBody: subMerchantIdInt,
-    amount: params.amount,
+    amountSentInBody: params.amount,
     datetimeExpired: params.datetimeExpired,
   });
 
-  const maxRetries = 2;
-  let attempt = 0;
-  let lastErr: any = null;
-  let triedUpper = false;
+   const body: Record<string, any> = {
+    merchantId: merchantIdInt,
+    subMerchantId: subMerchantIdInt,
+    requestId: r,
+    transactionId: t,
+    amount: params.amount,
+    signature,
+  };
+  if (params.datetimeExpired) {
+    body.datetimeExpired = params.datetimeExpired;
+  }
+  console.debug('[Gidi][generateDynamicQris] sending request', {
+    body: { ...body, signature: '[redacted]' },
+  });
+  try {
+    const res = await client.post('/QrisMpm/generateDynamic', body);
+    const rawResponse = res.data || {};
+    const normalized = normalizeGidiResponse(rawResponse);
 
-  while (attempt <= maxRetries) {
-    // try lowercase first
-    for (const sig of [signatureLower, signatureUpper]) {
-      // if uppercase already tried and it wasn’t due to invalid signature, skip
-      if (sig === signatureUpper && triedUpper && attempt === 0) {
-        continue;
-      }
-
-      const body: Record<string, any> = {
-        merchantId: merchantIdInt,
-        subMerchantId: subMerchantIdInt,
-        requestId: r,
-        transactionId: t,
-        amount: params.amount,
-        signature: sig,
-      };
-      if (params.datetimeExpired) {
-        body.datetimeExpired = params.datetimeExpired;
-      }
-
-      console.debug('[Gidi][generateDynamicQris] trying signature', {
-        signature: sig,
-        body: { ...body, signature: '[redacted]' },
-      });
-
-      try {
-        const res = await client.post('/QrisMpm/generateDynamic', body);
-        const rawResponse = res.data || {};
-        const normalized = normalizeGidiResponse(rawResponse);
-
-        if (!normalized.qrPayload) {
-          console.error(
-            `[Gidi][generateDynamicQris] Missing qrPayload for transactionId=${config.transactionId}. Full response:`,
-            JSON.stringify(rawResponse)
-          );
-          throw new Error(
-            `Gidi response missing qrPayload/rawData. response was: ${JSON.stringify(
-              rawResponse
-            )}`
-          );
-        }
-
-        return {
-          qrPayload: normalized.qrPayload,
-          expiredTs: normalized.expiredTs,
-          checkoutUrl: normalized.checkoutUrl,
-          raw: rawResponse,
-        };
-      } catch (err) {
-        lastErr = err as AxiosError;
-        const status = lastErr.response?.status || null;
-
-        let respMsg = '';
-        let respCode = '';
-        if (lastErr.response?.data) {
-          const d = lastErr.response.data;
-          respCode = (d.responseCode || '').toString();
-          if (d.responseMessage) {
-            respMsg =
-              typeof d.responseMessage === 'object'
-                ? JSON.stringify(d.responseMessage)
-                : d.responseMessage;
-          } else if (d.message) {
-            respMsg = d.message;
-          } else {
-            respMsg = JSON.stringify(d);
-          }
-        } else {
-          respMsg = lastErr.message;
-        }
-
-        console.error(
-          `[Gidi][generateDynamicQris] signature attempt failed for ${config.transactionId} signature=${sig} status=${status} responseCode=${respCode} responseMessage=${respMsg}`
-        );
-
-        const isInvalidSignature =
-          respMsg.toLowerCase().includes('invalid signature') ||
-          respCode.toUpperCase() === 'INVALID_SIGNATURE';
-        const isRetryable =
-          !status || (status >= 500 && status < 600) || status === 429;
-
-        if (sig === signatureLower && isInvalidSignature) {
-          // mark to allow trying uppercase fallback next
-          triedUpper = true;
-          continue; // try uppercase
-        }
-
-        if (!isRetryable && !(sig === signatureLower && isInvalidSignature)) {
-          // unrecoverable non-signature error
-          break;
-        }
-
-        // if was invalid signature on uppercase or retryable server error, will loop
-      }
+    if (!normalized.qrPayload) {
+      console.error(
+        `[Gidi][generateDynamicQris] Missing qrPayload for transactionId=${config.transactionId}. Full response:`,
+        JSON.stringify(rawResponse)
+      );
+      throw new Error(
+        `Gidi response missing qrPayload/rawData. response was: ${JSON.stringify(
+          rawResponse
+        )}`
+      );
     }
 
-    if (attempt >= maxRetries) break;
-    const backoff = 200 * Math.pow(2, attempt);
-    await sleep(backoff);
-    attempt += 1;
+    return {
+      qrPayload: normalized.qrPayload,
+      expiredTs: normalized.expiredTs,
+      checkoutUrl: normalized.checkoutUrl,
+      raw: rawResponse,
+    };
+  } catch (err) {
+    const lastErr = err as AxiosError;
+    const status = lastErr.response?.status || null;
+
+    let respMsg = '';
+    let respCode = '';
+    if (lastErr.response?.data) {
+      const d: any = lastErr.response.data;
+      respCode = (d.responseCode || '').toString();
+      if (d.responseMessage) {
+        respMsg =
+          typeof d.responseMessage === 'object'
+            ? JSON.stringify(d.responseMessage)
+            : d.responseMessage;
+      } else if (d.message) {
+        respMsg = d.message;
+      } else {
+        respMsg = JSON.stringify(d);
+      }
+    } else {
+      respMsg = lastErr.message;
+    }
+
+    console.error(
+      `[Gidi][generateDynamicQris] request failed for ${config.transactionId} status=${status} responseCode=${respCode} responseMessage=${respMsg}`
+    );
+
+        const code = respCode.toUpperCase();
+    if (code === 'SERVICE_NOT_ALLOWED' || code === 'INVALID_SIGNATURE') {
+      throw new Error(
+        `Gidi terminal error ${code}: ${respMsg}`
+      );
+    }
+
+    throw new Error(
+      respMsg || 'unknown error from GIDI'
+    );
   }
 
-  const msg =
-    lastErr?.response?.data || lastErr?.message || 'unknown error from GIDI';
-  throw new Error(
-    `generateDynamicQris failed for ${config.transactionId}: ${JSON.stringify(
-      msg
-    )}`
-  );
+
 }
