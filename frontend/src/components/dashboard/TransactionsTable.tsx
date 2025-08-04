@@ -1,0 +1,234 @@
+import { Dispatch, SetStateAction } from 'react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+import { FileText, ClipboardCopy } from 'lucide-react'
+import api from '@/lib/api'
+import styles from '@/pages/Dashboard.module.css'
+import { Tx } from '@/types/dashboard'
+
+type Range = 'today' | 'yesterday' | 'week' | 'month' | 'custom'
+
+interface TransactionsTableProps {
+  range: Range
+  setRange: Dispatch<SetStateAction<Range>>
+  dateRange: [Date | null, Date | null]
+  setDateRange: Dispatch<SetStateAction<[Date | null, Date | null]>>
+  startDate: Date | null
+  endDate: Date | null
+  applyDateRange: () => void
+  search: string
+  setSearch: Dispatch<SetStateAction<string>>
+  statusFilter: string
+  setStatusFilter: Dispatch<SetStateAction<string>>
+  loadingTx: boolean
+  txs: Tx[]
+  perPage: number
+  setPerPage: Dispatch<SetStateAction<number>>
+  page: number
+  setPage: Dispatch<SetStateAction<number>>
+  totalPages: number
+  buildParams: () => any
+}
+
+export default function TransactionsTable({
+  range,
+  setRange,
+  dateRange,
+  setDateRange,
+  startDate,
+  endDate,
+  applyDateRange,
+  search,
+  setSearch,
+  statusFilter,
+  setStatusFilter,
+  loadingTx,
+  txs,
+  perPage,
+  setPerPage,
+  page,
+  setPage,
+  totalPages,
+  buildParams
+}: TransactionsTableProps) {
+  return (
+    <>
+      <section className={styles.filters}>
+        <div className={styles.rangeControls}>
+          <select value={range} onChange={e => setRange(e.target.value as Range)}>
+            <option value="today">Hari ini</option>
+            <option value="yesterday">Kemarin</option>
+            <option value="week">7 Hari Terakhir</option>
+            <option value="month">30 Hari Terakhir</option>
+            <option value="custom">Custom</option>
+          </select>
+          {range === 'custom' && (
+            <div className={styles.customDatePicker}>
+              <DatePicker
+                selectsRange
+                startDate={startDate}
+                endDate={endDate}
+                onChange={upd => setDateRange(upd)}
+                isClearable={false}
+                placeholderText="Select Date Range…"
+                maxDate={new Date()}
+                dateFormat="dd-MM-yyyy"
+                className={styles.dateInput}
+              />
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  className={styles.clearRangeBtn}
+                  onClick={() => {
+                    setDateRange([null, null])
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                className={styles.applyBtn}
+                onClick={applyDateRange}
+                disabled={!startDate || !endDate}
+              >
+                Terapkan
+              </button>
+            </div>
+          )}
+        </div>
+        <input
+          type="text"
+          className={styles.searchInput}
+          placeholder="Cari TRX ID, RRN, atau Player ID…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="PAID">PAID</option>
+          <option value="PENDING">PENDING</option>
+          <option value="EXPIRED">EXPIRED</option>
+        </select>
+        <button
+          onClick={() => {
+            api
+              .get('/admin/merchants/dashboard/export-all', {
+                params: buildParams(),
+                responseType: 'blob'
+              })
+              .then(r => {
+                const url = URL.createObjectURL(new Blob([r.data]))
+                const a = document.createElement('a')
+                a.href = url
+                a.download = 'dashboard-all.xlsx'
+                a.click()
+                URL.revokeObjectURL(url)
+              })
+          }}
+          className={styles.exportBtn}
+        >
+          <FileText size={16} /> Export Semua
+        </button>
+      </section>
+
+      <section className={styles.tableSection}>
+        <h2>Daftar Transaksi &amp; Settlement</h2>
+        {loadingTx ? (
+          <div className={styles.loader}>Loading transaksi…</div>
+        ) : (
+          <div className={styles.tableWrapper}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Paid At</th>
+                  <th>Settled At</th>
+                  <th>TRX ID</th>
+                  <th>RRN</th>
+                  <th>Player ID</th>
+                  <th>PG</th>
+                  <th>Amount</th>
+                  <th>Fee Launcx</th>
+                  <th>Fee PG</th>
+                  <th>Net Amount</th>
+                  <th>Status</th>
+                  <th>Settlement Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {txs.map(t => (
+                  <tr key={t.id}>
+                    <td>{new Date(t.date).toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })}</td>
+                    <td>
+                      {t.paymentReceivedTime
+                        ? new Date(t.paymentReceivedTime).toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
+                        : '-'}
+                    </td>
+                    <td>
+                      {t.settlementTime
+                        ? new Date(t.settlementTime).toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
+                        : '-'}
+                    </td>
+                    <td>
+                      <code className="font-mono">{t.id}</code>
+                      <button className={styles.copyBtn} onClick={() => navigator.clipboard.writeText(t.id)}>
+                        <ClipboardCopy size={14} />
+                      </button>
+                    </td>
+                    <td>
+                      <div className={styles.rrnCell}>
+                        <span className={styles.ellipsis}>{t.rrn}</span>
+                        <button className={styles.copyBtn} onClick={() => navigator.clipboard.writeText(t.rrn)}>
+                          <ClipboardCopy size={14} />
+                        </button>
+                      </div>
+                    </td>
+                    <td>{t.playerId}</td>
+                    <td>{t.channel}</td>
+                    <td>{t.amount.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
+                    <td>{t.feeLauncx.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
+                    <td>{t.feePg.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
+                    <td className={styles.netSettle}>{t.netSettle.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
+                    <td>{t.status || '-'}</td>
+                    <td>
+                      {t.settlementStatus === 'WAITING'
+                        ? 'PENDING'
+                        : t.settlementStatus === 'UNSUCCESSFUL'
+                          ? 'FAILED'
+                          : t.settlementStatus || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className={styles.pagination}>
+          <div>
+            Rows
+            <select
+              value={perPage}
+              onChange={e => {
+                setPerPage(+e.target.value)
+                setPage(1)
+              }}
+            >
+              {[10, 20, 50].map(n => (
+                <option key={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+              ‹
+            </button>
+            <span>{page}/{totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+              ›
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  )
+}
