@@ -16,6 +16,7 @@ import adminClientUserRoutes from './route/admin/clientUser.routes';
 
 import adminTotpRoutes from './route/admin/totp.routes';
 import adminLogRoutes from './route/admin/log.routes';
+import adminIpWhitelistRoutes from './route/admin/ipWhitelist.routes';
 
 import usersRoutes from './route/users.routes';
 
@@ -140,6 +141,7 @@ app.use('/api/v1/admin/settings', authMiddleware, settingsRoutes);
 
 app.use('/api/v1/admin/2fa', adminTotpRoutes);
 app.use('/api/v1/admin/logs', adminLogRoutes);
+app.use('/api/v1/admin/ip-whitelist', adminIpWhitelistRoutes);
 
 /* ========== 4. PARTNER-CLIENT (login/register + dashboard + withdraw) ========== */
 app.use('/api/v1/client', clientWebRoutes);
