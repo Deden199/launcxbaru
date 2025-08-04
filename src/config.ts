@@ -3,13 +3,18 @@ dotenv.config();
 
 // Parse port as number
 const PORT = Number(process.env.PORT) || 5000;
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
+
 
 export const config = {
   api: {
     // Base URL with port, used to build callbacks and checkout URLs
     baseUrl: process.env.BASE_URL || `http://localhost:${PORT}`,
     forceProvider: process.env.FORCE_PROVIDER?.trim().toLowerCase() || null,
-jwtSecret: process.env.JWT_SECRET || 'default_jwt_secret',
+      jwtSecret,
     // Prefix for Swagger server (will point to API v1)
     swaggerUrl:
       process.env.SWAGGER_URL || `http://localhost:${PORT}/api/v1`,

@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { ClipboardCopy } from 'lucide-react'
+import { ClipboardCopy, Search, X } from 'lucide-react'
+
 
 interface Client {
   id: string
@@ -27,6 +28,7 @@ type CreateResp = {
 
 export default function ApiClientsPage() {
   useRequireAuth()
+  
   const router = useRouter()
   const [clients, setClients] = useState<Client[]>([])
   const [search, setSearch] = useState('')
@@ -88,10 +90,20 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
       .catch(() => alert('Gagal menyalin'))
   }
 
-  const filteredClients = clients.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.id.includes(search)
-  )
+const [debouncedSearch, setDebouncedSearch] = useState(search)
+
+// debounce sync: update debouncedSearch setelah user berhenti ketik 250ms
+useEffect(() => {
+  const t = setTimeout(() => setDebouncedSearch(search), 250)
+  return () => clearTimeout(t)
+}, [search])
+
+// filtered menggunakan debouncedSearch
+const filteredClients = clients.filter(c =>
+  c.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+  c.id.includes(debouncedSearch)
+)
+
 
   return (
     <div className="container">
@@ -156,11 +168,35 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
           </div>
         </div>
       )}
-      <input
-        placeholder="Search clients…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-      />
+<div className="search-wrapper">
+  <div className="search-box">
+    <div className="icon-left">
+      <Search size={16} aria-hidden="true" />
+    </div>
+    <input
+      id="client-search"
+      placeholder="Cari client atau ID…"
+      value={search}
+      onChange={e => setSearch(e.target.value)}
+      aria-label="Search clients"
+      autoComplete="off"
+    />
+    {search && (
+      <button
+        type="button"
+        className="clear-btn"
+        aria-label="Clear search"
+        onClick={() => {
+          setSearch('')
+          // reset debounce immediate
+        }}
+      >
+        <X size={16} aria-hidden="true" />
+      </button>
+    )}
+  </div>
+</div>
+
 
       <div className="cards-grid">
         {filteredClients.length === 0 ? (
@@ -243,6 +279,56 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+  .search-wrapper {
+  margin: 1.5rem 0;
+  max-width: 480px;
+  width: 100%;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f0f4fa;
+  border: 1px solid rgba(79, 70, 229, 0.15);
+  border-radius: 12px;
+  padding: 6px 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.06);
+  transition: border-color .15s, box-shadow .15s;
+}
+.search-box:focus-within {
+  border-color: var(--clr-primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.25);
+}
+.search-box input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 6px 4px;
+  font-size: 0.95rem;
+  color: var(--clr-text);
+  outline: none;
+  min-width: 0; /* important for flex shrink */
+}
+.icon-left {
+  display: flex;
+  align-items: center;
+  color: rgba(100, 116, 139, 0.7);
+}
+.clear-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background .15s;
+  color: rgba(100, 116, 139, 0.9);
+}
+.clear-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 
 .container .form-card {
   background: var(--clr-card);
@@ -324,6 +410,63 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
   width: 320px;
   text-align: center;
   box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+}
+.search-wrapper {
+  margin: 1.5rem 0;
+  max-width: 480px;
+  width: 100%;
+}
+.search-inner {
+  position: relative;
+  display: flex;
+  align-items: center; /* kunci: vertical center */
+}
+.search-inner input {
+  flex: 1;
+  padding: 0.65rem 2.5rem 0.65rem 2.5rem; /* ruang cukup untuk icon */
+  font-size: 0.95rem;
+  border: 1px solid rgba(203, 213, 225, 1);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--clr-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  transition: border-color .15s, box-shadow .15s;
+  line-height: 1.2;
+  height: 40px;
+  box-sizing: border-box;
+}
+.search-inner input:focus {
+  outline: none;
+  border-color: var(--clr-primary);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);
+}
+.search-inner .icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: rgba(100, 116, 139, 0.7);
+  display: flex;
+  align-items: center;
+}
+.clear-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  transition: background .15s;
+  color: rgba(100, 116, 139, 0.9);
+}
+.clear-btn:hover {
+  background: rgba(0,0,0,0.04);
 }
 
 .container .cards-grid {
