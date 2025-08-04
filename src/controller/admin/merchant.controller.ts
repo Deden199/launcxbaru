@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { DisbursementStatus } from '@prisma/client';
+import { AuthRequest } from '../../middleware/auth';
+import { authenticator } from 'otplib';
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto'
 import axios from 'axios'
@@ -1068,17 +1070,38 @@ export const adminValidateAccount = async (req: Request, res: Response) => {
   }
 }
 
-export const adminWithdraw = async (req: Request, res: Response) => {
-  const { subMerchantId, amount, bank_code, account_number, account_name } = req.body as {
+export const adminWithdraw = async (req: AuthRequest, res: Response) => {
+  const { subMerchantId, amount, bank_code, account_number, account_name, otp } = req.body as {
     subMerchantId: string
     amount: number
     bank_code: string
     account_number: string
     account_name: string
+    otp?: string
   }
 
+  let refId: string | null = null
+
   try {
-        const refId = `adm-${Date.now()}`
+    // OTP verification
+    const admin = await prisma.partnerUser.findUnique({
+      where: { id: req.userId! },
+      select: { totpEnabled: true, totpSecret: true }
+    })
+    if (!admin) return res.status(404).json({ error: 'Admin not found' })
+    if (admin.totpEnabled) {
+      if (!otp) return res.status(400).json({ error: 'OTP wajib diisi' })
+      if (!admin.totpSecret || !authenticator.check(String(otp), admin.totpSecret)) {
+        return res.status(400).json({ error: 'OTP tidak valid' })
+      }
+    }
+
+    // max amount validation
+    const maxSet = await prisma.setting.findUnique({ where: { key: 'admin_withdraw_max' } })
+    const maxVal = parseFloat(maxSet?.value ?? '0')
+    if (!isNaN(maxVal) && maxVal > 0 && amount > maxVal) {
+      return res.status(400).json({ error: `Maximum withdraw Rp ${maxVal}` })
+    }
 
     const sub = await prisma.sub_merchant.findUnique({
       where: { id: subMerchantId },
@@ -1093,12 +1116,8 @@ export const adminWithdraw = async (req: Request, res: Response) => {
       client = new HilogateClient({
         merchantId: cfg.merchantId,
         secretKey: cfg.secretKey,
-env:
-  cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live'
-    ? cfg.env
-    : 'sandbox',
-
-  })
+        env: cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live' ? cfg.env : 'sandbox'
+      })
     } else {
       const cfg = sub.credentials as { merchantId: string; secretKey: string }
       client = new OyClient({
@@ -1107,9 +1126,9 @@ env:
         apiKey: cfg.secretKey
       })
     }
+
     let acctName = account_name
     let bankName = ''
-
     if (provider === 'hilogate') {
       const valid = await (client as HilogateClient).validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
@@ -1119,37 +1138,79 @@ env:
       const banks = await (client as HilogateClient).getBankCodes()
       bankName = banks.find(b => b.code === bank_code)?.name || ''
     }
+
+    // atomic balance check and record creation
+    const txRes = await prisma.$transaction(async tx => {
+      const inAgg = await tx.order.aggregate({
+        _sum: { settlementAmount: true },
+        where: { subMerchantId, settlementTime: { not: null } }
+      })
+      const outClientAgg = await tx.withdrawRequest.aggregate({
+        _sum: { amount: true },
+        where: {
+          subMerchantId,
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
+        }
+      })
+      const outAdminAgg = await tx.adminWithdraw.aggregate({
+        _sum: { amount: true },
+        where: {
+          subMerchantId,
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] }
+        }
+      })
+      const totalIn = inAgg._sum.settlementAmount ?? 0
+      const totalOut = (outClientAgg._sum.amount ?? 0) + (outAdminAgg._sum.amount ?? 0)
+      const available = totalIn - totalOut
+      if (amount > available) throw new Error('InsufficientBalance')
+      const ref = `adm-${Date.now()}`
+      await tx.adminWithdraw.create({
+        data: {
+          refId: ref,
+          subMerchant: { connect: { id: subMerchantId } },
+          amount,
+          bankName,
+          bankCode: bank_code,
+          accountNumber: account_number,
+          accountName: acctName,
+          status: DisbursementStatus.PENDING
+        }
+      })
+      return { refId: ref }
+    })
+
+    refId = txRes.refId
+
     let resp: any
     if (provider === 'hilogate') {
       resp = await (client as HilogateClient).createWithdrawal({
-        ref_id:             refId,
+        ref_id: refId,
         amount,
-        currency:           'IDR',
+        currency: 'IDR',
         account_number,
-        account_name:       acctName,
+        account_name: acctName,
         account_name_alias: acctName,
         bank_code,
-        bank_name:          bankName,
-        branch_name:        '',
-        description:        `Admin withdraw Rp ${amount}`
+        bank_name: bankName,
+        branch_name: '',
+        description: `Admin withdraw Rp ${amount}`
       })
     } else {
       resp = await (client as OyClient).disburse({
-        recipient_bank:    bank_code,
+        recipient_bank: bank_code,
         recipient_account: account_number,
         amount,
-        note:              `Admin withdraw Rp ${amount}`,
-        partner_trx_id:    refId,
-        email:             'admin@launcx.com'
+        note: `Admin withdraw Rp ${amount}`,
+        partner_trx_id: refId,
+        email: 'admin@launcx.com'
       })
-            bankName = ''
-
+      bankName = ''
     }
 
     const newStatus = provider === 'hilogate'
-      ? (['WAITING','PENDING'].includes(resp.status)
+      ? (['WAITING', 'PENDING'].includes(resp.status)
           ? DisbursementStatus.PENDING
-          : ['COMPLETED','SUCCESS'].includes(resp.status)
+          : ['COMPLETED', 'SUCCESS'].includes(resp.status)
             ? DisbursementStatus.COMPLETED
             : DisbursementStatus.FAILED)
       : (resp.status.code === '101'
@@ -1158,23 +1219,36 @@ env:
             ? DisbursementStatus.COMPLETED
             : DisbursementStatus.FAILED)
 
-    await prisma.adminWithdraw.create({
+    await prisma.adminWithdraw.update({
+      where: { refId },
       data: {
-        refId, // <<-- wajib, sebelumnya hilang
-        subMerchant: { connect: { id: subMerchantId } },
-        amount,
-        bankName,
-        bankCode: bank_code,
-        accountNumber: account_number,
-        accountName: acctName,
         pgRefId: resp.trx_id || resp.trxId || null,
         status: newStatus
+      }
+    })
+
+    await prisma.adminLog.create({
+      data: {
+        adminId: req.userId!,
+        action: 'ADMIN_WITHDRAW',
+        target: refId
       }
     })
 
     return res.status(201).json({ status: newStatus })
   } catch (err: any) {
     console.error('[adminWithdraw]', err)
+    if (refId) {
+      try {
+        await prisma.adminWithdraw.update({
+          where: { refId },
+          data: { status: DisbursementStatus.FAILED }
+        })
+      } catch {}
+    }
+    if (err.message === 'InsufficientBalance') {
+      return res.status(400).json({ error: 'Insufficient balance' })
+    }
     return res.status(500).json({ error: err.message || 'Internal server error' })
   }
 }
