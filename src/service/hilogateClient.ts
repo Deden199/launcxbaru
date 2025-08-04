@@ -78,6 +78,10 @@ export class HilogateClient {
     return this.request('patch', `/api/v1/transactions/resend-callback/${ref_id}`);
   }
 
+  /** Resend transaction callback */
+  public async resendManualCallback(ref_id: string): Promise<any> {
+    return this.requestFull('get', `/api/v1/transactions/${ref_id}/send-callback`);
+  }
   /** Buat transaksi QRIS */
   public async createTransaction(opts: {
     ref_id: string;
