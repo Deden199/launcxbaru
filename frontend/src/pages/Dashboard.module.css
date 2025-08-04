@@ -283,6 +283,8 @@
 .childSelector {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem;
   margin-bottom: 1rem;
   font-family: Inter, sans-serif;
 }
@@ -408,5 +410,9 @@
     outline: none;
     border-color: #666;
     box-shadow: 0 0 0 3px rgba(100,100,255,0.2);
+  }
+  .childSelector {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
