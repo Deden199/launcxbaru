@@ -95,16 +95,3 @@ export async function retryDisbursement(refId: string, merchantId: string) {
     },
   });
 }
-export async function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
-  try {
-    await (prisma as any).hilogateCallbackWatcher.create({
-      data: {
-        referenceId: refId,
-        config: cfg,
-        processed: false,
-      },
-    });
-  } catch (err: any) {
-    logger.error('[scheduleHilogateFallback] error scheduling fallback', err);
-  }
-}

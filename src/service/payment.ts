@@ -22,7 +22,7 @@ import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQris, GidiConfig } from './gidi.service';
-import { scheduleHilogateFallback } from './hilogate.service';
+import { scheduleHilogateFallback } from './hilogateFallback';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -175,7 +175,7 @@ const apiResp = await hilClient.createTransaction({
         settlementAmount: null,
       },
     });
-    await scheduleHilogateFallback(refId, hilCfg);
+    scheduleHilogateFallback(refId, hilCfg);
 
     // 8) Return response ke client
     return {
