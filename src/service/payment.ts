@@ -21,22 +21,8 @@ import { getActiveProvidersForClient, Provider } from './provider';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
-import { generateDynamicQris, GidiConfig } from './gidi.service';
+import { generateDynamicQris, generateDynamicQrisWithAutoPoll, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
-// dedupe lokal supaya dua caller bersamaan gak bikin dua generateDynamicQris
-const inFlightGidi = new Map<string, Promise<any>>();
-async function wrappedGenerateDynamicQris(gidiCfg: GidiConfig, opts: { amount: number; datetimeExpired?: string }) {
-  const tx = gidiCfg.transactionId;
-  if (inFlightGidi.has(tx)) {
-    return inFlightGidi.get(tx)!;
-  }
-  const p = generateDynamicQris(gidiCfg, opts)
-    .finally(() => {
-      inFlightGidi.delete(tx);
-    });
-  inFlightGidi.set(tx, p);
-  return p;
-}
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -320,12 +306,10 @@ if (mName === 'gidi') {
   }
 
   // 4) Bentuk GidiConfig lengkap sesuai dokumentasi
-  const gidiCfg: GidiConfig = {
+  const baseGidiCfg: Omit<GidiConfig, 'requestId' | 'transactionId'> = {
     baseUrl: rawCfg.baseUrl,
     merchantId: String(rawCfg.merchantId || merchantRec.id),
     subMerchantId: String(rawCfg.subMerchantId),
-    requestId: refId,
-    transactionId: refId,
     credentialKey: rawCfg.credentialKey,
   };
 
@@ -335,22 +319,25 @@ if (mName === 'gidi') {
   const expireDate = new Date(now.getTime() + 30 * 60 * 1000);
   const datetimeExpired = formatDateJakarta(expireDate);
 
-  let apiResp;
+  let qrResult: GidiQrisResult;
   try {
-    apiResp = await generateDynamicQris(gidiCfg, { amount, datetimeExpired });
-  } catch (err: any) {
+    qrResult = await generateDynamicQrisFinal(
+      baseGidiCfg,
+      { amount, datetimeExpired },
+      { autoPoll: true }
+    );
+    } catch (err: any) {
     logger.error(`[Gidi] generateDynamicQris failed for ${refId}`, err);
     throw new Error(`Gidi QRIS generation failed: ${err.message || 'unknown'}`);
   }
 
-  const qrPayload = apiResp.qrPayload;
-  const expiredTs = apiResp.expiredTs;
-
+  const qrPayload = qrResult.qrPayload;
+  const expiredTs = qrResult.expiredTs;
   // 6) Simpan audit log
   await prisma.transaction_response.create({
     data: {
       referenceId:  refId,
-      responseBody: apiResp.raw ?? apiResp,
+      responseBody: qrResult.raw ?? qrResult,
       playerId:     pid,
     },
   });
