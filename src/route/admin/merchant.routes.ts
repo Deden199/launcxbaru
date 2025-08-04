@@ -3,6 +3,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import * as ctrl from '../../controller/admin/merchant.controller'
 import * as exportCtrl from '../../controller/admin/merchant.controller'
 import { authMiddleware, AuthRequest, requireSuperAdminAuth } from '../../middleware/auth'
+import { adminIpWhitelist } from '../../middleware/ipWhitelist'
 import subMerchantRouter from './subMerchant.routes'   // ← import
 
 const router = Router()
@@ -43,7 +44,7 @@ router.get('/dashboard/profit',       ctrl.getPlatformProfit)
 router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
-router.post('/dashboard/withdraw', requireSuperAdminAuth, ctrl.adminWithdraw)
+router.post('/dashboard/withdraw', adminIpWhitelist, requireSuperAdminAuth, ctrl.adminWithdraw)
 router.post(
   '/dashboard/validate-account',
   requireSuperAdminAuth,
