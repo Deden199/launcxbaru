@@ -390,43 +390,42 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       whereOrders.partnerClientId = partnerClientId
     }
 
-    // (3) total pending
-    const pendingAgg = await prisma.order.aggregate({
-      _sum: { pendingAmount: true },
-      where: { ...whereOrders, status: 'PAID' }
-    })
-    const totalPending = pendingAgg._sum.pendingAmount ?? 0
-
-    // (4) active balance via settled
-    const settleAgg = await prisma.order.aggregate({
-      _sum: { settlementAmount: true },
-      where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } }
-    })
-    const ordersActiveBalance = settleAgg._sum.settlementAmount ?? 0
-    // (4.1) total paid (SUM(amount) status = 'PAID' tanpa limit)
-    const paidAgg = await prisma.order.aggregate({
-      _sum: { amount: true },
-      where: { ...whereOrders, status: 'PAID' }
-    })
-    const totalPaid = paidAgg._sum.amount ?? 0
-    // (5) merchant total balance
+    // (3) total pending, active balance, total paid, dan total balance merchant
     const pcWhere: any = {}
     if (partnerClientId && partnerClientId !== 'all') {
       pcWhere.id = partnerClientId
     }
-        if (searchStr) {
+    if (searchStr) {
       whereOrders.OR = [
         { id:       { contains: searchStr, mode: 'insensitive' } },
         { rrn:      { contains: searchStr, mode: 'insensitive' } },
         { playerId: { contains: searchStr, mode: 'insensitive' } },
       ]
     }
-    const partnerClients = await prisma.partnerClient.findMany({
-      where: pcWhere,
-      select: { balance: true }
-    })
-    const totalMerchantBalance = partnerClients
-      .reduce((sum, pc) => sum + pc.balance, 0)
+
+    const [pendingAgg, settleAgg, paidAgg, partnerClients] = await Promise.all([
+      prisma.order.aggregate({
+        _sum: { pendingAmount: true },
+        where: { ...whereOrders, status: 'PAID' }
+      }),
+      prisma.order.aggregate({
+        _sum: { settlementAmount: true },
+        where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } }
+      }),
+      prisma.order.aggregate({
+        _sum: { amount: true },
+        where: { ...whereOrders, status: 'PAID' }
+      }),
+      prisma.partnerClient.findMany({
+        where: pcWhere,
+        select: { balance: true }
+      })
+    ])
+
+    const totalPending = pendingAgg._sum.pendingAmount ?? 0
+    const ordersActiveBalance = settleAgg._sum.settlementAmount ?? 0
+    const totalPaid = paidAgg._sum.amount ?? 0
+    const totalMerchantBalance = partnerClients.reduce((sum, pc) => sum + pc.balance, 0)
 
     // (6) ambil detail orders, termasuk ketiga timestamp
       const [orders, total] = await Promise.all([
