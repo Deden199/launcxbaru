@@ -7,6 +7,8 @@ import { Wallet, ListChecks, Clock, Layers } from 'lucide-react'
 import styles from './Dashboard.module.css'
 import dynamic from 'next/dynamic'
 import { Tx, Withdrawal, SubBalance } from '@/types/dashboard'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 
 function parseJwt(t: string) {
   try {
@@ -524,7 +526,7 @@ const filtered = mapped.filter(t => {
 
   return (
     <div className={styles.container}>
-      {/* Merchant selector */}
+      {/* Merchant selector & range filter */}
       <div className={styles.childSelector}>
         <label>Client:</label>
         <select
@@ -536,6 +538,50 @@ const filtered = mapped.filter(t => {
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
+
+        <select
+          value={range}
+          onChange={e => setRange(e.target.value as typeof range)}
+        >
+          <option value="today">Hari ini</option>
+          <option value="yesterday">Kemarin</option>
+          <option value="week">7 Hari Terakhir</option>
+          <option value="month">30 Hari Terakhir</option>
+          <option value="custom">Custom</option>
+        </select>
+
+        {range === 'custom' && (
+          <div className={styles.customDatePicker}>
+            <DatePicker
+              selectsRange
+              startDate={startDate}
+              endDate={endDate}
+              onChange={upd => setDateRange(upd)}
+              isClearable={false}
+              placeholderText="Select Date Range…"
+              maxDate={new Date()}
+              dateFormat="dd-MM-yyyy"
+              className={styles.dateInput}
+            />
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                className={styles.clearRangeBtn}
+                onClick={() => setDateRange([null, null])}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.applyBtn}
+              onClick={applyDateRange}
+              disabled={!startDate || !endDate}
+            >
+              Terapkan
+            </button>
+          </div>
+        )}
       </div>
 <aside className={styles.sidebar}>
   <section className={styles.statsGrid}>
@@ -671,13 +717,6 @@ const filtered = mapped.filter(t => {
       <main className={styles.content}>
 
           <TransactionsTable
-            range={range}
-            setRange={setRange}
-            dateRange={dateRange}
-            setDateRange={setDateRange}
-            startDate={startDate}
-            endDate={endDate}
-            applyDateRange={applyDateRange}
             search={search}
             setSearch={setSearch}
             statusFilter={statusFilter}

@@ -1,21 +1,10 @@
 import { Dispatch, SetStateAction } from 'react'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
 import { FileText, ClipboardCopy } from 'lucide-react'
 import api from '@/lib/api'
 import styles from '@/pages/Dashboard.module.css'
 import { Tx } from '@/types/dashboard'
 
-type Range = 'today' | 'yesterday' | 'week' | 'month' | 'custom'
-
 interface TransactionsTableProps {
-  range: Range
-  setRange: Dispatch<SetStateAction<Range>>
-  dateRange: [Date | null, Date | null]
-  setDateRange: Dispatch<SetStateAction<[Date | null, Date | null]>>
-  startDate: Date | null
-  endDate: Date | null
-  applyDateRange: () => void
   search: string
   setSearch: Dispatch<SetStateAction<string>>
   statusFilter: string
@@ -31,13 +20,6 @@ interface TransactionsTableProps {
 }
 
 export default function TransactionsTable({
-  range,
-  setRange,
-  dateRange,
-  setDateRange,
-  startDate,
-  endDate,
-  applyDateRange,
   search,
   setSearch,
   statusFilter,
@@ -54,49 +36,6 @@ export default function TransactionsTable({
   return (
     <>
       <section className={styles.filters}>
-        <div className={styles.rangeControls}>
-          <select value={range} onChange={e => setRange(e.target.value as Range)}>
-            <option value="today">Hari ini</option>
-            <option value="yesterday">Kemarin</option>
-            <option value="week">7 Hari Terakhir</option>
-            <option value="month">30 Hari Terakhir</option>
-            <option value="custom">Custom</option>
-          </select>
-          {range === 'custom' && (
-            <div className={styles.customDatePicker}>
-              <DatePicker
-                selectsRange
-                startDate={startDate}
-                endDate={endDate}
-                onChange={upd => setDateRange(upd)}
-                isClearable={false}
-                placeholderText="Select Date Range…"
-                maxDate={new Date()}
-                dateFormat="dd-MM-yyyy"
-                className={styles.dateInput}
-              />
-              {(startDate || endDate) && (
-                <button
-                  type="button"
-                  className={styles.clearRangeBtn}
-                  onClick={() => {
-                    setDateRange([null, null])
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-              <button
-                type="button"
-                className={styles.applyBtn}
-                onClick={applyDateRange}
-                disabled={!startDate || !endDate}
-              >
-                Terapkan
-              </button>
-            </div>
-          )}
-        </div>
         <input
           type="text"
           className={styles.searchInput}
