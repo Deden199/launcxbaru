@@ -91,7 +91,7 @@ export default function AdminTwoFaPage() {
                 value={otp}
                 onChange={e => setOtp(e.target.value)}
                 inputMode="numeric"
-                pattern="\\d*"
+                pattern="[0-9]{6}"
                 className={styles.input}
               />
               <button type="submit" className={styles.button}>Verify OTP</button>
