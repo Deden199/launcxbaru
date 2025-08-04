@@ -595,7 +595,9 @@ const filtered = mapped.filter(t => {
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
   <h2>Wallet Balances</h2>
   {loadingBalances ? (
-    <div className={styles.loader}>Loading balances…</div>
+    <div className={styles.statsGrid}>
+      <div className={`${styles.card} ${styles.cardLoader}`}>Loading balances…</div>
+    </div>
   ) : (
     <div className={styles.statsGrid}>
       {subBalances.map(s => (
