@@ -11,6 +11,9 @@ import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaika
 import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
+import { getCache, setCache } from '../../util/cache'
+
+const BALANCE_TTL_MS = 30_000
 
 
 import { prisma } from '../../core/prisma';
@@ -646,7 +649,7 @@ export const getProfitPerSubMerchant = async (req: Request, res: Response) => {
 // src/controller/admin/merchant.controller.ts
 export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
-    const { partnerClientId, merchantId, date_from, date_to } = req.query as any;
+    const { partnerClientId, merchantId, date_from, date_to, subMerchantId } = req.query as any;
 
     const dateFrom = date_from ? new Date(String(date_from)) : undefined;
     const dateTo   = date_to   ? new Date(String(date_to))   : undefined;
@@ -666,44 +669,56 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       where: {
         merchantId,
         provider: { in: ['hilogate', 'oy', 'gidi'] },
+        ...(subMerchantId && subMerchantId !== 'all' ? { id: String(subMerchantId) } : {}),
       },
       select: { id: true, name: true, provider: true, credentials: true }
     })
 
     const balanceResults = await Promise.all(subs.map(async (s) => {
       let bal = 0
-            let wdTotal: number | undefined
+      let wdTotal: number | undefined
       let wdPending: number | undefined
-      try {
-        if (s.provider === 'hilogate') {
-          const raw = s.credentials as any
-          const cfg: HilogateConfig = {
-            merchantId: raw.merchantId,
-            env:        raw.env,
-            secretKey:  raw.secretKey,
-          }
-          const client = new HilogateClient(cfg)
-          const resp   = await client.getBalance()
-          const data   = resp.data
-          bal = data.active_balance ?? 0
-          wdTotal   = data.total_withdrawal
-          wdPending = data.pending_withdrawal
-        } else if (s.provider === 'oy') {
-          const raw = s.credentials as any
-          const cfg: OyConfig = {
-            baseUrl:  config.api.oy.baseUrl,
-            username: raw.merchantId,
-            apiKey:   raw.secretKey,
-          }
-          const client = new OyClient(cfg)
-          const resp   = await client.getBalance()
-          const data   = (resp as any).data ?? resp
-          bal = data.availableBalance ?? data.balance ?? 0
-        }
-      } catch (e) {
 
-        console.error(`[${s.provider}] getBalance error`, e)
-              }
+      const cacheKey = `sub_balance_${s.id}`
+      const cached = getCache<{ balance: number; wdTotal?: number; wdPending?: number }>(cacheKey)
+
+      if (cached) {
+        bal = cached.balance
+        wdTotal = cached.wdTotal
+        wdPending = cached.wdPending
+      } else {
+        try {
+          if (s.provider === 'hilogate') {
+            const raw = s.credentials as any
+            const cfg: HilogateConfig = {
+              merchantId: raw.merchantId,
+              env:        raw.env,
+              secretKey:  raw.secretKey,
+            }
+            const client = new HilogateClient(cfg)
+            const resp   = await client.getBalance()
+            const data   = resp.data
+            bal = data.active_balance ?? 0
+            wdTotal   = data.total_withdrawal
+            wdPending = data.pending_withdrawal
+          } else if (s.provider === 'oy') {
+            const raw = s.credentials as any
+            const cfg: OyConfig = {
+              baseUrl:  config.api.oy.baseUrl,
+              username: raw.merchantId,
+              apiKey:   raw.secretKey,
+            }
+            const client = new OyClient(cfg)
+            const resp   = await client.getBalance()
+            const data   = (resp as any).data ?? resp
+            bal = data.availableBalance ?? data.balance ?? 0
+          }
+        } catch (e) {
+          console.error(`[${s.provider}] getBalance error`, e)
+        }
+        setCache(cacheKey, { balance: bal, wdTotal, wdPending }, BALANCE_TTL_MS)
+      }
+
       return { id: s.id, name: s.name, provider: s.provider, balance: bal, wdTotal, wdPending }
     }))
 
@@ -741,6 +756,9 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     if (dateFrom || dateTo) {
       whereOrders.createdAt = createdAtFilter
     }
+    if (subMerchantId && subMerchantId !== 'all') {
+      whereOrders.subMerchantId = String(subMerchantId)
+    }
 
     const whereWd: any = { status: DisbursementStatus.COMPLETED }
     if (partnerClientId && partnerClientId !== 'all') {
@@ -748,6 +766,9 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     }
     if (dateFrom || dateTo) {
       whereWd.createdAt = createdAtFilter
+    }
+    if (subMerchantId && subMerchantId !== 'all') {
+      whereWd.subMerchantId = String(subMerchantId)
     }
 
     const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS']
