@@ -29,6 +29,7 @@ export default function ApiClientsPage() {
   useRequireAuth()
   const router = useRouter()
   const [clients, setClients] = useState<Client[]>([])
+  const [search, setSearch] = useState('')
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newFeePercent, setNewFeePercent] = useState<number>(0.5)
@@ -86,6 +87,11 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
       .then(() => alert('Disalin!'))
       .catch(() => alert('Gagal menyalin'))
   }
+
+  const filteredClients = clients.filter(c =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.id.includes(search)
+  )
 
   return (
     <div className="container">
@@ -150,49 +156,58 @@ const [newForceSchedule, setNewForceSchedule] = useState<string>('')
           </div>
         </div>
       )}
+      <input
+        placeholder="Search clients…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
 
       <div className="cards-grid">
-        {clients.length === 0 && <p className="empty">Belum ada client</p>}
-        {clients.map(c => (
-          <div className="client-card" key={c.id}>
-            <div className="card-header">
-              <h4>{c.name}</h4>
-              <span className={c.isActive ? 'status active' : 'status inactive'}>
-                {c.isActive ? 'Active' : 'Inactive'}
-              </span>
+        {filteredClients.length === 0 ? (
+          <p className="empty">
+            {clients.length === 0 ? 'Belum ada client' : 'No clients found'}
+          </p>
+        ) : (
+          filteredClients.map(c => (
+            <div className="client-card" key={c.id}>
+              <div className="card-header">
+                <h4>{c.name}</h4>
+                <span className={c.isActive ? 'status active' : 'status inactive'}>
+                  {c.isActive ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="card-body">
+                <p><strong>Key:</strong>
+                  <span className="mono">{c.apiKey}</span>
+                  <ClipboardCopy onClick={() => copy(c.apiKey)} />
+                </p>
+                {/* <p><strong>Secret:</strong>
+                  <span className="mono">{c.apiSecret}</span>
+                  <ClipboardCopy onClick={() => copy(c.apiSecret)} />
+                </p> */}
+                <p><strong>Default PG:</strong> {c.defaultProvider}</p>
+                                {c.forceSchedule && (
+                  <p><strong>Force Schedule:</strong> {c.forceSchedule}</p>
+                )}
+                <p><strong>Parent:</strong> {c.parentClient?.name || '-'}</p>
+                <p><strong>Children:</strong> {c.children?.length || 0}</p>
+                <p><strong>Fee %:</strong> {c.feePercent.toFixed(3)}</p>
+                <p><strong>Fee Flat:</strong> {c.feeFlat.toFixed(2)}</p>
+              </div>
+              <div className="card-footer">
+                <button onClick={() => router.push(`/admin/clients/${c.id}`)}>
+                  Manage
+                </button>
+                 <button onClick={() => router.push(`/admin/clients/${c.id}/dashboard`)}>
+                  Dashboard
+                </button>
+                 <button onClick={() => router.push(`/admin/clients/${c.id}/withdraw`)}>
+                  Withdrawals
+                </button>
+              </div>
             </div>
-            <div className="card-body">
-              <p><strong>Key:</strong>
-                <span className="mono">{c.apiKey}</span>
-                <ClipboardCopy onClick={() => copy(c.apiKey)} />
-              </p>
-              {/* <p><strong>Secret:</strong>
-                <span className="mono">{c.apiSecret}</span>
-                <ClipboardCopy onClick={() => copy(c.apiSecret)} />
-              </p> */}
-              <p><strong>Default PG:</strong> {c.defaultProvider}</p>
-                            {c.forceSchedule && (
-                <p><strong>Force Schedule:</strong> {c.forceSchedule}</p>
-              )}
-              <p><strong>Parent:</strong> {c.parentClient?.name || '-'}</p>
-              <p><strong>Children:</strong> {c.children?.length || 0}</p>
-              <p><strong>Fee %:</strong> {c.feePercent.toFixed(3)}</p>
-              <p><strong>Fee Flat:</strong> {c.feeFlat.toFixed(2)}</p>
-            </div>
-            <div className="card-footer">
-              <button onClick={() => router.push(`/admin/clients/${c.id}`)}>
-                Manage
-              </button>
-               <button onClick={() => router.push(`/admin/clients/${c.id}/dashboard`)}>
-                Dashboard
-              </button>
-               <button onClick={() => router.push(`/admin/clients/${c.id}/withdraw`)}>
-                Withdrawals
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          )))}
+        </div>
 
       <style jsx>{`
  /* ApiClients.module.css */
