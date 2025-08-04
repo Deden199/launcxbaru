@@ -31,8 +31,11 @@ export const loginUser = async (req: Request, res: Response) => {
       return res.status(400).json(createErrorResponse('OTP wajib diisi'));
     }
     const secret = (user as any).totpSecret;
-    if (!secret || !authenticator.check(String(otp), secret)) {
-      return res.status(401).json(createErrorResponse('OTP tidak valid'));
+    if (
+      !secret ||
+      !authenticator.verify({ token: String(otp), secret })
+    ) {
+      return res.status(400).json(createErrorResponse('OTP tidak valid'));
     }
   }
   // <-- pakai config.api.jwtSecret

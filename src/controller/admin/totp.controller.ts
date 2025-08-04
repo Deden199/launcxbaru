@@ -30,7 +30,10 @@ export async function enableAdminTOTP(req: AuthRequest, res: Response) {
   })
   if (!user) return res.status(404).json({ error: 'User tidak ditemukan' })
   if (!user.totpSecret) return res.status(400).json({ error: 'Belum melakukan setup' })
-  if (!code || !authenticator.check(code, user.totpSecret)) {
+  if (!code || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Kode OTP harus 6 digit' })
+  }
+  if (!authenticator.verify({ token: code, secret: user.totpSecret })) {
     return res.status(400).json({ error: 'Kode OTP salah' })
   }
   await prisma.partnerUser.update({
