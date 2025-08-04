@@ -3,11 +3,10 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { Wallet, ListChecks, Clock, FileText, ClipboardCopy, Layers, CheckCircle } from 'lucide-react'
-import Select from 'react-select'
+import { Wallet, ListChecks, Clock, Layers } from 'lucide-react'
 import styles from './Dashboard.module.css'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
+import dynamic from 'next/dynamic'
+import { Tx, Withdrawal, SubBalance } from '@/types/dashboard'
 
 function parseJwt(t: string) {
   try {
@@ -37,30 +36,6 @@ type RawTx = {
 
 
 }
-interface Withdrawal {
-  id: string
-  refId: string
-  accountName: string
-  accountNameAlias: string
-  accountNumber: string
-  bankCode: string
-  bankName: string
-  branchName?: string
-  amount: number
-  withdrawFeePercent: number
-  withdrawFeeFlat: number
-  pgFee?: number
-
-  netAmount?: number
-  paymentGatewayId?: string
-  isTransferProcess: boolean
-  status: string
-  createdAt: string
-  completedAt?: string
-  wallet: string
-
-}
-
 interface AdminWithdrawal {
   id: string
   bankName: string
@@ -74,27 +49,7 @@ interface AdminWithdrawal {
   wallet: string
 }
 
-
-type Tx = {
-  id: string
-  date: string
-  rrn: string
-  playerId: string
-  amount: number
-  feeLauncx: number
-  feePg: number
-  netSettle: number
-  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID'
-  settlementStatus: string
-  channel:          string  // ← baru
-    paymentReceivedTime?: string
-  settlementTime?: string
-  trxExpirationTime?: string
-
-}
-
 type Merchant = { id: string; name: string }
-type SubBalance = { id: string; name: string; provider: string; balance: number }
 
 type TransactionsResponse = {
   transactions: RawTx[]
@@ -105,6 +60,10 @@ type TransactionsResponse = {
    totalPaid: number             // ← tambahan
 
 }
+
+const TransactionsTable = dynamic(() => import('@/components/dashboard/TransactionsTable'))
+const WithdrawalHistory = dynamic(() => import('@/components/dashboard/WithdrawalHistory'))
+const AdminWithdrawForm = dynamic(() => import('@/components/dashboard/AdminWithdrawForm'))
 
 export default function DashboardPage() {
   useRequireAuth()
@@ -547,55 +506,6 @@ const filtered = mapped.filter(t => {
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
-                  <div className={styles.rangeControls}>
-            <select value={range} onChange={e => setRange(e.target.value as any)}>
-              <option value="today">Hari ini</option>
-              <option value="yesterday">Kemarin</option>
-
-              <option value="week">7 Hari Terakhir</option>
-              <option value="month">30 Hari Terakhir</option>
-
-              <option value="custom">Custom</option>
-            </select>
-            {range === 'custom' && (
-              <div className={styles.customDatePicker}>
-                <DatePicker
-                  selectsRange
-                  startDate={startDate}
-                  endDate={endDate}
-                  onChange={upd => setDateRange(upd)}
-                  isClearable={false}
-                  placeholderText="Select Date Range…"
-                  maxDate={new Date()}
-                  dateFormat="dd-MM-yyyy"
-                  className={styles.dateInput}
-                />
-                {(startDate || endDate) && (
-                  <button
-                    type="button"
-                    className={styles.clearRangeBtn}
-                    onClick={() => {
-                      setDateRange([null, null])
-                      setFrom(toJakartaDate(new Date()))
-                      setTo(toJakartaDate(new Date()))
-                    }}
-                  >
-                    Clear
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={styles.applyBtn}
-                  onClick={() => {
-                    applyDateRange()
-                  }}
-                  disabled={!startDate || !endDate}
-                >
-                  Terapkan
-                </button>
-              </div>
-            )}
-          </div>
       </div>
 <aside className={styles.sidebar}>
   <section className={styles.statsGrid}>
@@ -667,39 +577,24 @@ const filtered = mapped.filter(t => {
 </section>
 
 {isSuperAdmin && (
-  <section className={styles.cardSection} style={{ marginTop: 32 }}>
-    <h2>Withdraw Wallet</h2>
-    <form onSubmit={handleAdminWithdraw} className={styles.withdrawForm}>
-      <select value={selectedSub} onChange={e => setSelectedSub(e.target.value)}>
-        {subBalances.map(s => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </select>
-      <input type="number" placeholder="Amount" value={wdAmount} onChange={e => setWdAmount(e.target.value)} required />
-      <div style={{ minWidth: 160 }}>
-        <Select
-          options={bankOptions}
-          value={bankOptions.find(o => o.value === wdBank) || null}
-          onChange={opt => setWdBank(opt?.value || '')}
-          placeholder="Select bank…"
-          isSearchable
-          styles={{ container: b => ({ ...b, width: '100%' }), control: b => ({ ...b, minHeight: '2.5rem' }) }}
-        />
-      </div>
-            <input type="text" placeholder="Account No" value={wdAccount} onChange={e => setWdAccount(e.target.value)} required />
-      <div className={styles.readonlyWrapper}>
-        <input readOnly placeholder="Account Name" value={wdName} />
-        {isValid && <CheckCircle className={styles.validIcon} size={18} />}
-      </div>
-      <button type="button" onClick={validateBankAccount} disabled={busy.validating}>
-        {busy.validating ? 'Validating…' : 'Validate'}
-      </button>
-      <button type="submit" disabled={!isValid || !!error || busy.submitting}>
-        {busy.submitting ? 'Submitting…' : 'Withdraw'}
-      </button>
-      {error && <span className={styles.error}>{error}</span>}
-    </form>
-  </section>
+  <AdminWithdrawForm
+    subBalances={subBalances}
+    selectedSub={selectedSub}
+    setSelectedSub={setSelectedSub}
+    wdAmount={wdAmount}
+    setWdAmount={setWdAmount}
+    wdAccount={wdAccount}
+    setWdAccount={setWdAccount}
+    wdBank={wdBank}
+    setWdBank={setWdBank}
+    wdName={wdName}
+    bankOptions={bankOptions}
+    isValid={isValid}
+    busy={busy}
+    error={error}
+    validateBankAccount={validateBankAccount}
+    handleAdminWithdraw={handleAdminWithdraw}
+  />
 )}
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
   <h2>Profit per sub</h2>
@@ -736,310 +631,31 @@ const filtered = mapped.filter(t => {
 </section>
       {/* Filters & Table */}
       <main className={styles.content}>
-        <section className={styles.filters}>
-          <div className={styles.rangeControls}>
-            <select value={range} onChange={e => setRange(e.target.value as any)}>
-              <option value="today">Hari ini</option>
-              <option value="yesterday">Kemarin</option>
 
-              <option value="week">7 Hari Terakhir</option>
-
-              <option value="month">30 Hari Terakhir</option>
-
-              <option value="custom">Custom</option>
-            </select>
-            {range === 'custom' && (
-              <div className={styles.customDatePicker}>
-                <DatePicker
-                  selectsRange
-                  startDate={startDate}
-                  endDate={endDate}
-                  onChange={upd => setDateRange(upd)}
-                  isClearable={false}
-                  placeholderText="Select Date Range…"
-                  maxDate={new Date()}
-                  dateFormat="dd-MM-yyyy"
-                  className={styles.dateInput}
-                />
-                {(startDate || endDate) && (
-                  <button
-                    type="button"
-                    className={styles.clearRangeBtn}
-                    onClick={() => {
-                      setDateRange([null, null])
-                      setFrom(toJakartaDate(new Date()))
-                      setTo(toJakartaDate(new Date()))
-                    }}
-                  >
-                    Clear
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={styles.applyBtn}
-                  onClick={() => {
-                    applyDateRange()
-                  }}
-                  disabled={!startDate || !endDate}
-                >
-                  Terapkan
-                </button>
-              </div>
-            )}
-          </div>
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder="Cari TRX ID, RRN, atau Player ID…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+          <TransactionsTable
+            range={range}
+            setRange={setRange}
+            dateRange={dateRange}
+            setDateRange={setDateRange}
+            startDate={startDate}
+            endDate={endDate}
+            applyDateRange={applyDateRange}
+            search={search}
+            setSearch={setSearch}
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            loadingTx={loadingTx}
+            txs={txs}
+            perPage={perPage}
+            setPerPage={setPerPage}
+            page={page}
+            setPage={setPage}
+            totalPages={totalPages}
+            buildParams={buildParams}
           />
-<select
-  value={statusFilter}
-  onChange={e => setStatusFilter(e.target.value)}
->
-  <option value="all">All Status</option>
-  <option value="SUCCESS">SUCCESS</option>
-  <option value="PAID">PAID</option>
-  <option value="PENDING">PENDING</option>
-  <option value="EXPIRED">EXPIRED</option>
-</select>
-
-          <button
-            onClick={() => {
-              api.get('/admin/merchants/dashboard/export-all', {
-                params: buildParams(),
-                responseType: 'blob'
-    }).then(r => {
-      const url = URL.createObjectURL(new Blob([r.data]))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'dashboard-all.xlsx'
-      a.click()
-      URL.revokeObjectURL(url)
-    })
-  }}
-  className={styles.exportBtn}
->
-  <FileText size={16} /> Export Semua
-</button>
-
-        </section>
-
-        <section className={styles.tableSection}>
-          <h2>Daftar Transaksi &amp; Settlement</h2>
-          {loadingTx ? (
-            <div className={styles.loader}>Loading transaksi…</div>
-          ) : (
-            <div className={styles.tableWrapper}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Paid At</th>           {/* baru */}
-                    <th>Settled At</th>        {/* baru */}
-                    <th>TRX ID</th>
-                    <th>RRN</th>
-                    <th>Player ID</th>
-                    <th>PG</th>        
-                    <th>Amount</th>
-                    <th>Fee Launcx</th>
-                    <th>Fee PG</th>
-                    <th>Net Amount</th>
-                    <th>Status</th>
-                    <th>Settlement Status</th>
-
-                  </tr>
-                </thead>
-                <tbody>
-                  {txs.map(t => (
-                    <tr key={t.id}>
-                      <td>{new Date(t.date).toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })}</td>
-                         <td>
-                            {t.paymentReceivedTime
-                                      ? new Date(t.paymentReceivedTime)
-                                              .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
-                                           : '-'}
-                                             </td>
-                        <td>
-                       {t.settlementTime
-                         ? new Date(t.settlementTime)
-                        .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
-                        : '-'}
-                     </td>
-                      <td>
-                        <code className="font-mono">{t.id}</code>
-                        <button className={styles.copyBtn} onClick={() => navigator.clipboard.writeText(t.id)}>
-                          <ClipboardCopy size={14} />
-                        </button>
-                      </td>
-                      <td>
-                        <div className={styles.rrnCell}>
-                          <span className={styles.ellipsis}>{t.rrn}</span>
-                          <button className={styles.copyBtn} onClick={() => navigator.clipboard.writeText(t.rrn)}>
-                            <ClipboardCopy size={14} />
-                          </button>
-                        </div>
-                      </td>
-                      <td>{t.playerId}</td>
-                      <td>{t.channel}</td>            {/* ← baru */}
-                      <td>{t.amount.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
-                      <td>{t.feeLauncx.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
-                      <td>{t.feePg.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
-                      <td className={styles.netSettle}>{t.netSettle.toLocaleString('id-ID', { style:'currency', currency:'IDR' })}</td>
-<td>
-  {t.status || '-'}
-</td>
 
 
-<td>
-  {t.settlementStatus === 'WAITING'
-    ? 'PENDING'
-    : t.settlementStatus === 'UNSUCCESSFUL'
-      ? 'FAILED'
-      : (t.settlementStatus || '-')}
-</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-)}
-<div className={styles.pagination}>
-              <div>
-                Rows
-                <select
-                  value={perPage}
-                  onChange={e => {
-                    setPerPage(+e.target.value)
-                    setPage(1)
-                  }}
-                >
-                  {[10, 20, 50].map(n => (
-                    <option key={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                  ‹
-                </button>
-                <span>{page}/{totalPages}</span>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-                  ›
-                </button>
-              </div>
-            </div>
-
-
-        </section>
-
-
-
-   {/* === WITHDRAWAL HISTORY ===================================================== */}
-      <section className={styles.tableSection} style={{ marginTop: 32 }}>
-        <h2>Withdrawal History</h2>
-        {loadingWd ? (
-          <div className={styles.loader}>Loading withdrawals…</div>
-        ) : (
-          <div className={styles.tableWrapper}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Ref ID</th>
-                  <th>Account Name</th>
-                  <th>Alias</th>
-                  <th>Account No.</th>
-                  <th>Bank Code</th>
-                  <th>Bank Name</th>
-                  <th>Branch</th>
-                  <th>Wallet/Submerchant</th>
-                  <th>Withdrawal Fee</th>
-
-                  <th>Amount</th>
-                  <th>Net Amount</th>
-                   <th>PG Fee</th>
-
-                  <th>PG Trx ID</th>
-                  <th>In Process</th>
-                  <th>Status</th>
-                  <th>Completed At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {withdrawals.length ? (
-                  withdrawals.map(w => (
-                    <tr key={w.id}>
-                      <td>
-                        {new Date(w.createdAt).toLocaleString('id-ID', {
-                          dateStyle: 'short',
-                          timeStyle: 'short'
-                        })}
-                      </td>
-                      <td>{w.refId}</td>
-                      <td>{w.accountName}</td>
-                      <td>{w.accountNameAlias}</td>
-                      <td>{w.accountNumber}</td>
-                      <td>{w.bankCode}</td>
-                      <td>{w.bankName}</td>
-                      <td>{w.branchName ?? '-'}</td>
-                      <td>{w.wallet}</td>
-                      <td>
-                        {(w.amount - (w.netAmount ?? 0)).toLocaleString('id-ID', {
-                          style: 'currency',
-                          currency: 'IDR'
-                        })}
-                      </td>
-                      <td>
-                        {w.amount.toLocaleString('id-ID', {
-                          style: 'currency',
-                          currency: 'IDR'
-                        })}
-                      </td>
-                      <td>
-                        {w.netAmount != null
-                          ? w.netAmount.toLocaleString('id-ID', {
-                              style: 'currency',
-                              currency: 'IDR'
-                            })
-                          : '-'}
-                      </td>
-
-                     <td>
-                        {w.pgFee != null
-                          ? w.pgFee.toLocaleString('id-ID', {
-                              style: 'currency',
-                              currency: 'IDR'
-                            })
-                          : '-'}
-                      </td>
-                      <td>{w.paymentGatewayId ?? '-'}</td>
-                      <td>{w.isTransferProcess ? 'Yes' : 'No'}</td>
-                      <td>{w.status}</td>
-                      <td>
-                        {w.completedAt
-                          ? new Date(w.completedAt).toLocaleString('id-ID', {
-                              dateStyle: 'short',
-                              timeStyle: 'short'
-                            })
-                          : '-'}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={17} className={styles.noData}>
-                      No withdrawals
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
+      <WithdrawalHistory loadingWd={loadingWd} withdrawals={withdrawals} />
             {/* === ADMIN WITHDRAWAL HISTORY ======================================= */}
       {isSuperAdmin && (
         <section className={styles.tableSection} style={{ marginTop: 32 }}>
