@@ -277,7 +277,7 @@ export default function PaymentProvidersPage() {
               )}
 
               {form.provider === 'gidi' && (
-                <>
+                <div className="form-grid">
                   <div className="form-group">
                     <label>Base URL</label>
                     <input
@@ -342,7 +342,7 @@ export default function PaymentProvidersPage() {
                       }
                     />
                   </div>
-                </>
+                </div>
               )}
               <div className="checkbox-group">
                 <label>
@@ -547,7 +547,15 @@ export default function PaymentProvidersPage() {
   color: var(--text-main);
 }
 
-          
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.form-grid .form-group {
+  margin-bottom: 0;
+}
+
         .modal-title {
           margin: 0 0 1rem;
           font-size: 1.3rem;
