@@ -20,6 +20,7 @@ export default function AdminUsersPage() {
   const [role, setRole] = useState('ADMIN')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [search, setSearch] = useState('')
 
   const loadUsers = async () => {
     try {
@@ -59,6 +60,11 @@ export default function AdminUsersPage() {
       setUsers(prev => prev.filter(u => u.id !== id))
     } catch {}
   }
+
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div className={styles.container}>
@@ -110,6 +116,12 @@ export default function AdminUsersPage() {
       </section>
 
       <section className={styles.tableCard}>
+        <input
+          className={styles.searchInput}
+          placeholder="Search admins"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         <table className={styles.table}>
           <thead className={styles.thead}>
             <tr>
@@ -119,7 +131,7 @@ export default function AdminUsersPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map(u => (
+            {filteredUsers.map(u => (
               <tr key={u.id} className={styles.tr}>
                 <td className={styles.td}>{u.name}</td>
                 <td className={styles.td}>{u.email}</td>
@@ -132,7 +144,7 @@ export default function AdminUsersPage() {
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {filteredUsers.length === 0 && (
               <tr>
                 <td colSpan={4} className={styles.emptyText}>No admins available.</td>
               </tr>
