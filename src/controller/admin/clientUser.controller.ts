@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import bcrypt from 'bcrypt'
 import { prisma } from '../../core/prisma'
 import { AuthRequest } from '../../middleware/auth'
+import { logAdminAction } from '../../util/adminLog'
 
 // List all ClientUser of a PartnerClient
 export const listClientUsers = async (req: Request, res: Response) => {
@@ -39,9 +40,7 @@ export const createClientUser = async (req: AuthRequest, res: Response) => {
   })
 
   if (req.userId) {
-    await prisma.adminLog.create({
-      data: { adminId: req.userId, action: 'createClientUser', target: user.id }
-    })
+    await logAdminAction(req.userId, 'createClientUser', user.id)
   }
 
   res.status(201).json(user)
@@ -55,9 +54,7 @@ export const deleteClientUser = async (req: AuthRequest, res: Response) => {
   })
 
   if (req.userId) {
-    await prisma.adminLog.create({
-      data: { adminId: req.userId, action: 'deleteClientUser', target: userId }
-    })
+    await logAdminAction(req.userId, 'deleteClientUser', userId)
   }
 
   res.status(204).end()
