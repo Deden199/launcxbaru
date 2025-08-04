@@ -38,3 +38,16 @@ openssl rsa -pubout -in private.pem -out public.pem
 openssl pkey -pubin -in public.pem -text
 ```
 # laucxserver
+
+## Admin IP Whitelist
+
+Super Admins can restrict certain administrative actions to specific IP addresses.
+
+### API
+
+- `GET /api/v1/admin/ip-whitelist` – returns the list of allowed IPs.
+- `PUT /api/v1/admin/ip-whitelist` – update the allowed IPs with `{ "ips": ["1.1.1.1", "2.2.2.2"] }`.
+
+The whitelist is stored in the `Setting` table under the key `admin_ip_whitelist`.
+If the setting is missing or empty, no IP restriction is applied.
+

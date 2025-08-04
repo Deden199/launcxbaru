@@ -1,16 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../core/prisma';
 
-const whitelist = (process.env.ADMIN_IP_WHITELIST || '')
-  .split(',')
-  .map(ip => ip.trim())
-  .filter(Boolean);
+let whitelist: string[] | null = null;
 
-export function adminIpWhitelist(req: Request, res: Response, next: NextFunction) {
+async function fetchWhitelist() {
+  const row = await prisma.setting.findUnique({
+    where: { key: 'admin_ip_whitelist' },
+  });
+  whitelist = row?.value
+    .split(',')
+    .map(ip => ip.trim())
+    .filter(Boolean) ?? [];
+}
+
+export async function refreshAdminIpWhitelist() {
+  await fetchWhitelist();
+}
+
+export async function adminIpWhitelist(req: Request, res: Response, next: NextFunction) {
+  if (whitelist === null) {
+    await fetchWhitelist();
+  }
   const header = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
   const ip = header.split(',')[0].trim();
-  if (whitelist.length > 0 && !whitelist.includes(ip)) {
+  if ((whitelist?.length ?? 0) > 0 && !whitelist!.includes(ip)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   next();
 }
+
 
