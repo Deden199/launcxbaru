@@ -84,6 +84,7 @@ const [wdAmount, setWdAmount] = useState('')
 const [wdAccount, setWdAccount] = useState('')
 const [wdBank, setWdBank] = useState('')
 const [wdName, setWdName] = useState('')
+const [otp, setOtp] = useState('')
 const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
 const bankOptions = banks.map(b => ({ value: b.code, label: b.name }))
 const [isValid, setIsValid] = useState(false)
@@ -350,11 +351,13 @@ async function handleAdminWithdraw(e: React.FormEvent) {
       bank_code: wdBank,
       account_number: wdAccount,
       account_name: wdName,
+      otp,
     })
     setWdAmount('')
     setWdAccount('')
     setWdBank('')
     setWdName('')
+    setOtp('')
     setIsValid(false)
 
   } catch (err: any) {
@@ -588,6 +591,8 @@ const filtered = mapped.filter(t => {
     wdBank={wdBank}
     setWdBank={setWdBank}
     wdName={wdName}
+    otp={otp}
+    setOtp={setOtp}
     bankOptions={bankOptions}
     isValid={isValid}
     busy={busy}

@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import Select from 'react-select'
 import { CheckCircle } from 'lucide-react'
+import api from '@/lib/api'
 import { SubBalance } from '@/types/dashboard'
 import styles from '@/pages/Dashboard.module.css'
 
@@ -14,6 +16,8 @@ interface AdminWithdrawFormProps {
   wdBank: string
   setWdBank: (v: string) => void
   wdName: string
+  otp: string
+  setOtp: (v: string) => void
   bankOptions: { value: string; label: string }[]
   isValid: boolean
   busy: { validating: boolean; submitting: boolean }
@@ -33,6 +37,8 @@ export default function AdminWithdrawForm({
   wdBank,
   setWdBank,
   wdName,
+  otp,
+  setOtp,
   bankOptions,
   isValid,
   busy,
@@ -40,6 +46,14 @@ export default function AdminWithdrawForm({
   validateBankAccount,
   handleAdminWithdraw
 }: AdminWithdrawFormProps) {
+  const [requiresOtp, setRequiresOtp] = useState(false)
+
+  useEffect(() => {
+    api
+      .get('/admin/2fa/status')
+      .then(res => setRequiresOtp(res.data.totpEnabled))
+      .catch(() => {})
+  }, [])
   return (
     <section className={styles.cardSection} style={{ marginTop: 32 }}>
       <h2>Withdraw Wallet</h2>
@@ -85,6 +99,15 @@ export default function AdminWithdrawForm({
         <button type="button" onClick={validateBankAccount} disabled={busy.validating}>
           {busy.validating ? 'Validating…' : 'Validate'}
         </button>
+        {requiresOtp && (
+          <input
+            type="text"
+            placeholder="OTP"
+            value={otp}
+            onChange={e => setOtp(e.target.value)}
+            required
+          />
+        )}
         <button type="submit" disabled={!isValid || !!error || busy.submitting}>
           {busy.submitting ? 'Submitting…' : 'Withdraw'}
         </button>
