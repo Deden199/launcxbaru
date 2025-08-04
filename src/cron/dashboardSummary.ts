@@ -8,9 +8,10 @@ import { formatIdr } from '../util/currency'
 import axios from 'axios'
 
 async function buildSummaryMessage(): Promise<string> {
-  const nowJakarta = moment().tz('Asia/Jakarta')
-  const startOfDay = nowJakarta.clone().startOf('day').toDate()
-  const now        = nowJakarta.toDate()
+  const nowJakarta  = moment().tz('Asia/Jakarta')
+  const startOfDay  = nowJakarta.clone().startOf('day').toDate()
+  const startOfMonth = nowJakarta.clone().startOf('month').toDate()
+  const now         = nowJakarta.toDate()
 
   const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS'] as const
 
@@ -30,6 +31,14 @@ async function buildSummaryMessage(): Promise<string> {
   const paidAgg = await prisma.order.aggregate({
     _sum: { amount: true },
     where: { createdAt: { gte: startOfDay, lte: now }, status: 'PAID' }
+  })
+
+  const pendingAgg = await prisma.order.aggregate({
+    _sum: { pendingAmount: true },
+    where: {
+      createdAt: { gte: startOfMonth, lt: startOfDay },
+      status: 'PAID'
+    }
   })
 
   const wdAgg = await prisma.withdrawRequest.aggregate({
@@ -57,6 +66,7 @@ async function buildSummaryMessage(): Promise<string> {
     `Total Payment Volume : ${formatIdr(tpvAgg._sum.amount ?? 0)}`,
     `Total Paid           : ${formatIdr(paidAgg._sum.amount ?? 0)}`,
     `Total Settlement     : ${formatIdr(settleAgg._sum.settlementAmount ?? 0)}`,
+    `Pending Settlement (Month to Yesterday) : ${formatIdr(pendingAgg._sum.pendingAmount ?? 0)}`,
     `Successful Withdraw  : ${formatIdr(wdAgg._sum.amount ?? 0)}`,
     `Available Client Withdraw : ${formatIdr(totalClientBalance)}`
   ]
