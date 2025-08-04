@@ -5,9 +5,10 @@ import * as ctrl from '../../controller/admin/client.controller'
 
 const router = Router()
 
-// semua route hanya untuk ADMIN
+// semua route hanya untuk ADMIN & SUPER_ADMIN
 router.use(authMiddleware, (req, res, next) => {
-  if ((req as any).userRole !== 'ADMIN') return res.status(403).end()
+  const role = (req as any).userRole
+  if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') return res.status(403).end()
   next()
 })
 
