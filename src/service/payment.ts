@@ -21,7 +21,7 @@ import { getActiveProvidersForClient, Provider } from './provider';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
-import { generateDynamicQris, generateDynamicQrisWithAutoPoll, GidiConfig, GidiQrisResult } from './gidi.service';
+import { generateDynamicQrisFinal, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
