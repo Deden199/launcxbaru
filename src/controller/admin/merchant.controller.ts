@@ -649,94 +649,28 @@ export const getProfitPerSubMerchant = async (req: Request, res: Response) => {
 // src/controller/admin/merchant.controller.ts
 export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
-    const { partnerClientId, merchantId, date_from, date_to, subMerchantId } = req.query as any;
+    const { partnerClientId, merchantId, date_from, date_to, subMerchantId } =
+      req.query as any
 
-    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
-    const dateTo   = date_to   ? new Date(String(date_to))   : undefined;
-    const createdAtFilter: any = {};
-    if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
-    if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo;
-    // 1) Hitung hari ini: weekend vs weekday (termasuk override)
-    const isWeekend = isJakartaWeekend(new Date())
-    const scheduleFilter = isWeekend
-      ? { weekday: false, weekend: true }
-      : { weekday: true, weekend: false };
+    const dateFrom = date_from ? new Date(String(date_from)) : undefined
+    const dateTo   = date_to   ? new Date(String(date_to))   : undefined
+    const createdAtFilter: any = {}
+    if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom
+    if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo
 
-    // ─── 2) Sub-Merchant Balances ─────────────────────────────
-    let total_withdrawal = 0, pending_withdrawal = 0
-
+    // ─── 1) Sub-Merchant IDs (for aggregations) ──────────────
     const subs = await prisma.sub_merchant.findMany({
       where: {
-        merchantId,
+        ...(merchantId && merchantId !== 'all' ? { merchantId } : {}),
         provider: { in: ['hilogate', 'oy', 'gidi'] },
-        ...(subMerchantId && subMerchantId !== 'all' ? { id: String(subMerchantId) } : {}),
+        ...(subMerchantId && subMerchantId !== 'all'
+          ? { id: String(subMerchantId) }
+          : {}),
       },
-      select: { id: true, name: true, provider: true, credentials: true }
+      select: { id: true },
     })
 
-    const balanceResults = await Promise.all(subs.map(async (s) => {
-      let bal = 0
-      let wdTotal: number | undefined
-      let wdPending: number | undefined
-
-      const cacheKey = `sub_balance_${s.id}`
-      const cached = getCache<{ balance: number; wdTotal?: number; wdPending?: number }>(cacheKey)
-
-      if (cached) {
-        bal = cached.balance
-        wdTotal = cached.wdTotal
-        wdPending = cached.wdPending
-      } else {
-        try {
-          if (s.provider === 'hilogate') {
-            const raw = s.credentials as any
-            const cfg: HilogateConfig = {
-              merchantId: raw.merchantId,
-              env:        raw.env,
-              secretKey:  raw.secretKey,
-            }
-            const client = new HilogateClient(cfg)
-            const resp   = await client.getBalance()
-            const data   = resp.data
-            bal = data.active_balance ?? 0
-            wdTotal   = data.total_withdrawal
-            wdPending = data.pending_withdrawal
-          } else if (s.provider === 'oy') {
-            const raw = s.credentials as any
-            const cfg: OyConfig = {
-              baseUrl:  config.api.oy.baseUrl,
-              username: raw.merchantId,
-              apiKey:   raw.secretKey,
-            }
-            const client = new OyClient(cfg)
-            const resp   = await client.getBalance()
-            const data   = (resp as any).data ?? resp
-            bal = data.availableBalance ?? data.balance ?? 0
-          }
-        } catch (e) {
-          console.error(`[${s.provider}] getBalance error`, e)
-        }
-        setCache(cacheKey, { balance: bal, wdTotal, wdPending }, BALANCE_TTL_MS)
-      }
-
-      return { id: s.id, name: s.name, provider: s.provider, balance: bal, wdTotal, wdPending }
-    }))
-
-    const subBalances = balanceResults.map(r => ({
-      id:       r.id,
-      name:     r.name,
-      provider: r.provider,
-      balance:  r.balance
-    }))
-
-    for (const r of balanceResults) {
-      if (r.wdTotal != null && total_withdrawal === 0 && pending_withdrawal === 0) {
-        total_withdrawal   = r.wdTotal ?? 0
-        pending_withdrawal = r.wdPending ?? 0
-      }
-    }
-
-       let clientIds: string[] | undefined
+    let clientIds: string[] | undefined
     if (partnerClientId && partnerClientId !== 'all') {
       clientIds = [partnerClientId]
 
@@ -811,20 +745,14 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       return n;
     }, 0);
 
-    const totalAvailableWithdraw = total_withdrawal - pending_withdrawal;
-
     const totalClientBalance =
       (inAgg._sum.settlementAmount ?? 0) - (outAgg._sum.amount ?? 0)
     // ─── 5) Kirim response ───────────────────────────────
     return res.json({
-      subBalances,
-      total_withdrawal,
-      pending_withdrawal,
       totalClientBalance,
       totalPaymentVolume: tpvAgg,
       totalPaid:          paidAgg,
       totalSettlement:    settleAgg,
-      totalAvailableWithdraw,
       totalSuccessfulWithdraw: succWdAgg._sum.amount ?? 0,
     })
 
@@ -833,6 +761,102 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ error: err.message || 'Failed to fetch dashboard summary' });
+  }
+};
+
+export const getMerchantBalances = async (req: Request, res: Response) => {
+  try {
+    const { merchantId } = req.params as any;
+    const cacheKey = `merchant_balances_${merchantId}`;
+    const cached = getCache<{ data: any; fetchedAt: number }>(cacheKey);
+    const STALE_MS = BALANCE_TTL_MS;
+    const CACHE_MS = BALANCE_TTL_MS * 2;
+
+    const fetchAndCache = async () => {
+      let total_withdrawal = 0;
+      let pending_withdrawal = 0;
+
+      const subs = await prisma.sub_merchant.findMany({
+        where: {
+          ...(merchantId && merchantId !== 'all' ? { merchantId } : {}),
+          provider: { in: ['hilogate', 'oy', 'gidi'] },
+        },
+        select: { id: true, name: true, provider: true, credentials: true },
+      });
+
+      const balanceResults = await Promise.all(
+        subs.map(async (s) => {
+          let bal = 0;
+          let wdTotal: number | undefined;
+          let wdPending: number | undefined;
+
+          try {
+            if (s.provider === 'hilogate') {
+              const raw = s.credentials as any;
+              const cfg: HilogateConfig = {
+                merchantId: raw.merchantId,
+                env: raw.env,
+                secretKey: raw.secretKey,
+              };
+              const client = new HilogateClient(cfg);
+              const resp = await client.getBalance();
+              const data = resp.data;
+              bal = data.active_balance ?? 0;
+              wdTotal = data.total_withdrawal;
+              wdPending = data.pending_withdrawal;
+            } else if (s.provider === 'oy') {
+              const raw = s.credentials as any;
+              const cfg: OyConfig = {
+                baseUrl: config.api.oy.baseUrl,
+                username: raw.merchantId,
+                apiKey: raw.secretKey,
+              };
+              const client = new OyClient(cfg);
+              const resp = await client.getBalance();
+              const data = (resp as any).data ?? resp;
+              bal = data.availableBalance ?? data.balance ?? 0;
+            }
+          } catch (e) {
+            console.error(`[${s.provider}] getBalance error`, e);
+          }
+
+          if (
+            wdTotal != null &&
+            total_withdrawal === 0 &&
+            pending_withdrawal === 0
+          ) {
+            total_withdrawal = wdTotal ?? 0;
+            pending_withdrawal = wdPending ?? 0;
+          }
+
+          return { id: s.id, name: s.name, provider: s.provider, balance: bal };
+        })
+      );
+
+      const data = {
+        subBalances: balanceResults,
+        total_withdrawal,
+        pending_withdrawal,
+      };
+      setCache(cacheKey, { data, fetchedAt: Date.now() }, CACHE_MS);
+      return data;
+    };
+
+    if (cached) {
+      res.json(cached.data);
+      if (Date.now() - cached.fetchedAt > STALE_MS) {
+        fetchAndCache().catch((e) =>
+          console.error('[getMerchantBalances refresh]', e)
+        );
+      }
+      return;
+    }
+
+    const fresh = await fetchAndCache();
+    res.json(fresh);
+  } catch (err: any) {
+    console.error('[getMerchantBalances]', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch balances' });
   }
 };
 
