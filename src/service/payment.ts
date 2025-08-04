@@ -23,6 +23,20 @@ import { OyClient, OyConfig } from './oyClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQris, GidiConfig } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
+// dedupe lokal supaya dua caller bersamaan gak bikin dua generateDynamicQris
+const inFlightGidi = new Map<string, Promise<any>>();
+async function wrappedGenerateDynamicQris(gidiCfg: GidiConfig, opts: { amount: number; datetimeExpired?: string }) {
+  const tx = gidiCfg.transactionId;
+  if (inFlightGidi.has(tx)) {
+    return inFlightGidi.get(tx)!;
+  }
+  const p = generateDynamicQris(gidiCfg, opts)
+    .finally(() => {
+      inFlightGidi.delete(tx);
+    });
+  inFlightGidi.set(tx, p);
+  return p;
+}
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [

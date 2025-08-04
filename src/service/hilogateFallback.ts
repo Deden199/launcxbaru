@@ -2,6 +2,7 @@ import { prisma } from '../core/prisma';
 import logger from '../logger';
 import { HilogateClient, HilogateConfig } from './hilogateClient';
 import { processHilogatePayload } from './payment';
+import moment from 'moment-timezone';
 
 const FINAL_STATUSES = ['SUCCESS', 'EXPIRED', 'FAILED', 'COMPLETED'];
 
@@ -35,10 +36,10 @@ async function resendCallback(refId: string, cfg: HilogateConfig) {
 
 export async function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
   const delayMs = 3 * 60 * 1000;
-  const nextRetry = new Date(Date.now() + delayMs);
+  const nextRetry = moment().tz('Asia/Jakarta').add(delayMs, 'ms').toDate();
 
   try {
-    await (prisma as any).hilogateCallbackWatcher.upsert({
+    await prisma.hilogateCallbackWatcher.upsert({
       where: { refId },
       update: { attemptCount: 0, processed: false, nextRetryAt: nextRetry },
       create: { refId, attemptCount: 0, processed: false, nextRetryAt: nextRetry },
@@ -89,7 +90,7 @@ export async function scheduleHilogateFallback(refId: string, cfg: HilogateConfi
         return;
       }
       const nextDelay = backoffs[attempts - 1] * 60 * 1000;
-      const nextTime = new Date(Date.now() + nextDelay);
+      const nextTime = moment().tz('Asia/Jakarta').add(nextDelay, 'ms').toDate();
       await prisma.hilogateCallbackWatcher.update({
         where: { refId },
         data: { attemptCount: attempts, nextRetryAt: nextTime },
