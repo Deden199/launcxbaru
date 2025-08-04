@@ -33,19 +33,24 @@ async function resendCallback(refId: string, cfg: HilogateConfig) {
   }
 }
 
-export function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
-  const delayMs = 10 * 60 * 1000;
+export async function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
+  const delayMs = 3 * 60 * 1000;
   const nextRetry = new Date(Date.now() + delayMs);
 
-  (prisma as any).hilogateCallbackWatcher.upsert({
-    where: { refId },
-    update: { attemptCount: 0, processed: false, nextRetryAt: nextRetry },
-    create: { refId, attemptCount: 0, processed: false, nextRetryAt: nextRetry },
-  });
+  try {
+    await (prisma as any).hilogateCallbackWatcher.upsert({
+      where: { refId },
+      update: { attemptCount: 0, processed: false, nextRetryAt: nextRetry },
+      create: { refId, attemptCount: 0, processed: false, nextRetryAt: nextRetry },
+    });
+  } catch (err: any) {
+    logger.error(`[hilogateFallback] failed to register watcher for ${refId}: ${err.message}`);
+    return;
+  }
 
   const checkAndResend = async () => {
     try {
-      const watcher = await (prisma as any).hilogateCallbackWatcher.findUnique({
+      const watcher = await prisma.hilogateCallbackWatcher.findUnique({
         where: { refId },
       });
       if (!watcher || watcher.processed) return;
@@ -54,7 +59,7 @@ export function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
         where: { referenceId: refId },
       });
       if (cb) {
-        await (prisma as any).hilogateCallbackWatcher.update({
+        await prisma.hilogateCallbackWatcher.update({
           where: { refId },
           data: { processed: true },
         });
@@ -67,7 +72,7 @@ export function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
       const status = evaluateFinalStatus(resp);
       if (status) {
         await resendCallback(refId, cfg);
-        await (prisma as any).hilogateCallbackWatcher.update({
+        await prisma.hilogateCallbackWatcher.update({
           where: { refId },
           data: { processed: true, attemptCount: watcher.attemptCount + 1 },
         });
@@ -75,9 +80,9 @@ export function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
       }
 
       const attempts = watcher.attemptCount + 1;
-      const backoffs = [20, 40];
+      const backoffs = [10, 40];
       if (attempts >= 3) {
-        await (prisma as any).hilogateCallbackWatcher.update({
+        await prisma.hilogateCallbackWatcher.update({
           where: { refId },
           data: { attemptCount: attempts },
         });
@@ -85,7 +90,7 @@ export function scheduleHilogateFallback(refId: string, cfg: HilogateConfig) {
       }
       const nextDelay = backoffs[attempts - 1] * 60 * 1000;
       const nextTime = new Date(Date.now() + nextDelay);
-      await (prisma as any).hilogateCallbackWatcher.update({
+      await prisma.hilogateCallbackWatcher.update({
         where: { refId },
         data: { attemptCount: attempts, nextRetryAt: nextTime },
       });

@@ -175,7 +175,7 @@ const apiResp = await hilClient.createTransaction({
         settlementAmount: null,
       },
     });
-    scheduleHilogateFallback(refId, hilCfg);
+    await scheduleHilogateFallback(refId, hilCfg);
 
     // 8) Return response ke client
     return {
