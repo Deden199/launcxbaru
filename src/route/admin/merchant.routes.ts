@@ -25,6 +25,8 @@ router.post('/',    ctrl.createMerchant)
 router.get('/',     ctrl.getAllMerchants)
 router.get('/allclient',     ctrl.getAllClient)
 
+router.get('/:merchantId/balances', ctrl.getMerchantBalances)
+
 router.get('/:id',  ctrl.getMerchantById)
 router.patch('/:id',      ctrl.updateMerchant)
 router.patch('/:id/fee',  ctrl.setFeeRate)

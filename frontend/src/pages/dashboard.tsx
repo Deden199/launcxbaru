@@ -78,6 +78,7 @@ export default function DashboardPage() {
 const [subBalances, setSubBalances] = useState<SubBalance[]>([])
 const [selectedSub, setSelectedSub] = useState<string>('')
 const [currentBalance, setCurrentBalance] = useState(0)
+const [loadingBalances, setLoadingBalances] = useState(true)
   const [adminWithdrawals, setAdminWithdrawals] = useState<AdminWithdrawal[]>([])
   const [loadingAdminWd, setLoadingAdminWd] = useState(true)
 const [wdAmount, setWdAmount] = useState('')
@@ -232,6 +233,7 @@ function buildParams() {
   // Fetch Hilogate summary
 const fetchSummary = async () => {
   setLoadingSummary(true)
+  setLoadingBalances(true)
   try {
     const params = buildParams()
 
@@ -241,38 +243,58 @@ const fetchSummary = async () => {
       setMerchants(resp.data)
     }
 
-    // (2) panggil endpoint summary, termasuk oyBalance
+    // (2) panggil endpoint summary tanpa balances
     const { data } = await api.get<{
-      subBalances:        SubBalance[]
-      activeBalance?:     number
       totalClientBalance: number
       totalPaymentVolume?: number
       totalPaid?: number
       totalSettlement?: number
-      totalAvailableWithdraw?: number
       totalSuccessfulWithdraw?: number
-      total_withdrawal?:  number
-      pending_withdrawal?:number
     }>('/admin/merchants/dashboard/summary', { params })
 
-    // (3) set state untuk semua balance
-    setSubBalances(data.subBalances)
-    const current = data.subBalances.find(s => s.id === selectedSub) || data.subBalances[0]
-    if (current) {
-      setSelectedSub(current.id)
-      setCurrentBalance(current.balance)
-    }
-if (data.totalClientBalance !== undefined) setTotalClientBalance(data.totalClientBalance)  // ← Tambahkan ini
-    if (data.pending_withdrawal  !== undefined) setTotalPending(data.pending_withdrawal)
-    if (data.totalPaymentVolume   !== undefined) setTpv(data.totalPaymentVolume)
-    if (data.totalSettlement      !== undefined) setTotalSettlement(data.totalSettlement)
-    if (data.totalAvailableWithdraw !== undefined) setAvailableWithdraw(data.totalAvailableWithdraw)
-    if (data.totalSuccessfulWithdraw !== undefined) setSuccessWithdraw(data.totalSuccessfulWithdraw)
+    if (data.totalClientBalance !== undefined)
+      setTotalClientBalance(data.totalClientBalance)
+    if (data.totalPaymentVolume !== undefined) setTpv(data.totalPaymentVolume)
+    if (data.totalSettlement !== undefined) setTotalSettlement(data.totalSettlement)
+    if (data.totalSuccessfulWithdraw !== undefined)
+      setSuccessWithdraw(data.totalSuccessfulWithdraw)
     if (data.totalPaid !== undefined) setTotalTrans(data.totalPaid)
   } catch (e) {
     console.error('fetchSummary error', e)
   } finally {
     setLoadingSummary(false)
+  }
+}
+
+const fetchBalances = async () => {
+  setLoadingBalances(true)
+  try {
+    const id = selectedMerchant === 'all' ? 'all' : selectedMerchant
+    const { data } = await api.get<{
+      subBalances: SubBalance[]
+      total_withdrawal?: number
+      pending_withdrawal?: number
+    }>(`/admin/merchants/${id}/balances`)
+
+    setSubBalances(data.subBalances)
+    const current =
+      data.subBalances.find(s => s.id === selectedSub) || data.subBalances[0]
+    if (current) {
+      setSelectedSub(current.id)
+      setCurrentBalance(current.balance)
+    }
+
+    if (
+      data.total_withdrawal !== undefined &&
+      data.pending_withdrawal !== undefined
+    ) {
+      setAvailableWithdraw(data.total_withdrawal - data.pending_withdrawal)
+      setTotalPending(data.pending_withdrawal)
+    }
+  } catch (e) {
+    console.error('fetchBalances error', e)
+  } finally {
+    setLoadingBalances(false)
   }
 }
 
@@ -488,6 +510,11 @@ const filtered = mapped.filter(t => {
     fetchWithdrawals()
   }, [range, from, to, selectedMerchant])
   useEffect(() => {
+    if (!loadingSummary) {
+      fetchBalances()
+    }
+  }, [loadingSummary, selectedMerchant])
+  useEffect(() => {
     fetchTransactions()
   }, [range, from, to, selectedMerchant, search, statusFilter, page, perPage])
 
@@ -567,16 +594,20 @@ const filtered = mapped.filter(t => {
 
 <section className={styles.cardSection} style={{ marginTop: 32 }}>
   <h2>Wallet Balances</h2>
-  <div className={styles.statsGrid}>
-    {subBalances.map(s => (
-      <div key={s.id} className={`${styles.card} ${styles.activeBalance}`}>
-        <h3 className={styles.cardTitle}>{s.name}</h3>
-        <p className={styles.cardValue}>
-          {s.balance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
-        </p>
-      </div>
-    ))}
-  </div>
+  {loadingBalances ? (
+    <div className={styles.loader}>Loading balances…</div>
+  ) : (
+    <div className={styles.statsGrid}>
+      {subBalances.map(s => (
+        <div key={s.id} className={`${styles.card} ${styles.activeBalance}`}>
+          <h3 className={styles.cardTitle}>{s.name}</h3>
+          <p className={styles.cardValue}>
+            {s.balance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+          </p>
+        </div>
+      ))}
+    </div>
+  )}
 </section>
 
 {isSuperAdmin && (
