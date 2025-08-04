@@ -397,9 +397,6 @@ async function handleAdminWithdraw(e: React.FormEvent) {
     setWdBank('')
     setWdName('')
     setIsValid(false)
-    fetchSummary()
-    fetchWithdrawals()
-    fetchAdminWithdrawals()
 
   } catch (err: any) {
     alert(err.response?.data?.error || 'Failed')
@@ -591,12 +588,6 @@ const filtered = mapped.filter(t => {
                   className={styles.applyBtn}
                   onClick={() => {
                     applyDateRange()
-                    fetchSummary()
-                    fetchProfit()
-                    fetchProfitSub()
-                    fetchAdminWithdrawals()
-                    fetchWithdrawals()
-                    fetchTransactions()
                   }}
                   disabled={!startDate || !endDate}
                 >
@@ -788,12 +779,6 @@ const filtered = mapped.filter(t => {
                   className={styles.applyBtn}
                   onClick={() => {
                     applyDateRange()
-                    fetchSummary()
-                    fetchProfit()
-                    fetchProfitSub()
-                    fetchAdminWithdrawals()
-                    fetchWithdrawals()
-                    fetchTransactions()
                   }}
                   disabled={!startDate || !endDate}
                 >
