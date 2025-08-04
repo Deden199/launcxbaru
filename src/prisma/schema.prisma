@@ -354,6 +354,7 @@ model AdminLog {
   adminId   String
   action    String
   target    String?
+  detail    Json?
   createdAt DateTime @default(now())
 
   admin PartnerUser @relation(fields: [adminId], references: [id])

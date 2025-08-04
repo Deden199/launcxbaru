@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt'
 import { AuthRequest } from '../../middleware/auth'
 import { parseDateSafely } from '../../util/time'
 import { PrismaClient, DisbursementStatus } from '@prisma/client'
+import { logAdminAction } from '../../util/adminLog'
 
 const prisma = new PrismaClient()
 
@@ -130,13 +131,7 @@ export const createClient = async (req: AuthRequest, res: Response) => {
     }
   })
   if (req.userId) {
-    await prisma.adminLog.create({
-      data: {
-        adminId: req.userId,
-        action: 'createClient',
-        target: client.id
-      }
-    })
+    await logAdminAction(req.userId, 'createClient', client.id)
   }
   // 2c) kembalikan data client + kredensial default
   res.status(201).json({
@@ -289,13 +284,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     })
   }
   if (req.userId) {
-    await prisma.adminLog.create({
-      data: {
-        adminId: req.userId,
-        action: 'updateClient',
-        target: clientId
-      }
-    })
+    await logAdminAction(req.userId, 'updateClient', clientId)
   }
   res.json(updated)
 }

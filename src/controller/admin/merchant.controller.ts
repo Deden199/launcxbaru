@@ -14,9 +14,10 @@ import { parseRawCredential, normalizeCredentials } from '../../util/credentials
 
 
 import { prisma } from '../../core/prisma';
+import { logAdminAction } from '../../util/adminLog';
 
 // 1. Create merchant (mdr wajib)
-export const createMerchant = async (req: Request, res: Response) => {
+export const createMerchant = async (req: AuthRequest, res: Response) => {
   const { name, phoneNumber, email, telegram, mdr } = req.body;
   if (mdr == null) {
     return res.status(400).json({ error: 'mdr required' });
@@ -30,6 +31,9 @@ export const createMerchant = async (req: Request, res: Response) => {
       mdr: Number(mdr),
     },
   });
+  if (req.userId) {
+    await logAdminAction(req.userId, 'createMerchant', merchant.id);
+  }
   res.status(201).json(merchant);
 };
 
@@ -120,7 +124,7 @@ export const getMerchantById = async (req: Request, res: Response) => {
 };
 
 // 4. Update merchant (boleh ubah semua field termasuk mdr)
-export const updateMerchant = async (req: Request, res: Response) => {
+export const updateMerchant = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { mdr, ...rest } = req.body;
   const data: any = { ...rest };
@@ -128,18 +132,24 @@ export const updateMerchant = async (req: Request, res: Response) => {
     data.mdr = Number(mdr);
   }
   const updated = await prisma.merchant.update({ where: { id }, data });
+  if (req.userId) {
+    await logAdminAction(req.userId, 'updateMerchant', id);
+  }
   res.json(updated);
 };
 
 // 5. Delete merchant
-export const deleteMerchant = async (req: Request, res: Response) => {
+export const deleteMerchant = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   await prisma.merchant.delete({ where: { id } });
+  if (req.userId) {
+    await logAdminAction(req.userId, 'deleteMerchant', id);
+  }
   res.status(204).end();
 };
 
 // 6. Set fee rate (mdr) khusus
-export const setFeeRate = async (req: Request, res: Response) => {
+export const setFeeRate = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { mdr } = req.body;
   if (mdr == null) {
@@ -149,10 +159,13 @@ export const setFeeRate = async (req: Request, res: Response) => {
     where: { id },
     data: { mdr: Number(mdr) },
   });
+  if (req.userId) {
+    await logAdminAction(req.userId, 'setFeeRate', id, { mdr: Number(mdr) });
+  }
   res.json(merchant);
 };
 
-export const connectPG = async (req: Request, res: Response) => {
+export const connectPG = async (req: AuthRequest, res: Response) => {
   try {
     const merchantId = req.params.id;
   const { provider, credentials: inputCreds, fee, name } = req.body;
@@ -207,6 +220,10 @@ export const connectPG = async (req: Request, res: Response) => {
       },
     });
 
+    if (req.userId) {
+      await logAdminAction(req.userId, 'connectPG', created.id);
+    }
+
     return res.status(201).json(created);
   } catch (err: any) {
     console.error('[connectPG]', err)
@@ -228,7 +245,7 @@ export const listPGs = async (req: Request, res: Response) => {
 };
 
 // 9. Update fee koneksi PG
-export const updatePGFee = async (req: Request, res: Response) => {
+export const updatePGFee = async (req: AuthRequest, res: Response) => {
    try {
      const merchantId = req.params.id
     const subId       = req.params.subId
@@ -278,6 +295,10 @@ export const updatePGFee = async (req: Request, res: Response) => {
       data,
     })
 
+    if (req.userId) {
+      await logAdminAction(req.userId, 'updatePGFee', subId)
+    }
+
     return res.json(updated)
   } catch (err: any) {
     console.error('[updateSubMerchant]', err)
@@ -291,9 +312,12 @@ export const updatePGFee = async (req: Request, res: Response) => {
 }
 
 // 10. Disconnect PG
-export const disconnectPG = async (req: Request, res: Response) => {
+export const disconnectPG = async (req: AuthRequest, res: Response) => {
   const subId = req.params.subId;
   await prisma.sub_merchant.delete({ where: { id: subId } });
+  if (req.userId) {
+    await logAdminAction(req.userId, 'disconnectPG', subId);
+  }
   res.status(204).end();
 };
 
@@ -1227,13 +1251,7 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
       }
     })
 
-    await prisma.adminLog.create({
-      data: {
-        adminId: req.userId!,
-        action: 'ADMIN_WITHDRAW',
-        target: refId
-      }
-    })
+    await logAdminAction(req.userId!, 'ADMIN_WITHDRAW', refId)
 
     return res.status(201).json({ status: newStatus })
   } catch (err: any) {

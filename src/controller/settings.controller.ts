@@ -1,6 +1,8 @@
 import { Request, Response } from 'express'
 import { prisma } from '../core/prisma'
 import { setWeekendOverrideDates } from '../util/time'
+import { AuthRequest } from '../middleware/auth'
+import { logAdminAction } from '../util/adminLog'
 
 export async function getSettings(req: Request, res: Response) {
   const rows = await prisma.setting.findMany()
@@ -9,7 +11,7 @@ export async function getSettings(req: Request, res: Response) {
   res.json({ data: obj })
 }
 
-export async function updateSettings(req: Request, res: Response) {
+export async function updateSettings(req: AuthRequest, res: Response) {
   const updates: Record<string,string> = req.body
   const tx = await prisma.$transaction(
     Object.entries(updates).map(([key,value]) =>
@@ -26,6 +28,9 @@ export async function updateSettings(req: Request, res: Response) {
       .map(d => d.trim())
       .filter(Boolean)
     setWeekendOverrideDates(dates)
+  }
+  if (req.userId) {
+    await logAdminAction(req.userId, 'updateSettings', 'settings', updates)
   }
   res.json({ data: tx })
 }
