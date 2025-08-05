@@ -526,6 +526,10 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
     const dateTo = date_to ? new Date(String(date_to)) : undefined;
     if (dateTo && !isNaN(dateTo.getTime())) dateTo.setHours(23, 59, 59, 999);
     const createdAtFilter: any = {};
+    if (status && !Object.values(DisbursementStatus).includes(status as DisbursementStatus)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
     if (dateTo && !isNaN(dateTo.getTime())) createdAtFilter.lte = dateTo;
 
