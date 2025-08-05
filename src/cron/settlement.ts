@@ -17,7 +17,6 @@ const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari w
 let lastCreatedAt: Date | null = null;
 let lastId: string | null = null;
 let running = true;
-let isRunning = false;
 
 // HTTPS agent dengan keep-alive
 const httpsAgent = new https.Agent({
@@ -261,18 +260,6 @@ async function processBatchLoop(): Promise<{ settledCount: number; netAmount: nu
   return { settledCount, netAmount };
 }
 
-// wrapper untuk prevent overlap
-async function safeRun(): Promise<{ settledCount: number; netAmount: number }> {
-  if (!running || isRunning) {
-    return { settledCount: 0, netAmount: 0 };
-  }
-  isRunning = true;
-  try {
-    return await processBatchLoop();
-  } finally {
-    isRunning = false;
-  }
-}
 let cutoffTime: Date | null = null;
 
 export function scheduleSettlementChecker() {
@@ -283,7 +270,7 @@ export function scheduleSettlementChecker() {
 
   logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
-  // 1) Harian jam 17:00: set cut‑off & process batches
+  // Harian jam 17:00: set cut‑off & process batches
   cron.schedule(
     '0 17 * * *',
     async () => {
@@ -334,22 +321,4 @@ export function scheduleSettlementChecker() {
     { timezone: 'Asia/Jakarta' }
   );
 
-  // 2) Polling tiap 5 menit 17:00–20:00
-  cron.schedule(
-    '*/5 18-20 * * *',
-    async () => {
-      if (!running) return;
-      logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
-      const { settledCount, netAmount } = await safeRun();
-      try {
-        await sendTelegramMessage(
-          config.api.telegram.adminChannel,
-          `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
-        );
-      } catch (err) {
-        logger.error('[SettlementCron] Failed to send Telegram summary:', err);
-      }
-    },
-    { timezone: 'Asia/Jakarta' }
-  );
 }
