@@ -81,6 +81,7 @@ const [subBalances, setSubBalances] = useState<SubBalance[]>([])
 const [selectedSub, setSelectedSub] = useState<string>('')
 const [currentBalance, setCurrentBalance] = useState(0)
 const [loadingBalances, setLoadingBalances] = useState(true)
+const [balanceError, setBalanceError] = useState('')
   const [adminWithdrawals, setAdminWithdrawals] = useState<AdminWithdrawal[]>([])
   const [loadingAdminWd, setLoadingAdminWd] = useState(true)
 const [wdAmount, setWdAmount] = useState('')
@@ -234,7 +235,6 @@ function buildParams() {
   // Fetch Hilogate summary
 const fetchSummary = async () => {
   setLoadingSummary(true)
-  setLoadingBalances(true)
   try {
     const params = buildParams()
 
@@ -269,6 +269,7 @@ const fetchSummary = async () => {
 
 const fetchBalances = async () => {
   setLoadingBalances(true)
+  setBalanceError('')
   try {
     const id = selectedMerchant === 'all' ? 'all' : selectedMerchant
     const { data } = await api.get<{
@@ -294,6 +295,7 @@ const fetchBalances = async () => {
     }
   } catch (e) {
     console.error('fetchBalances error', e)
+    setBalanceError('Failed to load balances. Please try again.')
   } finally {
     setLoadingBalances(false)
   }
@@ -520,10 +522,8 @@ const filtered = mapped.filter(t => {
     fetchWithdrawals()
   }, [range, from, to, selectedMerchant])
   useEffect(() => {
-    if (!loadingSummary) {
-      fetchBalances()
-    }
-  }, [loadingSummary, selectedMerchant])
+    fetchBalances()
+  }, [selectedMerchant])
   useEffect(() => {
     fetchTransactions()
   }, [range, from, to, selectedMerchant, search, statusFilter, page, perPage])
@@ -652,6 +652,8 @@ const filtered = mapped.filter(t => {
     <div className={styles.statsGrid}>
       <div className={`${styles.card} ${styles.cardLoader}`}>Loading balances…</div>
     </div>
+  ) : balanceError ? (
+    <div className={styles.error}>{balanceError}</div>
   ) : (
     <div className={styles.statsGrid}>
       {subBalances.map(s => (
