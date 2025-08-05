@@ -17,6 +17,15 @@ function parseJwt(t: string) {
     return null
   }
 }
+
+function mapWithdrawStatus(
+  status: string
+): 'PENDING' | 'COMPLETED' | 'FAILED' | undefined {
+  const s = status.toUpperCase()
+  return ['PENDING', 'COMPLETED', 'FAILED'].includes(s as any)
+    ? (s as 'PENDING' | 'COMPLETED' | 'FAILED')
+    : undefined
+}
 type RawTx = {
   id: string
   date: string
@@ -103,6 +112,7 @@ const [error, setError] = useState('')
   const [to, setTo]       = useState(() => toJakartaDate(new Date()))
   const [search, setSearch] = useState('')
 const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('PAID')
+const [withdrawStatusFilter, setWithdrawStatusFilter] = useState('')
 
 
   const [totalPages, setTotalPages] = useState(1)
@@ -336,6 +346,9 @@ async function fetchWithdrawals() {
   setLoadingWd(true)
   try {
     const params = buildParams()
+    delete params.status
+    const status = mapWithdrawStatus(withdrawStatusFilter)
+    if (status) params.status = status
     const { data } = await api.get<{ data: Withdrawal[] }>(
       '/admin/merchants/dashboard/withdrawals',
       { params }
@@ -353,6 +366,9 @@ async function fetchAdminWithdrawals() {
   setLoadingAdminWd(true)
   try {
     const params = buildParams()
+    delete params.status
+    const status = mapWithdrawStatus(withdrawStatusFilter)
+    if (status) params.status = status
     const { data } = await api.get<{ data: AdminWithdrawal[] }>(
       '/admin/merchants/dashboard/admin-withdrawals',
       { params }
@@ -520,7 +536,7 @@ const filtered = mapped.filter(t => {
     fetchAdminWithdrawals()
 
     fetchWithdrawals()
-  }, [range, from, to, selectedMerchant])
+  }, [range, from, to, selectedMerchant, withdrawStatusFilter])
   useEffect(() => {
     fetchBalances()
   }, [selectedMerchant])
