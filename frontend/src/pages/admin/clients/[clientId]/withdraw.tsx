@@ -49,17 +49,29 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
   const [startDate, endDate] = dateRange
+  const [totalPages, setTotalPages] = useState(1)
 
   useEffect(() => {
     if (!clientId) return
     setLoading(true)
     setPageError('')
+    const params: any = { page, limit: perPage }
+    if (statusFilter) params.status = statusFilter
+    if (searchRef) params.ref = searchRef
+    if (startDate) params.fromDate = startDate.toISOString()
+    if (endDate) params.toDate = endDate.toISOString()
+
     api
-      .get<{ data: Withdrawal[] }>(`/admin/clients/${clientId}/withdrawals`)
-      .then(res => setWithdrawals(res.data.data))
+      .get<{ data: Withdrawal[]; total: number }>(`/admin/clients/${clientId}/withdrawals`, {
+        params
+      })
+      .then(res => {
+        setWithdrawals(res.data.data)
+        setTotalPages(Math.max(1, Math.ceil(res.data.total / perPage)))
+      })
       .catch(() => setPageError('Failed to load data'))
       .finally(() => setLoading(false))
-  }, [clientId])
+  }, [clientId, searchRef, statusFilter, startDate, endDate, page, perPage])
 
   useEffect(() => {
     if (!clientId) return
@@ -92,17 +104,7 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
     XLSX.writeFile(wb, 'withdrawals.xlsx')
   }
 
-  const filtered = withdrawals.filter(w => {
-    const d = new Date(w.createdAt)
-    if (searchRef && !w.refId.includes(searchRef)) return false
-    if (statusFilter && w.status !== statusFilter) return false
-    if (startDate && d < startDate) return false
-    if (endDate && d > new Date(endDate.setHours(23,59,59))) return false
-    return true
-  })
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
-  const pageData = filtered.slice((page - 1) * perPage, page * perPage)
 
   return (
     <ClientLayout>
@@ -181,8 +183,8 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageData.length ? (
-                    pageData.map(w => (
+                  {withdrawals.length ? (
+                    withdrawals.map(w => (
                       <tr key={w.refId}>
                         <td>{new Date(w.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
                         <td>{w.completedAt ? new Date(w.completedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
