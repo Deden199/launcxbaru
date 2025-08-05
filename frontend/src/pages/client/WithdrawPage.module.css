@@ -106,6 +106,30 @@
 .exportBtn:hover{ background:#4f46e5; }
 
 .filters    { display:flex; flex-wrap:wrap; gap:.75rem; margin-bottom:1rem; }
+.withdrawFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.withdrawFilters input,
+.withdrawFilters select {
+  padding: .5rem .75rem;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  font-size: .875rem;
+  font-family: var(--font-sans, sans-serif);
+  flex: 1 1 150px;
+}
+@media (max-width: 480px) {
+  .withdrawFilters {
+    flex-direction: column;
+  }
+  .withdrawFilters input,
+  .withdrawFilters select {
+    width: 100%;
+  }
+}
 .input,.select { padding:.5rem .75rem; border:1px solid #d1d5db; border-radius:8px;
                  font-size:.875rem; }
 

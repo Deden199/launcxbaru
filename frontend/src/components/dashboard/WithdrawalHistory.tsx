@@ -45,7 +45,7 @@ export default function WithdrawalHistory(_: any) {
 
   return (
     <>
-      <section className={styles.filters}>
+      <section className={styles.withdrawFilters}>
         <input
           type="text"
           placeholder="Search Ref"
@@ -79,7 +79,6 @@ export default function WithdrawalHistory(_: any) {
           placeholderText="Select Date Range..."
           maxDate={new Date()}
           dateFormat="dd-MM-yyyy"
-          className={styles.searchInput}
         />
       </section>
       <section className={styles.tableSection} style={{ marginTop: 32 }}>

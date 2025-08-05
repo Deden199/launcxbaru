@@ -30,6 +30,30 @@
   align-items: center;
   margin-bottom: 1.5rem;
 }
+.withdrawFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.withdrawFilters input,
+.withdrawFilters select {
+  padding: .5rem .75rem;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: .5rem;
+  font-size: .875rem;
+  font-family: var(--font-sans, sans-serif);
+  flex: 1 1 150px;
+}
+@media (max-width: 480px) {
+  .withdrawFilters {
+    flex-direction: column;
+  }
+  .withdrawFilters input,
+  .withdrawFilters select {
+    width: 100%;
+  }
+}
 .rangeControls {
   display: flex;
   gap: .75rem;
