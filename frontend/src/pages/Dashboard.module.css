@@ -54,6 +54,9 @@
     width: 100%;
   }
 }
+.withdrawSection {
+  margin-top: 2rem;
+}
 .rangeControls {
   display: flex;
   gap: .75rem;
