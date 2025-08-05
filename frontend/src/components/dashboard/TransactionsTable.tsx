@@ -58,6 +58,7 @@ export default function TransactionsTable({
             setStatusFilter(e.target.value)
           }}
         >
+          <option value="SUCCESS">SUCCESS</option>
           <option value="PAID">PAID</option>
           <option value="PENDING">PENDING</option>
           <option value="EXPIRED">EXPIRED</option>

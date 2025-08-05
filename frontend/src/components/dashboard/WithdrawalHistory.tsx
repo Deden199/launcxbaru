@@ -46,7 +46,7 @@ export default function WithdrawalHistory(_: any) {
   return (
     <>
       <section className={styles.withdrawFilters}>
-        <input
+        {/* <input
           type="text"
           placeholder="Search Ref"
           value={searchRef}
@@ -54,7 +54,7 @@ export default function WithdrawalHistory(_: any) {
             setSearchRef(e.target.value)
             setPage(1)
           }}
-        />
+        /> */}
         <select
           value={statusFilter}
           onChange={e => {
