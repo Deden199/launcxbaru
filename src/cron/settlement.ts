@@ -221,7 +221,8 @@ const where: any = {
 // safe runner untuk batch loop dengan limit
 async function processBatchLoop() {
   let batches = 0;
-  const MAX_BATCHES = 10;
+  const MAX_BATCHES = Math.min(Number(process.env.SETTLEMENT_MAX_BATCHES) || 50, 100);
+  // env SETTLEMENT_MAX_BATCHES defaults to 50 and is capped at 100 to avoid resource exhaustion
   while (running && batches < MAX_BATCHES && (await processBatchOnce())) {
     batches++;
     logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`);
