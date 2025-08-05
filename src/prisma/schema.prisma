@@ -359,6 +359,19 @@ model AdminLog {
 
   admin PartnerUser @relation(fields: [adminId], references: [id])
 }
+
+model CallbackJobDeadLetter {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  jobId        String   @db.ObjectId
+  url          String
+  payload      Json
+  signature    String
+  statusCode   Int?
+  errorMessage String?
+  attempts     Int
+  createdAt    DateTime @default(now())
+}
+
 model HilogateCallbackWatcher {
   refId        String   @id @map("_id")
   attemptCount Int      @default(0)

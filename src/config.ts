@@ -36,7 +36,7 @@ export const config = {
 
         callbackQueue: {
       intervalMs: Number(process.env.CALLBACK_WORKER_INTERVAL_MS) || 5000,
-      maxAttempts: Number(process.env.CALLBACK_WORKER_MAX_ATTEMPTS) || 5,
+      maxAttempts: Number(process.env.CALLBACK_WORKER_MAX_ATTEMPTS) || 3,
       batchSize: Number(process.env.CALLBACK_WORKER_BATCH_SIZE) || 10,
     },
     expectedApiKey:

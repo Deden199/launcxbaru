@@ -27,6 +27,13 @@ export async function postWithRetry<T = any>(
       return resp;
     } catch (err: any) {
       lastErr = err;
+            const status = err.response?.status;
+      if (status >= 400 && status < 500) {
+        logger.error(
+          `[postWithRetry] client error ${status}: ${JSON.stringify(err.response?.data)}`
+        );
+        throw err;
+      }
       if (attempt >= attempts) {
         logger.error(
           `[postWithRetry] failed after ${attempts} attempts: ${err.message}`
