@@ -9,7 +9,7 @@ import crypto from 'crypto'
 import logger from '../logger'
 
 // ————————— CONFIG —————————
-const BATCH_SIZE = 500                          // jumlah order PAID diproses per batch
+const BATCH_SIZE = 1000                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari write conflict
 
