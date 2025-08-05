@@ -59,8 +59,14 @@ function generateSignature(path: string, secretKey: string): string {
 
 type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number };
 
-// core worker: proses satu batch; return true jika masih ada data
-async function processBatchOnce(): Promise<boolean> {
+type BatchResult = {
+  hasMore: boolean;
+  settledCount: number;
+  netAmount: number;
+};
+
+// core worker: proses satu batch; return object with stats
+async function processBatchOnce(): Promise<BatchResult> {
   // cursor-based pagination
 const where: any = {
   status: 'PAID',
@@ -98,7 +104,7 @@ const where: any = {
   });
 
   if (!pendingOrders.length) {
-    return false;
+    return { hasMore: false, settledCount: 0, netAmount: 0 };
   }
 
   // update cursor
@@ -117,7 +123,7 @@ const where: any = {
         const creds =
           o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
         if (!creds) {
-          return null;
+          return 0;
         }
 
         let settlementResult: SettlementResult | null = null;
@@ -135,7 +141,7 @@ const where: any = {
           const tx = resp.data.data;
           const st = (tx.settlement_status || '').toUpperCase();
           if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) {
-            return null;
+            return 0;
           }
           settlementResult = {
             netAmt: o.pendingAmount ?? tx.net_amount,
@@ -152,7 +158,7 @@ const where: any = {
           const s = statusResp.data;
           const st = (s.settlement_status || '').toUpperCase();
           if (s.status?.code !== '000' || st === 'WAITING') {
-            return null;
+            return 0;
           }
 
           const detailResp = await axios.get(
@@ -166,7 +172,7 @@ const where: any = {
           );
           const d = detailResp.data.data;
           if (!d || detailResp.data.status?.code !== '000') {
-            return null;
+            return 0;
           }
           settlementResult = {
             netAmt: d.settlement_amount,
@@ -178,7 +184,7 @@ const where: any = {
         }
 
         if (!settlementResult) {
-          return null;
+          return 0;
         }
 
         // idempotent update dengan updateMany + count check
@@ -203,28 +209,48 @@ const where: any = {
                   where: { id: o.partnerClientId! },
                   data: { balance: { increment: settlementResult.netAmt } }
                 });
+                return settlementResult.netAmt;
               }
+              return 0;
             })
           )
         );
       } catch (err) {
         logger.error(`[SettlementCron] order ${o.id} failed:`, err);
-        return null;
+        return 0;
       }
     })
   );
 
-  await Promise.allSettled(txPromises);
-  return true;
+  const settled = await Promise.allSettled(txPromises);
+  let settledCount = 0;
+  let netAmount = 0;
+  for (const r of settled) {
+    if (r.status === 'fulfilled') {
+      const val = r.value as number;
+      if (val > 0) {
+        settledCount++;
+        netAmount += val;
+      }
+    }
+  }
+
+  return { hasMore: true, settledCount, netAmount };
 }
 
 // safe runner untuk batch loop dengan limit
-async function processBatchLoop() {
+async function processBatchLoop(): Promise<{ settledCount: number; netAmount: number }> {
   let batches = 0;
+  let settledCount = 0;
+  let netAmount = 0;
   const MAX_BATCHES = Math.min(Number(process.env.SETTLEMENT_MAX_BATCHES) || 50, 100);
   // env SETTLEMENT_MAX_BATCHES defaults to 50 and is capped at 100 to avoid resource exhaustion
-  while (running && batches < MAX_BATCHES && (await processBatchOnce())) {
+  while (running && batches < MAX_BATCHES) {
+    const { hasMore, settledCount: sc, netAmount: na } = await processBatchOnce();
+    if (!hasMore) break;
     batches++;
+    settledCount += sc;
+    netAmount += na;
     logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`);
   }
   if (batches === MAX_BATCHES) {
@@ -232,16 +258,17 @@ async function processBatchLoop() {
       `[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`
     );
   }
+  return { settledCount, netAmount };
 }
 
 // wrapper untuk prevent overlap
-async function safeRun() {
+async function safeRun(): Promise<{ settledCount: number; netAmount: number }> {
   if (!running || isRunning) {
-    return;
+    return { settledCount: 0, netAmount: 0 };
   }
   isRunning = true;
   try {
-    await processBatchLoop();
+    return await processBatchLoop();
   } finally {
     isRunning = false;
   }
@@ -275,7 +302,15 @@ export function scheduleSettlementChecker() {
         } catch (err) {
           logger.error('[SettlementCron] Failed to send Telegram notification:', err);
         }
-        await safeRun();
+        const { settledCount, netAmount } = await safeRun();
+        try {
+          await sendTelegramMessage(
+            config.api.telegram.adminChannel,
+            `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
+          );
+        } catch (err) {
+          logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+        }
       },
       { timezone: 'Asia/Jakarta' }
     );
@@ -286,7 +321,15 @@ export function scheduleSettlementChecker() {
       async () => {
         if (!running) return;
         logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
-        await safeRun();
+        const { settledCount, netAmount } = await safeRun();
+        try {
+          await sendTelegramMessage(
+            config.api.telegram.adminChannel,
+            `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
+          );
+        } catch (err) {
+          logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+        }
       },
       { timezone: 'Asia/Jakarta' }
     );
