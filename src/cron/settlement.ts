@@ -7,6 +7,7 @@ import { prisma } from '../core/prisma'
 import { config } from '../config'
 import crypto from 'crypto'
 import logger from '../logger'
+import { sendTelegramMessage } from '../core/telegram.axios'
 
 // ————————— CONFIG —————————
 const BATCH_SIZE = 1000                          // jumlah order PAID diproses per batch
@@ -265,6 +266,14 @@ export function scheduleSettlementChecker() {
         lastCreatedAt = null;
         lastId        = null;
         logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
+        try {
+          await sendTelegramMessage(
+            config.api.telegram.adminChannel,
+            `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
+          );
+        } catch (err) {
+          logger.error('[SettlementCron] Failed to send Telegram notification:', err);
+        }
         await safeRun();
       },
       { timezone: 'Asia/Jakarta' }
