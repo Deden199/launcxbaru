@@ -265,35 +265,42 @@ export function scheduleSettlementChecker() {
         logger.error('[SettlementCron] Failed to send Telegram notification:', err);
       }
 
-      const total = await prisma.order.count({
-        where: {
-          status: 'PAID',
-          partnerClientId: { not: null },
-          createdAt: { lte: cutoffTime }
-        }
-      });
-      const iterations = Math.ceil(total / BATCH_SIZE);
+ // Hitung total batch yang dibutuhkan
+const total = await prisma.order.count({
+  where: {
+    status: 'PAID',
+    partnerClientId: { not: null },
+    createdAt: { lte: cutoffTime }
+  }
+});
+const iterations = Math.ceil(total / BATCH_SIZE);
 
-      let settledOrders = 0;
-      let netAmount = 0;
-      let ranIterations = 0;
+// Reset cursor ONCE sebelum loop
+lastCreatedAt = null;
+lastId        = null;
 
-      for (let i = 0; i < iterations; i++) {
-        lastCreatedAt = null;
-        lastId = null;
-        const { settledCount, netAmount: na } = await processBatchLoop();
-        if (!settledCount) break;
-        settledOrders += settledCount;
-        netAmount += na;
-        ranIterations++;
-        await new Promise(r => setTimeout(r, 500));
-      }
+let settledOrders = 0;
+let netAmount     = 0;
+let ranIterations = 0;
+
+for (let i = 0; i < iterations; i++) {
+  // Proses satu batch berikutnya
+  const { settledCount, netAmount: na } = await processBatchOnce();
+  if (!settledCount) break;           // berhenti kalau tidak ada yang tersettle
+  settledOrders += settledCount;
+  netAmount     += na;
+  ranIterations++;
+  logger.info(`[SettlementCron] Iter ${i+1}/${iterations}: settled ${settledCount}`);
+  await new Promise(r => setTimeout(r, 500));  // jeda ringan
+}
 
       try {
-        await sendTelegramMessage(
-          config.api.telegram.adminChannel,
-          `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders with net amount ${netAmount}`
-        );
+// Kirim ringkasan hasil
+await sendTelegramMessage(
+  config.api.telegram.adminChannel,
+  `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
+);
+
       } catch (err) {
         logger.error('[SettlementCron] Failed to send Telegram summary:', err);
       }
