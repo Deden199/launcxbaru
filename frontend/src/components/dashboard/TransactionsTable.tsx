@@ -1,8 +1,10 @@
-import { Dispatch, SetStateAction } from 'react'
+import { Dispatch, SetStateAction, useState } from 'react'
 import { FileText, ClipboardCopy } from 'lucide-react'
 import api from '@/lib/api'
 import styles from '@/pages/Dashboard.module.css'
 import { Tx } from '@/types/dashboard'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 
 interface TransactionsTableProps {
   search: string
@@ -17,6 +19,7 @@ interface TransactionsTableProps {
   setPage: Dispatch<SetStateAction<number>>
   totalPages: number
   buildParams: () => any
+  onDateChange: (dates: [Date | null, Date | null]) => void
 }
 
 export default function TransactionsTable({
@@ -31,8 +34,10 @@ export default function TransactionsTable({
   page,
   setPage,
   totalPages,
-  buildParams
+  buildParams,
+  onDateChange
 }: TransactionsTableProps) {
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
   return (
     <>
       <section className={styles.filters}>
@@ -48,6 +53,21 @@ export default function TransactionsTable({
           <option value="PENDING">PENDING</option>
           <option value="EXPIRED">EXPIRED</option>
         </select>
+        <DatePicker
+          selectsRange
+          startDate={dateRange[0]}
+          endDate={dateRange[1]}
+          onChange={upd => {
+            const range = upd as [Date | null, Date | null]
+            setDateRange(range)
+            onDateChange(range)
+          }}
+          isClearable={true}
+          placeholderText="Filter tanggal…"
+          className={styles.dateInput}
+          maxDate={new Date()}
+          dateFormat="dd-MM-yyyy"
+        />
         <button
           onClick={() => {
             api

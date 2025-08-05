@@ -154,8 +154,15 @@ const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('P
 function buildParams() {
   const p: any = {}
   const tz = 'Asia/Jakarta'
-
-  if (range === 'today') {
+  if (startDate && endDate) {
+    const s = new Date(startDate); s.setHours(0,0,0,0)
+    const e = new Date(endDate); e.setHours(23,59,59,999)
+    const sJak = new Date(s.toLocaleString('en-US', { timeZone: tz }))
+    const eJak = new Date(e.toLocaleString('en-US', { timeZone: tz }))
+    p.date_from = sJak.toISOString()
+    p.date_to   = eJak.toISOString()
+  }
+  else if (range === 'today') {
     // jam 00:00:00 di Jakarta
     const startStr = new Date().toLocaleString('en-US', {
       timeZone: tz,
@@ -206,14 +213,6 @@ function buildParams() {
     const endJak   = new Date(end.toLocaleString('en-US', { timeZone: tz }))
     p.date_from = startJak.toISOString()
     p.date_to   = endJak.toISOString()
-  }
-  else if (startDate && endDate) {
-    const s = new Date(startDate); s.setHours(0,0,0,0)
-    const e = new Date(endDate); e.setHours(23,59,59,999)
-    const sJak = new Date(s.toLocaleString('en-US', { timeZone: tz }))
-    const eJak = new Date(e.toLocaleString('en-US', { timeZone: tz }))
-    p.date_from = sJak.toISOString()
-    p.date_to   = eJak.toISOString()
   }
 
   if (selectedMerchant !== 'all') {
@@ -502,6 +501,15 @@ const filtered = mapped.filter(t => {
       setTo(toJakartaDate(endDate))
     }
   }
+  const handleDateChange = (dates: [Date | null, Date | null]) => {
+    setDateRange(dates)
+    if (dates[0] && dates[1]) {
+      setRange('custom')
+      setFrom(toJakartaDate(dates[0]))
+      setTo(toJakartaDate(dates[1]))
+      setPage(1)
+    }
+  }
   // Effects
   useEffect(() => {
     fetchSummary()
@@ -729,6 +737,7 @@ const filtered = mapped.filter(t => {
             setPage={setPage}
             totalPages={totalPages}
             buildParams={buildParams}
+            onDateChange={handleDateChange}
           />
 
 
