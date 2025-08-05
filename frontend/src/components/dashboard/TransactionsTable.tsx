@@ -46,9 +46,18 @@ export default function TransactionsTable({
           className={styles.searchInput}
           placeholder="Cari TRX ID, RRN, atau Player ID…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => {
+            setPage(1)
+            setSearch(e.target.value)
+          }}
         />
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <select
+          value={statusFilter}
+          onChange={e => {
+            setPage(1)
+            setStatusFilter(e.target.value)
+          }}
+        >
           <option value="PAID">PAID</option>
           <option value="PENDING">PENDING</option>
           <option value="EXPIRED">EXPIRED</option>
