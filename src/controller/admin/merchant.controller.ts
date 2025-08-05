@@ -1164,8 +1164,8 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // max amount validation
-    const maxSet = await prisma.setting.findUnique({ where: { key: 'admin_withdraw_max' } })
+    // max amount validation (use same limit as client)
+    const maxSet = await prisma.setting.findUnique({ where: { key: 'withdraw_max' } })
     const maxVal = parseFloat(maxSet?.value ?? '0')
     if (!isNaN(maxVal) && maxVal > 0 && amount > maxVal) {
       return res.status(400).json({ error: `Maximum withdraw Rp ${maxVal}` })
