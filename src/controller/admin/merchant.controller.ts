@@ -511,14 +511,23 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 export async function getDashboardWithdrawals(req: Request, res: Response) {
   try {
     // (1) Parse filter tanggal & partnerClientId
-    const { date_from, date_to, partnerClientId, page = '1', limit = '50' } =
-      req.query as any;
+    const {
+      date_from,
+      date_to,
+      partnerClientId,
+      page = '1',
+      limit = '50',
+      search,
+      status,
+    } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10));
-    const pageSize = Math.min(100, parseInt(limit as string, 10));    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
-    const dateTo   = date_to   ? new Date(String(date_to))   : undefined;
+    const pageSize = Math.min(100, parseInt(limit as string, 10));
+    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
+    const dateTo = date_to ? new Date(String(date_to)) : undefined;
+    if (dateTo && !isNaN(dateTo.getTime())) dateTo.setHours(23, 59, 59, 999);
     const createdAtFilter: any = {};
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
-    if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo;
+    if (dateTo && !isNaN(dateTo.getTime())) createdAtFilter.lte = dateTo;
 
     // (2) Build where untuk withdrawRequest
     const where: any = {};
@@ -527,6 +536,12 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
     }
     if (dateFrom || dateTo) {
       where.createdAt = createdAtFilter;
+    }
+    if (search) {
+      where.refId = { contains: String(search), mode: 'insensitive' };
+    }
+    if (status) {
+      where.status = status;
     }
  
     // (3) Ambil data dari DB, select semua kolom yang diperlukan
