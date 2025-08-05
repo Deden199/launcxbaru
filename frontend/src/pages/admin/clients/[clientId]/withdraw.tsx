@@ -130,15 +130,13 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
             </button>
           </div>
 
-          <div className={styles.filters}>
+          <div className={styles.withdrawFilters}>
             <input
-              className={styles.input}
               placeholder="Search Ref"
               value={searchRef}
               onChange={e => { setSearchRef(e.target.value); setPage(1) }}
             />
             <select
-              className={styles.select}
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
             >
@@ -161,7 +159,6 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
               placeholderText="Select Date Range..."
               maxDate={new Date()}
               dateFormat="dd-MM-yyyy"
-              className={styles.input}
             />
           </div>
 
