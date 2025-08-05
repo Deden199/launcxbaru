@@ -757,9 +757,9 @@ const filtered = mapped.filter(t => {
             buildParams={buildParams}
             onDateChange={handleDateChange}
           />
-
-
-      <WithdrawalHistory loadingWd={loadingWd} withdrawals={withdrawals} />
+      <section className={styles.withdrawSection}>
+        <WithdrawalHistory loadingWd={loadingWd} withdrawals={withdrawals} />
+      </section>
             {/* === ADMIN WITHDRAWAL HISTORY ======================================= */}
       {isSuperAdmin && (
         <section className={styles.tableSection} style={{ marginTop: 32 }}>
