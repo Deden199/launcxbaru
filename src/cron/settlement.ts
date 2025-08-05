@@ -16,7 +16,6 @@ const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari w
 
 let lastCreatedAt: Date | null = null;
 let lastId: string | null = null;
-let running = true;
 
 // HTTPS agent dengan keep-alive
 const httpsAgent = new https.Agent({
@@ -237,36 +236,17 @@ const where: any = {
   return { hasMore: true, settledCount, netAmount };
 }
 
-// safe runner untuk batch loop dengan limit
+// safe runner: process up to a single batch
 async function processBatchLoop(): Promise<{ settledCount: number; netAmount: number }> {
-  let batches = 0;
-  let settledCount = 0;
-  let netAmount = 0;
-  const MAX_BATCHES = Math.min(Number(process.env.SETTLEMENT_MAX_BATCHES) || 50, 100);
-  // env SETTLEMENT_MAX_BATCHES defaults to 50 and is capped at 100 to avoid resource exhaustion
-  while (running && batches < MAX_BATCHES) {
-    const { hasMore, settledCount: sc, netAmount: na } = await processBatchOnce();
-    if (!hasMore) break;
-    batches++;
-    settledCount += sc;
-    netAmount += na;
-    logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`);
-  }
-  if (batches === MAX_BATCHES) {
-    logger.info(
-      `[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`
-    );
-  }
+  const { settledCount, netAmount } = await processBatchOnce();
   return { settledCount, netAmount };
 }
 
 let cutoffTime: Date | null = null;
 
 export function scheduleSettlementChecker() {
-  if (!running) return;
-
-  process.on('SIGINT', () => { running = false; logger.info('[SettlementCron] SIGINT, shutdown…'); });
-  process.on('SIGTERM', () => { running = false; logger.info('[SettlementCron] SIGTERM, shutdown…'); });
+  process.on('SIGINT', () => { logger.info('[SettlementCron] SIGINT, shutdown…'); });
+  process.on('SIGTERM', () => { logger.info('[SettlementCron] SIGTERM, shutdown…'); });
 
   logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
