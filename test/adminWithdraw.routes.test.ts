@@ -9,7 +9,7 @@ process.env.JWT_SECRET = 'test'
 import { prisma } from '../src/core/prisma'
 import * as adminLog from '../src/util/adminLog'
 import * as oyModule from '../src/service/oyClient'
-const { adminWithdraw } = require('../src/controller/admin/merchant.controller')
+const { adminWithdraw, getDashboardWithdrawals } = require('../src/controller/admin/merchant.controller')
 
 const secret = authenticator.generateSecret()
 
@@ -85,3 +85,59 @@ test('withdraw posts to provider even when balance insufficient', async () => {
   assert.deepEqual(res.body, { status: { code: '101' }, trx_id: 'trx' })
   assert.equal(lastDisburse.amount, 200000)
 })
+
+test('getDashboardWithdrawals returns 400 for invalid status', async () => {
+  let called = 0
+  ;(prisma as any).withdrawRequest = {
+    findMany: async () => { called++; return [] },
+    count: async () => { called++; return 0 }
+  }
+  const app = express()
+  app.get('/dashboard/withdrawals', getDashboardWithdrawals)
+  const res = await request(app).get('/dashboard/withdrawals').query({ status: 'INVALID' })
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error, 'Invalid status')
+  assert.equal(called, 0)
+})
+
+test('getDashboardWithdrawals returns data for valid status', async () => {
+  let findCalled = 0
+  let countCalled = 0
+  const now = new Date()
+  ;(prisma as any).withdrawRequest = {
+    findMany: async () => {
+      findCalled++
+      return [{
+        id: '1',
+        refId: 'r1',
+        accountName: 'Test',
+        accountNameAlias: 'Alias',
+        accountNumber: '123',
+        bankCode: '001',
+        bankName: 'Bank',
+        branchName: 'Branch',
+        amount: 100,
+        netAmount: 90,
+        pgFee: 10,
+        withdrawFeePercent: 0,
+        withdrawFeeFlat: 0,
+        paymentGatewayId: 'pg',
+        isTransferProcess: false,
+        status: 'PENDING',
+        createdAt: now,
+        completedAt: null,
+        subMerchant: { name: 'wallet', provider: 'prov' }
+      }]
+    },
+    count: async () => { countCalled++; return 1 }
+  }
+  const app = express()
+  app.get('/dashboard/withdrawals', getDashboardWithdrawals)
+  const res = await request(app).get('/dashboard/withdrawals').query({ status: 'PENDING' })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.total, 1)
+  assert.equal(res.body.data[0].status, 'PENDING')
+  assert.equal(findCalled, 1)
+  assert.equal(countCalled, 1)
+})
+
