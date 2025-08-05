@@ -281,57 +281,53 @@ export function scheduleSettlementChecker() {
   process.on('SIGINT', () => { running = false; logger.info('[SettlementCron] SIGINT, shutdown…'); });
   process.on('SIGTERM', () => { running = false; logger.info('[SettlementCron] SIGTERM, shutdown…'); });
 
-  ;(async () => {
-    // sekali jalan di startup (drain backlog terakhir, jika diperlukan)
-    await safeRun();
-    logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode');
+  logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
-    // 1) Harian jam 17:00: reset cursor & cut‑off
-    cron.schedule(
-      '0 17 * * *',
-      async () => {
-        cutoffTime    = new Date();
-        lastCreatedAt = null;
-        lastId        = null;
-        logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
-        try {
-          await sendTelegramMessage(
-            config.api.telegram.adminChannel,
-            `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
-          );
-        } catch (err) {
-          logger.error('[SettlementCron] Failed to send Telegram notification:', err);
-        }
-        const { settledCount, netAmount } = await safeRun();
-        try {
-          await sendTelegramMessage(
-            config.api.telegram.adminChannel,
-            `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
-          );
-        } catch (err) {
-          logger.error('[SettlementCron] Failed to send Telegram summary:', err);
-        }
-      },
-      { timezone: 'Asia/Jakarta' }
-    );
+  // 1) Harian jam 17:00: reset cursor & cut‑off
+  cron.schedule(
+    '0 17 * * *',
+    async () => {
+      cutoffTime    = new Date();
+      lastCreatedAt = null;
+      lastId        = null;
+      logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
+      try {
+        await sendTelegramMessage(
+          config.api.telegram.adminChannel,
+          `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
+        );
+      } catch (err) {
+        logger.error('[SettlementCron] Failed to send Telegram notification:', err);
+      }
+      const { settledCount, netAmount } = await safeRun();
+      try {
+        await sendTelegramMessage(
+          config.api.telegram.adminChannel,
+          `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
+        );
+      } catch (err) {
+        logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+      }
+    },
+    { timezone: 'Asia/Jakarta' }
+  );
 
-    // 2) Polling tiap 5 menit 17:00–20:00
-    cron.schedule(
-      '*/5 18-20 * * *',
-      async () => {
-        if (!running) return;
-        logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
-        const { settledCount, netAmount } = await safeRun();
-        try {
-          await sendTelegramMessage(
-            config.api.telegram.adminChannel,
-            `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
-          );
-        } catch (err) {
-          logger.error('[SettlementCron] Failed to send Telegram summary:', err);
-        }
-      },
-      { timezone: 'Asia/Jakarta' }
-    );
-  })();
+  // 2) Polling tiap 5 menit 17:00–20:00
+  cron.schedule(
+    '*/5 18-20 * * *',
+    async () => {
+      if (!running) return;
+      logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
+      const { settledCount, netAmount } = await safeRun();
+      try {
+        await sendTelegramMessage(
+          config.api.telegram.adminChannel,
+          `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
+        );
+      } catch (err) {
+        logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+      }
+    },
+    { timezone: 'Asia/Jakarta' }
+  );
 }
