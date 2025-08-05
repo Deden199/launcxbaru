@@ -12,6 +12,7 @@ import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
 import { getCache, setCache } from '../../util/cache'
+import pLimit from 'p-limit'
 
 const BALANCE_TTL_MS = 30_000
 
@@ -803,53 +804,56 @@ export const getMerchantBalances = async (req: Request, res: Response) => {
         select: { id: true, name: true, provider: true, credentials: true },
       });
 
+      const limit = pLimit(5);
       const balanceResults = await Promise.all(
-        subs.map(async (s) => {
-          let bal = 0;
-          let wdTotal: number | undefined;
-          let wdPending: number | undefined;
+        subs.map((s) =>
+          limit(async () => {
+            let bal = 0;
+            let wdTotal: number | undefined;
+            let wdPending: number | undefined;
 
-          try {
-            if (s.provider === 'hilogate') {
-              const raw = s.credentials as any;
-              const cfg: HilogateConfig = {
-                merchantId: raw.merchantId,
-                env: raw.env,
-                secretKey: raw.secretKey,
-              };
-              const client = new HilogateClient(cfg);
-              const resp = await client.getBalance();
-              const data = resp.data;
-              bal = data.active_balance ?? 0;
-              wdTotal = data.total_withdrawal;
-              wdPending = data.pending_withdrawal;
-            } else if (s.provider === 'oy') {
-              const raw = s.credentials as any;
-              const cfg: OyConfig = {
-                baseUrl: config.api.oy.baseUrl,
-                username: raw.merchantId,
-                apiKey: raw.secretKey,
-              };
-              const client = new OyClient(cfg);
-              const resp = await client.getBalance();
-              const data = (resp as any).data ?? resp;
-              bal = data.availableBalance ?? data.balance ?? 0;
+            try {
+              if (s.provider === 'hilogate') {
+                const raw = s.credentials as any;
+                const cfg: HilogateConfig = {
+                  merchantId: raw.merchantId,
+                  env: raw.env,
+                  secretKey: raw.secretKey,
+                };
+                const client = new HilogateClient(cfg);
+                const resp = await client.getBalance();
+                const data = resp.data;
+                bal = data.active_balance ?? 0;
+                wdTotal = data.total_withdrawal;
+                wdPending = data.pending_withdrawal;
+              } else if (s.provider === 'oy') {
+                const raw = s.credentials as any;
+                const cfg: OyConfig = {
+                  baseUrl: config.api.oy.baseUrl,
+                  username: raw.merchantId,
+                  apiKey: raw.secretKey,
+                };
+                const client = new OyClient(cfg);
+                const resp = await client.getBalance();
+                const data = (resp as any).data ?? resp;
+                bal = data.availableBalance ?? data.balance ?? 0;
+              }
+            } catch (e) {
+              console.error(`[${s.provider}] getBalance error`, e);
             }
-          } catch (e) {
-            console.error(`[${s.provider}] getBalance error`, e);
-          }
 
-          if (
-            wdTotal != null &&
-            total_withdrawal === 0 &&
-            pending_withdrawal === 0
-          ) {
-            total_withdrawal = wdTotal ?? 0;
-            pending_withdrawal = wdPending ?? 0;
-          }
+            if (
+              wdTotal != null &&
+              total_withdrawal === 0 &&
+              pending_withdrawal === 0
+            ) {
+              total_withdrawal = wdTotal ?? 0;
+              pending_withdrawal = wdPending ?? 0;
+            }
 
-          return { id: s.id, name: s.name, provider: s.provider, balance: bal };
-        })
+            return { id: s.id, name: s.name, provider: s.provider, balance: bal };
+          })
+        )
       );
 
       const data = {
