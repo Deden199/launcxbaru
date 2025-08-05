@@ -283,14 +283,12 @@ export function scheduleSettlementChecker() {
 
   logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
-  // 1) Harian jam 17:00: reset cursor & cut‑off
+  // 1) Harian jam 17:00: set cut‑off & process batches
   cron.schedule(
     '0 17 * * *',
     async () => {
-      cutoffTime    = new Date();
-      lastCreatedAt = null;
-      lastId        = null;
-      logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
+      cutoffTime = new Date();
+      logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
       try {
         await sendTelegramMessage(
           config.api.telegram.adminChannel,
@@ -299,11 +297,35 @@ export function scheduleSettlementChecker() {
       } catch (err) {
         logger.error('[SettlementCron] Failed to send Telegram notification:', err);
       }
-      const { settledCount, netAmount } = await safeRun();
+
+      const total = await prisma.order.count({
+        where: {
+          status: 'PAID',
+          partnerClientId: { not: null },
+          createdAt: { lte: cutoffTime }
+        }
+      });
+      const iterations = Math.ceil(total / BATCH_SIZE);
+
+      let settledOrders = 0;
+      let netAmount = 0;
+      let ranIterations = 0;
+
+      for (let i = 0; i < iterations; i++) {
+        lastCreatedAt = null;
+        lastId = null;
+        const { settledCount, netAmount: na } = await processBatchLoop();
+        if (!settledCount) break;
+        settledOrders += settledCount;
+        netAmount += na;
+        ranIterations++;
+        await new Promise(r => setTimeout(r, 500));
+      }
+
       try {
         await sendTelegramMessage(
           config.api.telegram.adminChannel,
-          `[SettlementCron] Summary: settled ${settledCount} orders with net amount ${netAmount}`
+          `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders with net amount ${netAmount}`
         );
       } catch (err) {
         logger.error('[SettlementCron] Failed to send Telegram summary:', err);
