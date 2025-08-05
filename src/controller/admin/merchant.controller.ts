@@ -1245,7 +1245,6 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
       const totalIn = inAgg._sum.settlementAmount ?? 0
       const totalOut = (outClientAgg._sum.amount ?? 0) + (outAdminAgg._sum.amount ?? 0)
       const available = totalIn - totalOut
-      if (amount > available) throw new Error('InsufficientBalance')
       const ref = `adm-${Date.now()}`
       await tx.adminWithdraw.create({
         data: {
@@ -1312,7 +1311,7 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
 
     await logAdminAction(req.userId!, 'ADMIN_WITHDRAW', refId)
 
-    return res.status(201).json({ status: newStatus })
+    return res.status(201).json(resp)
   } catch (err: any) {
     console.error('[adminWithdraw]', err)
     if (refId) {
@@ -1323,8 +1322,8 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
         })
       } catch {}
     }
-    if (err.message === 'InsufficientBalance') {
-      return res.status(400).json({ error: 'Insufficient balance' })
+    if (err?.response?.data) {
+      return res.status(400).json(err.response.data)
     }
     return res.status(500).json({ error: err.message || 'Internal server error' })
   }

@@ -4,10 +4,12 @@ import express from 'express'
 import request from 'supertest'
 import { authenticator } from 'otplib'
 
-import { adminWithdraw } from '../src/controller/admin/merchant.controller'
+process.env.JWT_SECRET = 'test'
+
 import { prisma } from '../src/core/prisma'
 import * as adminLog from '../src/util/adminLog'
 import * as oyModule from '../src/service/oyClient'
+const { adminWithdraw } = require('../src/controller/admin/merchant.controller')
 
 const secret = authenticator.generateSecret()
 
@@ -31,8 +33,10 @@ const secret = authenticator.generateSecret()
 ;(prisma as any).adminWithdraw = { update: async () => {} }
 ;(adminLog as any).logAdminAction = async () => {}
 
+let lastDisburse: any = null
 ;(oyModule as any).OyClient = class {
-  async disburse() {
+  async disburse(payload: any) {
+    lastDisburse = payload
     return { status: { code: '101' }, trx_id: 'trx' }
   }
 }
@@ -66,7 +70,18 @@ test('withdraw fails with invalid otp', async () => {
 
 test('withdraw succeeds with valid otp', async () => {
   const otp = authenticator.generate(secret)
+  lastDisburse = null
   const res = await request(app).post('/withdraw').send({ ...basePayload, otp })
   assert.equal(res.status, 201)
-  assert.deepEqual(res.body, { status: 'PENDING' })
+  assert.deepEqual(res.body, { status: { code: '101' }, trx_id: 'trx' })
+  assert.equal(lastDisburse.amount, basePayload.amount)
+})
+
+test('withdraw posts to provider even when balance insufficient', async () => {
+  const otp = authenticator.generate(secret)
+  lastDisburse = null
+  const res = await request(app).post('/withdraw').send({ ...basePayload, amount: 200000, otp })
+  assert.equal(res.status, 201)
+  assert.deepEqual(res.body, { status: { code: '101' }, trx_id: 'trx' })
+  assert.equal(lastDisburse.amount, 200000)
 })
