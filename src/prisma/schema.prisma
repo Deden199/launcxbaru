@@ -329,7 +329,7 @@ model WithdrawRequest {
   @@index([status])
 
 }
-/// Queue for partner callback delivery
+/// Queue for partner callback deliverys
 model CallbackJob {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   url       String
@@ -337,7 +337,7 @@ model CallbackJob {
   signature String
   attempts  Int      @default(0)
   delivered Boolean  @default(false)
-  lastError String?
+  lastError Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
