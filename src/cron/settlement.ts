@@ -250,9 +250,9 @@ export function scheduleSettlementChecker() {
 
   logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
-  // Harian jam 17:00: set cut‑off & process batches
+  // Harian jam 16:00: set cut‑off & process batches
   cron.schedule(
-    '0 17 * * *',
+    '0 16 * * *',
     async () => {
       cutoffTime = new Date();
       logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
