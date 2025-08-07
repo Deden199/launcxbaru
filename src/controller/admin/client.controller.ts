@@ -543,3 +543,39 @@ export const getClientSubWallets = async (req: Request, res: Response) => {
 
   res.json(result)
 }
+
+// 8) Reconcile client balance
+export const reconcileClientBalance = async (req: AuthRequest, res: Response) => {
+  const { clientId } = req.params as { clientId: string }
+
+  const settlementAgg = await prisma.order.aggregate({
+    _sum: { settlementAmount: true },
+    where: {
+      partnerClientId: clientId,
+      settlementTime: { not: null },
+    },
+  })
+  const totalSettlement = settlementAgg._sum.settlementAmount ?? 0
+
+  const withdrawAgg = await prisma.withdrawRequest.aggregate({
+    _sum: { amount: true },
+    where: {
+      partnerClientId: clientId,
+      status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] },
+    },
+  })
+  const totalWithdraw = withdrawAgg._sum.amount ?? 0
+
+  const newBalance = totalSettlement - totalWithdraw
+
+  await prisma.partnerClient.update({
+    where: { id: clientId },
+    data: { balance: newBalance },
+  })
+
+  if (req.userId) {
+    await logAdminAction(req.userId, 'reconcileClientBalance', clientId)
+  }
+
+  res.json({ balance: newBalance })
+}

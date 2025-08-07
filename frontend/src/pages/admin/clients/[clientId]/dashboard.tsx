@@ -122,6 +122,16 @@ const AdminClientDashboard = () => {
     }
   }
 
+  const reconcileBalance = async () => {
+    if (!clientId) return
+    try {
+      await api.post(`/admin/clients/${clientId}/reconcile-balance`)
+      fetchSummary()
+    } catch {
+      router.push('/login')
+    }
+  }
+
   useEffect(() => { fetchSummary() }, [clientId, range, selectedChild, from, to, statusFilter])
   useEffect(() => { fetchTransactions() }, [clientId, range, selectedChild, from, to, statusFilter])
   const filtered = txs.filter(t =>
@@ -153,7 +163,7 @@ const AdminClientDashboard = () => {
 
         <aside className={styles.sidebar}>
           <section className={styles.statsGrid}>
-            {/* <div className={`${styles.card} ${styles.activeBalance}`}>
+            <div className={`${styles.card} ${styles.activeBalance}`}>
               <Wallet className={styles.cardIcon} />
               <h2>
                 Active Balance
@@ -167,7 +177,8 @@ const AdminClientDashboard = () => {
                 )}
               </h2>
               <p>{balance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</p>
-            </div> */}
+              <button className={styles.applyBtn} onClick={reconcileBalance}>Reconcile Balance</button>
+            </div>
             <div className={styles.card}>
               <ListChecks className={styles.cardIcon} />
               <h2>Transactions</h2>
