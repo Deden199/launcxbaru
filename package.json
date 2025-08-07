@@ -10,6 +10,7 @@
     "start": "node dist/app.js",
     "dev": "ts-node src/app.ts",
     "callback-worker": "ts-node src/worker/callbackQueue.ts",
+    "reconcile-balances": "ts-node --transpile-only scripts/reconcileBalances.ts",
     "test": "node --test -r ts-node/register test/**/*.test.ts"
   },
   "author": "",
