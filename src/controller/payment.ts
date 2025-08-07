@@ -431,17 +431,24 @@ if (cb) {
     const newSetSt   = settlementSt ?? (isSuccess ? 'PENDING' : pgStatusRaw)
 
     // 5) Ambil partner fee config
-const orderRecord = await prisma.order.findUnique({
-  where: { id: orderId },
-  select: { userId: true }  // userId = partnerClient.id
-})
-if (!orderRecord) throw new Error('Order not found for callback')
+    const orderRecord = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, status: true }  // userId = partnerClient.id
+    })
+    if (!orderRecord) throw new Error('Order not found for callback')
 
-const pc = await prisma.partnerClient.findUnique({
-  where: { id: orderRecord.userId },
-  select: { feePercent: true, feeFlat: true, weekendFeePercent: true, weekendFeeFlat: true, callbackUrl: true, callbackSecret: true }
-})
-if (!pc) throw new Error('PartnerClient not found for callback')
+    if (orderRecord.status === 'SETTLED') {
+      logger.info(`[OY Callback] Order ${orderId} already SETTLED; skipping update`)
+      return res
+        .status(200)
+        .json(createSuccessResponse({ message: 'Order already settled' }))
+    }
+
+    const pc = await prisma.partnerClient.findUnique({
+      where: { id: orderRecord.userId },
+      select: { feePercent: true, feeFlat: true, weekendFeePercent: true, weekendFeeFlat: true, callbackUrl: true, callbackSecret: true }
+    })
+    if (!pc) throw new Error('PartnerClient not found for callback')
 
 
     // 6) Hitung fee Launcx
