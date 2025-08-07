@@ -51,3 +51,15 @@ Super Admins can restrict certain administrative actions to specific IP addresse
 The whitelist is stored in the `Setting` table under the key `admin_ip_whitelist`.
 If the setting is missing or empty, no IP restriction is applied.
 
+## Reconcile Partner Balances
+
+This script recalculates `PartnerClient` balances based on settled orders and
+pending/completed withdrawals.
+
+```
+npm run reconcile-balances
+```
+
+Make sure database environment variables are set before running the script. The
+script prints a summary of balance adjustments to the console.
+
