@@ -7,7 +7,7 @@ import { ClientAuthRequest } from '../middleware/clientAuth'
 import ExcelJS from 'exceljs'
 import crypto from 'crypto';
 import axios from 'axios';
-import { formatDateJakarta, wibTimestampString } from '../util/time';
+import { formatDateJakarta } from '../util/time';
 import pLimit from 'p-limit' // optional kalau mau throttle paralel, tapi tidak diperlukan
 
 import { retry } from '../utils/retry';
@@ -453,18 +453,12 @@ export async function retryTransactionCallback(
     return res.status(400).json({ error: 'Missing orderId' });
   }
 
-  // 1) Load Order sebagai source of truth, termasuk status dan settlementStatus
+  // 1) Load Order sebagai source of truth
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     select: {
       partnerClientId: true,
-      amount: true,
-      feeLauncx: true,
-      qrPayload: true,
-      status: true,            // ← ambil status final
-      settlementStatus: true,  // ← ambil settlementStatus final
-      pendingAmount: true,
-      settlementAmount: true
+      status: true,
     }
   });
   if (!order) {
@@ -475,6 +469,7 @@ export async function retryTransactionCallback(
       .status(400)
       .json({ error: `Status ${order.status} tidak bisa retry callback` });
   }
+
   // 2) Verifikasi hak akses
   const allowed = [req.partnerClientId!, ...(req.childrenIds ?? [])];
   if (!allowed.includes(order.partnerClientId!)) {
@@ -490,44 +485,28 @@ export async function retryTransactionCallback(
     return res.status(400).json({ error: 'Callback belum diset' });
   }
 
-  // 4) Bangun payload baru dari data order saat ini
-  const timestamp = wibTimestampString();
-  const nonce = crypto.randomUUID();
-  const clientPayload = {
-    orderId,
-    status: order.status,
-    settlementStatus: order.settlementStatus,
-    grossAmount: order.amount,
-    feeLauncx: order.feeLauncx,
-    netAmount:
-      order.status === 'PAID'
-        ? order.pendingAmount ?? order.amount
-        : order.settlementAmount ?? order.amount,
-    qrPayload: order.qrPayload,
-    timestamp,
-    nonce
-  };
+  // 4) Ambil 1 job terbaru matching payload.orderId via aggregateRaw dan cast ke array
+  const rawJobs = await prisma.callbackJob.aggregateRaw({
+    pipeline: [
+      { $match: { 'payload.orderId': orderId } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 1 }
+    ]
+  });
+  const jobs = (rawJobs as unknown as any[]);
+  const job = jobs[0];
+  if (!job) {
+    return res.status(404).json({ error: 'Callback job tidak ditemukan' });
+  }
 
-  // 5) Sign dan kirim ulang langsung ke callbackUrl partner
-  const sig = crypto
-    .createHmac('sha256', partner.callbackSecret)
-    .update(JSON.stringify(clientPayload))
-    .digest('hex');
-
+  // 5) Kirim ulang dengan retry util
   try {
     await retry(() =>
-      axios.post(partner.callbackUrl, clientPayload, {
-        headers: { 'X-Callback-Signature': sig },
+      axios.post(job.url, job.payload, {
+        headers: { 'X-Callback-Signature': job.signature },
         timeout: 5000
       })
     );
-    // tandai semua CallbackJob terkait order ini sebagai delivered
-    await prisma.callbackJob.updateMany({
-      where: {
-        payload: { path: ['orderId'], equals: orderId }
-      },
-      data: { delivered: true }
-    });
     return res.json({ success: true });
   } catch (err: any) {
     return res
