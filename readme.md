@@ -63,3 +63,11 @@ npm run reconcile-balances
 Make sure database environment variables are set before running the script. The
 script prints a summary of balance adjustments to the console.
 
+### Admin Panel Reconciliation
+
+Admins can also trigger a balance recomputation from the web panel:
+
+1. Log in to the admin panel and open a client's dashboard.
+2. Click **Reconcile Balance** inside the *Active Balance* card.
+3. The server recalculates the balance from settled orders minus withdrawals and the card refreshes with the new value.
+
