@@ -237,15 +237,6 @@ try {
       .catch(() => alert('Gagal menyalin'))
   }
 
-  const retryCallback = async (id: string) => {
-    try {
-      await api.post(`/client/callbacks/${id}/retry`)
-      alert('Callback terkirim')
-    } catch {
-      alert('Gagal retry callback')
-    }
-  }
-
   // Trigger fetches when filters change
   useEffect(() => { fetchSummary() }, [range, selectedChild, from, to, statusFilter])
   useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to, search, page, perPage, statusFilter])
@@ -452,16 +443,7 @@ try {
                             ? 'FAILED'
                             : (t.settlementStatus || '-')}
                       </td>
-                      <td>
-                        {['PAID', 'DONE', 'SETTLED', 'SUCCESS'].includes(t.status) && (
-                          <button
-                            className={styles.retryBtn}
-                            onClick={() => retryCallback(t.id)}
-                          >
-                            Retry Callback
-                          </button>
-                        )}
-                      </td>
+                      <td></td>
                     </tr>
                   ))}
                 </tbody>
