@@ -448,17 +448,22 @@ export async function processHilogatePayload(payload: {
   // 1) Hit DB untuk ambil order & merchant
   const existing = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { merchantId: true, amount: true, feeLauncx: true }
+    select: { merchantId: true, amount: true, feeLauncx: true, status: true }
   });
   if (!existing) throw new Error(`Order ${orderId} not found`);
 
-  // 2) Hitung status internal
+  // 2) Jika order sudah SETTLED, abaikan callback agar status tidak berubah
+  if (existing.status === 'SETTLED') {
+    return;
+  }
+
+  // 3) Hitung status internal
   const upStatus  = pgStatus.toUpperCase();
   const isSuccess = ['SUCCESS','DONE'].includes(upStatus);
   const newStatus = isSuccess ? 'PAID' : upStatus;
   const newSetSt  = settlement_status?.toUpperCase() ?? (isSuccess ? 'PENDING' : null);
 
-  // 3) Update order di DB
+  // 4) Update order di DB
   await prisma.order.update({
     where: { id: orderId },
     data: {
@@ -471,7 +476,7 @@ export async function processHilogatePayload(payload: {
     }
   });
 
-  // 4) Forward ke partner jika sukses
+  // 5) Forward ke partner jika sukses
   if (isSuccess) {
     const partner = await prisma.partnerClient.findUnique({
       where: { id: existing.merchantId },
