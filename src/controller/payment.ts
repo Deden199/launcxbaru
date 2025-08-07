@@ -242,9 +242,15 @@ const trxExpirationTime = full.expires_at?.value
     // 6) Ambil merchantId
     const existing = await prisma.order.findUnique({
       where: { id: orderId },
-      select: { merchantId: true }
+      select: { merchantId: true, status: true }
     })
     if (!existing) throw new Error(`Order ${orderId} not found`)
+    if (existing.status === 'SETTLED') {
+      logger.info(`[Callback] Order ${orderId} already SETTLED; skipping update`)
+      return res
+        .status(200)
+        .json(createSuccessResponse({ message: 'Order already settled' }))
+    }
     const merchantId = existing.merchantId
 
     // 7) Ambil konfigurasi fee partner
