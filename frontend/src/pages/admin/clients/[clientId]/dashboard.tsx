@@ -250,7 +250,7 @@ const AdminClientDashboard = () => {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Paid At</th>
+                      <th>Update At</th>
                       <th>Settled At</th>
                       <th>TRX ID</th>
                       <th>RRN</th>

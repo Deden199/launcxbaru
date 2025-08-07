@@ -371,7 +371,7 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
       { header: 'Fee',        key: 'fee',      width: 15 },
       { header: 'Status',     key: 'stat',     width: 16 },
       { header: 'Date',       key: 'date',     width: 20 },
-      { header: 'Paid At',    key: 'paidAt',    width: 20 },
+      { header: 'Update At',    key: 'paidAt',    width: 20 },
       { header: 'Settled At', key: 'settledAt', width: 20 },
       { header: 'Expires At', key: 'expiresAt', width: 20 },
     ]
