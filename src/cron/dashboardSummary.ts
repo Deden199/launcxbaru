@@ -12,7 +12,7 @@ const DisbursementStatus = {
   PENDING: 'PENDING'
 } as const
 
-export async function buildSummaryMessage(): Promise<string> {
+export async function buildSummaryMessage(): Promise<string[]> {
   const nowJakarta  = moment().tz('Asia/Jakarta')
   const startOfDay  = nowJakarta.clone().startOf('day').toDate()
   const startOfMonth = nowJakarta.clone().startOf('month').toDate()
@@ -157,22 +157,38 @@ export async function buildSummaryMessage(): Promise<string> {
     groupMessages.push(['```', ...groupLines, '```'].join('\n'))
   }
 
-  return [globalMsg, ...groupMessages].join('\n')
+  return [globalMsg, ...groupMessages]
 }
 
 async function sendSummary() {
   try {
-    const message = await buildSummaryMessage()
+    const messages = await buildSummaryMessage()
     const chatId = config.api.telegram.adminChannel
     if (chatId) {
-      await axios.post(
-        `https://api.telegram.org/bot${config.api.telegram.botToken}/sendMessage`,
-        {
-          chat_id: chatId,
-          text: message,
-          parse_mode: 'Markdown'
+      for (const msg of messages) {
+        if (msg.length <= 4096) {
+          await axios.post(
+            `https://api.telegram.org/bot${config.api.telegram.botToken}/sendMessage`,
+            {
+              chat_id: chatId,
+              text: msg,
+              parse_mode: 'Markdown'
+            }
+          )
+        } else {
+          for (let i = 0; i < msg.length; i += 4096) {
+            const chunk = msg.slice(i, i + 4096)
+            await axios.post(
+              `https://api.telegram.org/bot${config.api.telegram.botToken}/sendMessage`,
+              {
+                chat_id: chatId,
+                text: chunk,
+                parse_mode: 'Markdown'
+              }
+            )
+          }
         }
-      )
+      }
     }
   } catch (err) {
     console.error('[dashboardSummary]', err)
