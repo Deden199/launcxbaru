@@ -6,6 +6,8 @@ import { formatDateJakarta } from '../util/time'
 import { formatIdr } from '../util/currency'
 import axios from 'axios'
 import { getParentClientsWithChildren } from '../service/partnerClient'
+import logger from '../logger'
+import { sendTelegramMessage } from '../core/telegram.axios'
 
 const DisbursementStatus = {
   COMPLETED: 'COMPLETED',
@@ -192,7 +194,17 @@ async function sendSummary() {
       }
     }
   } catch (err) {
-    console.error('[dashboardSummary]', err)
+    logger.error('[dashboardSummary] Unexpected error:', err)
+    try {
+      if (config.api.telegram.adminChannel) {
+        await sendTelegramMessage(
+          config.api.telegram.adminChannel,
+          `[dashboardSummary] Fatal error: ${err instanceof Error ? err.message : err}`
+        )
+      }
+    } catch (telegramErr) {
+      logger.error('[dashboardSummary] Failed to send Telegram alert:', telegramErr)
+    }
   }
 }
 
