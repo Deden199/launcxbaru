@@ -81,6 +81,7 @@ export async function buildSummaryMessage(): Promise<string[]> {
   const groupMessages: string[] = []
 
   for (const parent of groups) {
+    if (parent.children.length === 0) continue
     const ids = [parent.id, ...parent.children.map(c => c.id)]
 
     const gTpvAgg = await prisma.order.aggregate({
@@ -198,5 +199,5 @@ async function sendSummary() {
 export function scheduleDashboardSummary() {
   const opts = { timezone: 'Asia/Jakarta' as const }
   // Kirim summary tepat di menit ke-0 setiap jam
-cron.schedule('16 * * * *', sendSummary, opts)
+  cron.schedule('0 * * * *', sendSummary, opts)
 }
