@@ -1,4 +1,4 @@
-import cron from 'node-cron'
+import cron, { ScheduledTask } from 'node-cron'
 import axios from 'axios'
 import https from 'https'
 import os from 'os'
@@ -243,57 +243,71 @@ async function processBatchLoop(): Promise<{ settledCount: number; netAmount: nu
 }
 
 let cutoffTime: Date | null = null;
-let settlementTask: cron.ScheduledTask | null = null;
+let settlementTask: ScheduledTask | null = null;
 
 async function runSettlementJob() {
-  cutoffTime = new Date();
-  logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
   try {
-    await sendTelegramMessage(
-      config.api.telegram.adminChannel,
-      `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
-    );
-  } catch (err) {
-    logger.error('[SettlementCron] Failed to send Telegram notification:', err);
-  }
-
-  // Hitung total batch yang dibutuhkan
-  const total = await prisma.order.count({
-    where: {
-      status: 'PAID',
-      partnerClientId: { not: null },
-      createdAt: { lte: cutoffTime }
+    cutoffTime = new Date();
+    logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
+    try {
+      await sendTelegramMessage(
+        config.api.telegram.adminChannel,
+        `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
+      );
+    } catch (err) {
+      logger.error('[SettlementCron] Failed to send Telegram notification:', err);
     }
-  });
-  const iterations = Math.ceil(total / BATCH_SIZE);
 
-  // Reset cursor ONCE sebelum loop
-  lastCreatedAt = null;
-  lastId = null;
+    // Hitung total batch yang dibutuhkan
+    const total = await prisma.order.count({
+      where: {
+        status: 'PAID',
+        partnerClientId: { not: null },
+        createdAt: { lte: cutoffTime }
+      }
+    });
+    const iterations = Math.ceil(total / BATCH_SIZE);
 
-  let settledOrders = 0;
-  let netAmount = 0;
-  let ranIterations = 0;
+    // Reset cursor ONCE sebelum loop
+    lastCreatedAt = null;
+    lastId = null;
 
-  for (let i = 0; i < iterations; i++) {
-    // Proses satu batch berikutnya
-    const { settledCount, netAmount: na } = await processBatchOnce();
-    if (!settledCount) break; // berhenti kalau tidak ada yang tersettle
-    settledOrders += settledCount;
-    netAmount += na;
-    ranIterations++;
-    logger.info(`[SettlementCron] Iter ${i + 1}/${iterations}: settled ${settledCount}`);
-    await new Promise(r => setTimeout(r, 500)); // jeda ringan
-  }
+    let settledOrders = 0;
+    let netAmount = 0;
+    let ranIterations = 0;
 
-  try {
-    // Kirim ringkasan hasil
-    await sendTelegramMessage(
-      config.api.telegram.adminChannel,
-      `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
-    );
+    for (let i = 0; i < iterations; i++) {
+      // Proses satu batch berikutnya
+      const { settledCount, netAmount: na } = await processBatchOnce();
+      if (!settledCount) break; // berhenti kalau tidak ada yang tersettle
+      settledOrders += settledCount;
+      netAmount += na;
+      ranIterations++;
+      logger.info(`[SettlementCron] Iter ${i + 1}/${iterations}: settled ${settledCount}`);
+      await new Promise(r => setTimeout(r, 500)); // jeda ringan
+    }
+
+    try {
+      // Kirim ringkasan hasil
+      await sendTelegramMessage(
+        config.api.telegram.adminChannel,
+        `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
+      );
+    } catch (err) {
+      logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+    }
   } catch (err) {
-    logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+    logger.error('[SettlementCron] Unexpected error:', err);
+    try {
+      if (config.api.telegram.adminChannel) {
+        await sendTelegramMessage(
+          config.api.telegram.adminChannel,
+          `[SettlementCron] Fatal error: ${err instanceof Error ? err.message : err}`
+        );
+      }
+    } catch (telegramErr) {
+      logger.error('[SettlementCron] Failed to send Telegram alert:', telegramErr);
+    }
   }
 }
 
