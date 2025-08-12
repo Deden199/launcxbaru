@@ -12,6 +12,7 @@ export default function SettingsPage() {
   useRequireAuth()
   const [minW, setMinW] = useState('')
   const [maxW, setMaxW] = useState('')
+  const [settlementCron, setSettlementCron] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [overrideDates, setOverrideDates] = useState<Date[]>([])
@@ -22,6 +23,7 @@ export default function SettingsPage() {
         setMinW(res.data.data.withdraw_min || '')
         setMaxW(res.data.data.withdraw_max || '')
         const raw = res.data.data.weekend_override_dates || ''
+        setSettlementCron(res.data.data.settlement_cron || '0 16 * * *')
         const dates = raw
           .split(',')
           .map(s => new Date(s.trim()))
@@ -42,7 +44,8 @@ export default function SettingsPage() {
       await api.put('/admin/settings', {
         withdraw_min: minW,
         withdraw_max: maxW,
-        weekend_override_dates: datesString
+        weekend_override_dates: datesString,
+        settlement_cron: settlementCron
       })
     } catch (e: any) {
       setError(e.response?.data?.error || 'Failed to save')
@@ -84,6 +87,16 @@ export default function SettingsPage() {
             value={maxW}
             onChange={e => setMaxW(e.target.value)}
             placeholder="e.g. 500000"
+          />
+        </div>
+        <div className={styles.formGroup}>
+          <label className={styles.label}>Settlement Cron</label>
+          <input
+            type="text"
+            className={styles.input}
+            value={settlementCron}
+            onChange={e => setSettlementCron(e.target.value)}
+            placeholder="e.g. 0 16 * * *"
           />
         </div>
         <div className={styles.formGroup}>

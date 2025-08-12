@@ -243,69 +243,81 @@ async function processBatchLoop(): Promise<{ settledCount: number; netAmount: nu
 }
 
 let cutoffTime: Date | null = null;
+let settlementTask: cron.ScheduledTask | null = null;
 
-export function scheduleSettlementChecker() {
-  process.on('SIGINT', () => { logger.info('[SettlementCron] SIGINT, shutdown…'); });
-  process.on('SIGTERM', () => { logger.info('[SettlementCron] SIGTERM, shutdown…'); });
+async function runSettlementJob() {
+  cutoffTime = new Date();
+  logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
+  try {
+    await sendTelegramMessage(
+      config.api.telegram.adminChannel,
+      `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
+    );
+  } catch (err) {
+    logger.error('[SettlementCron] Failed to send Telegram notification:', err);
+  }
+
+  // Hitung total batch yang dibutuhkan
+  const total = await prisma.order.count({
+    where: {
+      status: 'PAID',
+      partnerClientId: { not: null },
+      createdAt: { lte: cutoffTime }
+    }
+  });
+  const iterations = Math.ceil(total / BATCH_SIZE);
+
+  // Reset cursor ONCE sebelum loop
+  lastCreatedAt = null;
+  lastId = null;
+
+  let settledOrders = 0;
+  let netAmount = 0;
+  let ranIterations = 0;
+
+  for (let i = 0; i < iterations; i++) {
+    // Proses satu batch berikutnya
+    const { settledCount, netAmount: na } = await processBatchOnce();
+    if (!settledCount) break; // berhenti kalau tidak ada yang tersettle
+    settledOrders += settledCount;
+    netAmount += na;
+    ranIterations++;
+    logger.info(`[SettlementCron] Iter ${i + 1}/${iterations}: settled ${settledCount}`);
+    await new Promise(r => setTimeout(r, 500)); // jeda ringan
+  }
+
+  try {
+    // Kirim ringkasan hasil
+    await sendTelegramMessage(
+      config.api.telegram.adminChannel,
+      `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
+    );
+  } catch (err) {
+    logger.error('[SettlementCron] Failed to send Telegram summary:', err);
+  }
+}
+
+function createTask(expr: string) {
+  return cron.schedule(expr, runSettlementJob, { timezone: 'Asia/Jakarta' });
+}
+
+export async function scheduleSettlementChecker() {
+  process.on('SIGINT', () => {
+    logger.info('[SettlementCron] SIGINT, shutdown…');
+  });
+  process.on('SIGTERM', () => {
+    logger.info('[SettlementCron] SIGTERM, shutdown…');
+  });
 
   logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
 
-  // Harian jam 16:00: set cut‑off & process batches
-  cron.schedule(
-    '0 16 * * *',
-    async () => {
-      cutoffTime = new Date();
-      logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
-      try {
-        await sendTelegramMessage(
-          config.api.telegram.adminChannel,
-          `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
-        );
-      } catch (err) {
-        logger.error('[SettlementCron] Failed to send Telegram notification:', err);
-      }
-
- // Hitung total batch yang dibutuhkan
-const total = await prisma.order.count({
-  where: {
-    status: 'PAID',
-    partnerClientId: { not: null },
-    createdAt: { lte: cutoffTime }
-  }
-});
-const iterations = Math.ceil(total / BATCH_SIZE);
-
-// Reset cursor ONCE sebelum loop
-lastCreatedAt = null;
-lastId        = null;
-
-let settledOrders = 0;
-let netAmount     = 0;
-let ranIterations = 0;
-
-for (let i = 0; i < iterations; i++) {
-  // Proses satu batch berikutnya
-  const { settledCount, netAmount: na } = await processBatchOnce();
-  if (!settledCount) break;           // berhenti kalau tidak ada yang tersettle
-  settledOrders += settledCount;
-  netAmount     += na;
-  ranIterations++;
-  logger.info(`[SettlementCron] Iter ${i+1}/${iterations}: settled ${settledCount}`);
-  await new Promise(r => setTimeout(r, 500));  // jeda ringan
+  const setting = await prisma.setting.findUnique({ where: { key: 'settlement_cron' } });
+  const expr = setting?.value || '0 16 * * *';
+  settlementTask = createTask(expr);
 }
 
-      try {
-// Kirim ringkasan hasil
-await sendTelegramMessage(
-  config.api.telegram.adminChannel,
-  `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
-);
-
-      } catch (err) {
-        logger.error('[SettlementCron] Failed to send Telegram summary:', err);
-      }
-    },
-    { timezone: 'Asia/Jakarta' }
-  );
-
+export function restartSettlementChecker(expr: string) {
+  settlementTask?.stop();
+  settlementTask?.destroy();
+  settlementTask = createTask(expr || '0 16 * * *');
 }

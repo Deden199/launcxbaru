@@ -158,7 +158,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 /* ========== 6. SCHEDULED TASKS ========== */
-scheduleSettlementChecker()
+scheduleSettlementChecker().catch(err => logger.error('[SettlementCron] init failed', err))
 scheduleDashboardSummary()
 
 // Start server
