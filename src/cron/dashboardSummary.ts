@@ -198,5 +198,5 @@ async function sendSummary() {
 export function scheduleDashboardSummary() {
   const opts = { timezone: 'Asia/Jakarta' as const }
   // Kirim summary tepat di menit ke-0 setiap jam
-  cron.schedule('0 * * * *', sendSummary, opts)
+cron.schedule('16 * * * *', sendSummary, opts)
 }

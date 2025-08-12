@@ -7,15 +7,16 @@ import { prisma } from '../core/prisma'
 import { config } from '../config'
 import crypto from 'crypto'
 import logger from '../logger'
-import { sendTelegramMessage } from '../core/telegram.axios'
 
 // ————————— CONFIG —————————
-const BATCH_SIZE = 1000                          // jumlah order PAID diproses per batch
+const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari write conflict
 
 let lastCreatedAt: Date | null = null;
 let lastId: string | null = null;
+let running = true;
+let isRunning = false;
 
 // HTTPS agent dengan keep-alive
 const httpsAgent = new https.Agent({
@@ -57,14 +58,8 @@ function generateSignature(path: string, secretKey: string): string {
 
 type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number };
 
-type BatchResult = {
-  hasMore: boolean;
-  settledCount: number;
-  netAmount: number;
-};
-
-// core worker: proses satu batch; return object with stats
-async function processBatchOnce(): Promise<BatchResult> {
+// core worker: proses satu batch; return true jika masih ada data
+async function processBatchOnce(): Promise<boolean> {
   // cursor-based pagination
 const where: any = {
   status: 'PAID',
@@ -102,7 +97,7 @@ const where: any = {
   });
 
   if (!pendingOrders.length) {
-    return { hasMore: false, settledCount: 0, netAmount: 0 };
+    return false;
   }
 
   // update cursor
@@ -121,7 +116,7 @@ const where: any = {
         const creds =
           o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
         if (!creds) {
-          return 0;
+          return null;
         }
 
         let settlementResult: SettlementResult | null = null;
@@ -139,7 +134,7 @@ const where: any = {
           const tx = resp.data.data;
           const st = (tx.settlement_status || '').toUpperCase();
           if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) {
-            return 0;
+            return null;
           }
           settlementResult = {
             netAmt: o.pendingAmount ?? tx.net_amount,
@@ -156,7 +151,7 @@ const where: any = {
           const s = statusResp.data;
           const st = (s.settlement_status || '').toUpperCase();
           if (s.status?.code !== '000' || st === 'WAITING') {
-            return 0;
+            return null;
           }
 
           const detailResp = await axios.get(
@@ -170,7 +165,7 @@ const where: any = {
           );
           const d = detailResp.data.data;
           if (!d || detailResp.data.status?.code !== '000') {
-            return 0;
+            return null;
           }
           settlementResult = {
             netAmt: d.settlement_amount,
@@ -182,7 +177,7 @@ const where: any = {
         }
 
         if (!settlementResult) {
-          return 0;
+          return null;
         }
 
         // idempotent update dengan updateMany + count check
@@ -207,105 +202,83 @@ const where: any = {
                   where: { id: o.partnerClientId! },
                   data: { balance: { increment: settlementResult.netAmt } }
                 });
-                return settlementResult.netAmt;
               }
-              return 0;
             })
           )
         );
       } catch (err) {
         logger.error(`[SettlementCron] order ${o.id} failed:`, err);
-        return 0;
+        return null;
       }
     })
   );
 
-  const settled = await Promise.allSettled(txPromises);
-  let settledCount = 0;
-  let netAmount = 0;
-  for (const r of settled) {
-    if (r.status === 'fulfilled') {
-      const val = r.value as number;
-      if (val > 0) {
-        settledCount++;
-        netAmount += val;
-      }
-    }
+  await Promise.allSettled(txPromises);
+  return true;
+}
+
+// safe runner untuk batch loop dengan limit
+async function processBatchLoop() {
+  let batches = 0;
+  const MAX_BATCHES = 10;
+  while (running && batches < MAX_BATCHES && (await processBatchOnce())) {
+    batches++;
+    logger.info(`[SettlementCron] ✅ Batch #${batches} complete at ${new Date().toISOString()}`);
   }
-
-  return { hasMore: true, settledCount, netAmount };
+  if (batches === MAX_BATCHES) {
+    logger.info(
+      `[SettlementCron] reached max ${MAX_BATCHES} batches, deferring remaining to next interval`
+    );
+  }
 }
 
-// safe runner: process up to a single batch
-async function processBatchLoop(): Promise<{ settledCount: number; netAmount: number }> {
-  const { settledCount, netAmount } = await processBatchOnce();
-  return { settledCount, netAmount };
+// wrapper untuk prevent overlap
+async function safeRun() {
+  if (!running || isRunning) {
+    return;
+  }
+  isRunning = true;
+  try {
+    await processBatchLoop();
+  } finally {
+    isRunning = false;
+  }
 }
-
 let cutoffTime: Date | null = null;
 
 export function scheduleSettlementChecker() {
-  process.on('SIGINT', () => { logger.info('[SettlementCron] SIGINT, shutdown…'); });
-  process.on('SIGTERM', () => { logger.info('[SettlementCron] SIGTERM, shutdown…'); });
+  if (!running) return;
 
-  logger.info('[SettlementCron] ⏳ Waiting for scheduled settlement time');
+  process.on('SIGINT', () => { running = false; logger.info('[SettlementCron] SIGINT, shutdown…'); });
+  process.on('SIGTERM', () => { running = false; logger.info('[SettlementCron] SIGTERM, shutdown…'); });
 
-  // Harian jam 16:00: set cut‑off & process batches
-  cron.schedule(
-    '0 16 * * *',
-    async () => {
-      cutoffTime = new Date();
-      logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
-      try {
-        await sendTelegramMessage(
-          config.api.telegram.adminChannel,
-          `[SettlementCron] Starting settlement check at ${cutoffTime.toISOString()}`
-        );
-      } catch (err) {
-        logger.error('[SettlementCron] Failed to send Telegram notification:', err);
-      }
+  ;(async () => {
+    // sekali jalan di startup (drain backlog terakhir, jika diperlukan)
+    await safeRun();
+    logger.info('[SettlementCron] 🏁 Backlog drained, entering scheduled mode');
 
- // Hitung total batch yang dibutuhkan
-const total = await prisma.order.count({
-  where: {
-    status: 'PAID',
-    partnerClientId: { not: null },
-    createdAt: { lte: cutoffTime }
-  }
-});
-const iterations = Math.ceil(total / BATCH_SIZE);
+    // 1) Harian jam 17:00: reset cursor & cut‑off
+    cron.schedule(
+      '0 17 * * *',
+      async () => {
+        cutoffTime    = new Date();
+        lastCreatedAt = null;
+        lastId        = null;
+        logger.info('[SettlementCron] 🔄 Reset cursor & set cut‑off at ' + cutoffTime.toISOString());
+        await safeRun();
+      },
+      { timezone: 'Asia/Jakarta' }
+    );
 
-// Reset cursor ONCE sebelum loop
-lastCreatedAt = null;
-lastId        = null;
-
-let settledOrders = 0;
-let netAmount     = 0;
-let ranIterations = 0;
-
-for (let i = 0; i < iterations; i++) {
-  // Proses satu batch berikutnya
-  const { settledCount, netAmount: na } = await processBatchOnce();
-  if (!settledCount) break;           // berhenti kalau tidak ada yang tersettle
-  settledOrders += settledCount;
-  netAmount     += na;
-  ranIterations++;
-  logger.info(`[SettlementCron] Iter ${i+1}/${iterations}: settled ${settledCount}`);
-  await new Promise(r => setTimeout(r, 500));  // jeda ringan
-}
-
-      try {
-// Kirim ringkasan hasil
-await sendTelegramMessage(
-  config.api.telegram.adminChannel,
-  `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
-);
-
-      } catch (err) {
-        logger.error('[SettlementCron] Failed to send Telegram summary:', err);
-      }
-    },
-    { timezone: 'Asia/Jakarta' }
-  );
-
+    // 2) Polling tiap 5 menit 17:00–20:00
+    cron.schedule(
+      '*/5 18-20 * * *',
+      async () => {
+        if (!running) return;
+        logger.info('[SettlementCron] ⏱ Polling tick at ' + new Date().toISOString());
+        await safeRun();
+      },
+      { timezone: 'Asia/Jakarta' }
+    );
+  })();
 }
