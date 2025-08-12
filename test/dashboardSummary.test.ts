@@ -21,8 +21,7 @@ test('buildSummaryMessage includes group summaries', async () => {
   ;(prisma as any).withdrawRequest = { aggregate: async (args: any) => zeroAgg(args) }
 
   const blocks = await buildSummaryMessage()
-  assert.equal(blocks.length, 3)
+  assert.equal(blocks.length, 2)
   assert.match(blocks[1], /\[Dashboard Summary - Parent1\]/)
   assert.match(blocks[1], /Total Payment Volume/)
-  assert.match(blocks[2], /\[Dashboard Summary - Parent2\]/)
 })

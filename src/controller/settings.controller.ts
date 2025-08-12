@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import cron from 'node-cron'
 import { prisma } from '../core/prisma'
 import { setWeekendOverrideDates } from '../util/time'
 import { restartSettlementChecker } from '../cron/settlement'
@@ -17,6 +18,13 @@ export async function getSettings(req: Request, res: Response) {
 
 export async function updateSettings(req: AuthRequest, res: Response) {
   const updates: Record<string,string> = req.body
+  if (updates['settlement_cron'] !== undefined) {
+    const expr = updates['settlement_cron'].trim()
+    const parts = expr.split(/\s+/)
+    if (!cron.validate(expr) || parts.length !== 5) {
+      return res.status(400).json({ error: 'Invalid or too frequent settlement_cron' })
+    }
+  }
   const tx = await prisma.$transaction(
     Object.entries(updates).map(([key,value]) =>
       prisma.setting.upsert({

@@ -98,6 +98,9 @@ export default function SettingsPage() {
             onChange={e => setSettlementCron(e.target.value)}
             placeholder="e.g. 0 16 * * *"
           />
+          <div className={styles.help}>
+            Cron format: minute hour day-of-month month day-of-week
+          </div>
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>Holiday Dates</label>
