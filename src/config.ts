@@ -16,6 +16,9 @@ export const config = {
     frontendBaseUrl: process.env.FRONTEND_BASE_URL || '',
     forceProvider: process.env.FORCE_PROVIDER?.trim().toLowerCase() || null,
     jwtSecret,
+        pivotCallback: {
+      apiKey: process.env.PIVOT_CALLBACK_API_KEY || '', // <-- ini
+    },
     // Prefix for Swagger server (will point to API v1)
     swaggerUrl:
       process.env.SWAGGER_URL || `http://localhost:${PORT}/api/v1`,

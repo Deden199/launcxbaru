@@ -24,6 +24,8 @@ import settingsRoutes   from './route/settings.routes';
 import { loadWeekendOverrideDates } from './util/time'
 
 import { withdrawalCallback } from './controller/withdrawals.controller'
+import pivotCallbackRouter from './route/payment.callback.routes';
+
 import webRoutes from './route/web.routes';
 import simulateRoutes from './route/simulate.routes';
 
@@ -77,6 +79,7 @@ app.post(
   express.json(),
   transactionCallback
 );
+
 app.post(
   '/api/v1/withdrawals/callback',
   express.raw({
@@ -129,6 +132,7 @@ app.use('/api/v1', ewalletRoutes);         // public e-wallet endpoints
 /* ========== 2. PROTECTED – API-KEY (SERVER-TO-SERVER) ========== */
 app.use('/api/v1/payments', apiKeyAuth, paymentRouter);
 app.use('/api/v2/payments', paymentRouterV2);
+app.use('/api/v2/payments', pivotCallbackRouter);
 
 // app.use('/api/v1/disbursements', apiKeyAuth, disbursementRouter);
 app.use('/api/v1', simulateRoutes);
