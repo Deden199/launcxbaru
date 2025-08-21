@@ -2,7 +2,7 @@ process.env.JWT_SECRET = 'test';
 process.env.PAYMENT_API_URL = 'https://provider.test';
 process.env.PAYMENT_API_KEY = 'key';
 process.env.PAYMENT_API_SECRET = 'secret';
-process.env.CARD_REDIRECT_BASE_URL = 'https://merchant.test';
+process.env.FRONTEND_BASE_URL = 'https://merchant.test/';
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';

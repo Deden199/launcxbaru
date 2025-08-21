@@ -25,8 +25,10 @@ export const createCardSession = async (
   order: any
 ) => {
   try {
-    const redirectBase =
-      process.env.CARD_REDIRECT_BASE_URL || config.api.baseUrl || '';
+    const redirectBase = config.api.frontendBaseUrl;
+    if (!redirectBase) {
+      throw new Error('FRONTEND_BASE_URL environment variable is required');
+    }
     const base = redirectBase.replace(/\/$/, '');
     const resp = await axios.post(
       `${baseUrl}/v2/payments`,
