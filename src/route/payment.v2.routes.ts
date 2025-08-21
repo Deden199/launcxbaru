@@ -133,7 +133,12 @@ paymentRouterV2.get(
     validator.handleValidationErrors,
 );
 
-paymentRouterV2.post('/session', cardController.createCardSession);
+paymentRouterV2.post(
+    '/session',
+    ...validator.createCardSessionValidation,
+    validator.handleValidationErrors,
+    cardController.createCardSession
+);
 
 paymentRouterV2.post('/:id/confirm', cardController.confirmCardSession);
 

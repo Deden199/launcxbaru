@@ -79,6 +79,27 @@ const getStatusValidation = [
         .withMessage('Payment ID must be alphanumeric'),
 ];
 
+// Validation rules for creating card session
+const createCardSessionValidation = [
+    body('amount')
+        .isInt({ gt: 0 })
+        .withMessage('Amount must be a positive integer'),
+
+    body('currency')
+        .isLength({ min: 3, max: 3 })
+        .withMessage('Currency must be a 3-letter code'),
+
+    body('customer')
+        .optional()
+        .isObject()
+        .withMessage('Customer must be an object'),
+
+    body('order')
+        .optional()
+        .isObject()
+        .withMessage('Order must be an object'),
+];
+
 // Validation for Get Disbursement Status Request
 const getDisbursementStatusValidation = [
     param('disbursement_id')
@@ -109,7 +130,8 @@ const validation = {
     getStatusValidation,
     initiateDisbursementValidation,
     getDisbursementStatusValidation,
-    checkAccountValidation
+    checkAccountValidation,
+    createCardSessionValidation
 };
 
 export default validation;

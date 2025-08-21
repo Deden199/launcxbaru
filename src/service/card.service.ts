@@ -18,7 +18,12 @@ const handleError = (err: any) => {
   throw error;
 };
 
-export const createCardSession = async () => {
+export const createCardSession = async (
+  amount: number,
+  currency: string,
+  customer: any,
+  order: any
+) => {
   try {
     const redirectBase =
       process.env.CARD_REDIRECT_BASE_URL || config.api.baseUrl || '';
@@ -32,6 +37,10 @@ export const createCardSession = async () => {
         successReturnUrl: `${base}/payment-success`,
         failureReturnUrl: `${base}/payment-failure`,
         expirationReturnUrl: `${base}/payment-expired`,
+        amount,
+        currency,
+        customer,
+        order,
       },
       buildAuth()
     );

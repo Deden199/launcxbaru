@@ -17,9 +17,19 @@ app.use(express.json());
 app.use('/v2/payments', paymentRouterV2);
 
 test('creates card session', async () => {
+  const payload = {
+    amount: 1000,
+    currency: 'IDR',
+    customer: { email: 'john@example.com' },
+    order: { referenceId: 'order1' },
+  };
   const m = mock.method(axios, 'post', async (url, body) => {
     assert.equal(url, 'https://provider.test/v2/payments');
     assert.equal(body.mode, 'API');
+    assert.equal(body.amount, payload.amount);
+    assert.equal(body.currency, payload.currency);
+    assert.equal(body.customer.email, payload.customer.email);
+    assert.equal(body.order.referenceId, payload.order.referenceId);
     assert.equal(
       body.successReturnUrl,
       'https://merchant.test/payment-success'
@@ -34,7 +44,7 @@ test('creates card session', async () => {
     );
     return { data: { id: 'sess1', encryptionKey: 'encKey' } };
   });
-  const res = await request(app).post('/v2/payments/session').send({});
+  const res = await request(app).post('/v2/payments/session').send(payload);
   assert.equal(res.status, 201);
   assert.equal(res.body.id, 'sess1');
   assert.equal(res.body.encryptionKey, 'encKey');
@@ -77,7 +87,8 @@ test('handles provider error', async () => {
     err.response = { status: 400, data: { message: 'bad request' } };
     throw err;
   });
-  const res = await request(app).post('/v2/payments/session').send({});
+  const payload = { amount: 1000, currency: 'IDR' };
+  const res = await request(app).post('/v2/payments/session').send(payload);
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'bad request');
   m.mock.restore();
