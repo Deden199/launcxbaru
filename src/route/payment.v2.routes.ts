@@ -137,4 +137,6 @@ paymentRouterV2.post('/session', cardController.createCardSession);
 
 paymentRouterV2.post('/:id/confirm', cardController.confirmCardSession);
 
+paymentRouterV2.get('/:id', cardController.getPayment);
+
 export default paymentRouterV2;

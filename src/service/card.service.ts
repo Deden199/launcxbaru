@@ -20,12 +20,20 @@ const handleError = (err: any) => {
 
 export const createCardSession = async () => {
   try {
+    const redirectBase =
+      process.env.CARD_REDIRECT_BASE_URL || config.api.baseUrl || '';
+    const base = redirectBase.replace(/\/$/, '');
     const resp = await axios.post(
       `${baseUrl}/v2/payments`,
       {
         mode: 'API',
         paymentMethod: { type: 'CARD' },
         autoConfirm: false,
+        redirectUrl: {
+          success: `${base}/payment-success`,
+          failure: `${base}/payment-failure`,
+          expired: `${base}/payment-expired`,
+        },
       },
       buildAuth()
     );
@@ -55,4 +63,16 @@ export const confirmCardSession = async (
   }
 };
 
-export default { createCardSession, confirmCardSession };
+export const getPayment = async (id: string) => {
+  try {
+    const resp = await axios.get(
+      `${baseUrl}/v2/payments/${id}`,
+      buildAuth()
+    );
+    return resp.data;
+  } catch (err: any) {
+    handleError(err);
+  }
+};
+
+export default { createCardSession, confirmCardSession, getPayment };
