@@ -121,6 +121,38 @@ const checkAccountValidation = [
         .withMessage('Account number is required and must be a valid number.'),
 ];
 
+// Validation rules for confirming a card session
+const confirmCardSessionValidation = [
+    param('id')
+        .isString()
+        .withMessage('Payment ID must be a string'),
+
+    body('encryptedCard')
+        .isString()
+        .isLength({ min: 1 })
+        .withMessage('encryptedCard is required and must be a non-empty string'),
+
+    body('paymentMethodOptions')
+        .optional()
+        .isObject()
+        .withMessage('paymentMethodOptions must be an object')
+        .custom(value => {
+            if (value.card && typeof value.card !== 'object') {
+                throw new Error('paymentMethodOptions.card must be an object');
+            }
+            if (value.card) {
+                const { captureMethod, threeDsMethod } = value.card;
+                if (captureMethod !== undefined && typeof captureMethod !== 'string') {
+                    throw new Error('paymentMethodOptions.card.captureMethod must be a string');
+                }
+                if (threeDsMethod !== undefined && typeof threeDsMethod !== 'string') {
+                    throw new Error('paymentMethodOptions.card.threeDsMethod must be a string');
+                }
+            }
+            return true;
+        }),
+];
+
 
 
 
@@ -131,7 +163,8 @@ const validation = {
     initiateDisbursementValidation,
     getDisbursementStatusValidation,
     checkAccountValidation,
-    createCardSessionValidation
+    createCardSessionValidation,
+    confirmCardSessionValidation
 };
 
 export default validation;

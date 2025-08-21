@@ -140,7 +140,12 @@ paymentRouterV2.post(
     cardController.createCardSession
 );
 
-paymentRouterV2.post('/:id/confirm', cardController.confirmCardSession);
+paymentRouterV2.post(
+    '/:id/confirm',
+    ...validator.confirmCardSessionValidation,
+    validator.handleValidationErrors,
+    cardController.confirmCardSession
+);
 
 paymentRouterV2.get('/:id', cardController.getPayment);
 
