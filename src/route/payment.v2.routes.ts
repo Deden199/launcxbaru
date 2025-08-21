@@ -1,5 +1,6 @@
 import validator from '../validation/validation';
 import { Router } from 'express';
+import cardController from '../controller/card.controller';
 
 
 const paymentRouterV2 = Router();
@@ -131,5 +132,9 @@ paymentRouterV2.get(
     ...validator.getStatusValidation,
     validator.handleValidationErrors,
 );
+
+paymentRouterV2.post('/session', cardController.createCardSession);
+
+paymentRouterV2.post('/:id/confirm', cardController.confirmCardSession);
 
 export default paymentRouterV2;

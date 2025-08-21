@@ -120,6 +120,11 @@ oy: {
       postUrl: process.env.TCPP_POST_URL || '',
       currency: process.env.TCPP_CURRENCY || '360',
     },
+    paymentApi: {
+      baseUrl: process.env.PAYMENT_API_URL || '',
+      apiKey: process.env.PAYMENT_API_KEY || '',
+      apiSecret: process.env.PAYMENT_API_SECRET || '',
+    },
   },
   aws: {
     region: process.env.AWS_REGION || 'ap-southeast-1',
