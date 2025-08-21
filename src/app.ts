@@ -30,6 +30,8 @@ import simulateRoutes from './route/simulate.routes';
 import ewalletRoutes from './route/ewallet.routes';
 import authRoutes from './route/auth.routes';
 import paymentRouter from './route/payment.routes';
+import paymentRouterV2 from './route/payment.v2.routes';
+
 import bankRoutes from './route/bank.routes'
 import { proxyOyQris } from './controller/qr.controller'
 
@@ -126,6 +128,8 @@ app.use('/api/v1', ewalletRoutes);         // public e-wallet endpoints
 
 /* ========== 2. PROTECTED – API-KEY (SERVER-TO-SERVER) ========== */
 app.use('/api/v1/payments', apiKeyAuth, paymentRouter);
+app.use('/v2/payments', paymentRouterV2);
+
 // app.use('/api/v1/disbursements', apiKeyAuth, disbursementRouter);
 app.use('/api/v1', simulateRoutes);
 
