@@ -17,7 +17,7 @@ Endpoints served under `/api/v1/payment`.
 - Custom provider services (Hilogate, OY, GIDI, etc.).
 
 ## Environment Variables
-- General: `BASE_URL`, `CALLBACK_URL`, `CALLBACK_URL_FINISH`, `FORCE_PROVIDER`.
+- General: `BASE_URL`, `FRONTEND_BASE_URL`, `CALLBACK_URL`, `CALLBACK_URL_FINISH`, `FORCE_PROVIDER`.
 - Callback worker: `CALLBACK_WORKER_INTERVAL_MS`, `CALLBACK_WORKER_MAX_ATTEMPTS`, `CALLBACK_WORKER_BATCH_SIZE`.
 - Netz configuration: `NETZ_URL`, `NETZ_PARTNER_ID`, `NETZ_PRIVATE_KEY`, `NETZ_CLIENT_SECRET`.
 - Brevo email: `BREVO_URL`, `BREVO_API_KEY`.
