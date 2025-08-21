@@ -31,6 +31,13 @@ export const createCardSession = async (req: Request, res: Response) => {
     const customer = req.body?.customer;
     const orderInfo = req.body?.orderInformation ?? req.body?.order ?? undefined;
 
+    const buyerId = req.body?.buyerId;
+    const subMerchantId = req.body?.subMerchantId;
+    const playerId = req.body?.playerId;
+    if (!buyerId || !subMerchantId) {
+      return res.status(400).json({ error: 'Missing buyerId or subMerchantId' });
+    }
+
     const session = await cardService.createCardSession(
       amountValue,
       currency,
@@ -42,7 +49,8 @@ export const createCardSession = async (req: Request, res: Response) => {
         metadata: req.body?.metadata,
         paymentType: req.body?.paymentType, // service akan default 'SINGLE' jika undefined
         clientReferenceId: req.body?.clientReferenceId,
-      }
+      },
+      { buyerId, subMerchantId, playerId }
     );
 
     // Pastikan FE selalu dapat { id, encryptionKey }

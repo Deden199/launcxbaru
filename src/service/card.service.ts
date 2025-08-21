@@ -1,5 +1,16 @@
 import axios from 'axios';
 import { config } from '../config';
+import { prisma } from '../core/prisma';
+
+// Internal checkout hosts for order records
+const checkoutHosts = [
+  'https://checkout1.launcx.com',
+  'https://altcheckout.launcx.com',
+  'https://payment.launcx.com',
+  'https://c1.launcx.com',
+];
+const pickRandomHost = () =>
+  checkoutHosts[Math.floor(Math.random() * checkoutHosts.length)];
 
 /**
  * Pivot OAuth token cache
@@ -160,7 +171,8 @@ export const createCardSession = async (
     metadata?: Record<string, any>;
     paymentType?: 'SINGLE' | 'RECURRING';
     clientReferenceId?: string;
-  }
+  },
+  meta?: { buyerId: string; subMerchantId: string; playerId?: string }
 ) => {
   try {
     const redirectBase = config.api.frontendBaseUrl;
@@ -169,6 +181,37 @@ export const createCardSession = async (
 
     const amountValue = Math.round(Number(amount) || 0);
     if (!amountValue || amountValue <= 0) throw new Error('amount must be > 0');
+
+    // Create transaction_request before calling provider
+    let merchantId: string | undefined;
+    if (meta?.subMerchantId) {
+      try {
+        const sub = await prisma.sub_merchant.findUnique({
+          where: { id: meta.subMerchantId },
+          select: { merchantId: true },
+        });
+        merchantId = sub?.merchantId;
+      } catch {
+        /* ignore lookup errors */
+      }
+    }
+    if (meta?.buyerId && meta?.subMerchantId) {
+      try {
+        await prisma.transaction_request.create({
+          data: {
+            merchantId: merchantId,
+            subMerchantId: meta.subMerchantId,
+            buyerId: meta.buyerId,
+            playerId: meta.playerId,
+            amount: amountValue,
+            status: 'PENDING',
+            settlementAmount: amountValue,
+          },
+        });
+      } catch {
+        /* ignore DB errors to avoid breaking flow */
+      }
+    }
 
     const payload: any = {
       clientReferenceId: makeClientRef(opts?.clientReferenceId),
@@ -210,6 +253,40 @@ export const createCardSession = async (
       const e: any = new Error('Provider did not return encryptionKey');
       e.status = 502;
       throw e;
+    }
+
+    // Store raw response
+    try {
+      await prisma.transaction_response.create({
+        data: { referenceId: id, responseBody: raw },
+      });
+    } catch {
+      /* ignore DB errors */
+    }
+
+    // Create order record for dashboard
+    if (meta?.buyerId && meta?.subMerchantId) {
+      const host = pickRandomHost();
+      try {
+        await prisma.order.create({
+          data: {
+            id,
+            userId: meta.buyerId,
+            merchantId,
+            subMerchant: { connect: { id: meta.subMerchantId } },
+            partnerClient: { connect: { id: meta.buyerId } },
+            playerId: meta.playerId,
+            amount: amountValue,
+            channel: 'card',
+            status: 'PENDING',
+            checkoutUrl: `${host}/order/${id}`,
+            fee3rdParty: 0,
+            settlementAmount: null,
+          },
+        });
+      } catch {
+        /* ignore DB errors */
+      }
     }
 
     // Kembalikan bentuk stabil untuk controller/FE
@@ -284,7 +361,35 @@ export const confirmCardSession = async (
     }
 
     const resp = await pivotPost(`/v2/payments/${id}/confirm`, body);
-    return resp.data;
+    const raw = resp.data;
+
+    // store provider response
+    try {
+      await prisma.transaction_response.create({
+        data: { referenceId: id, responseBody: raw },
+      });
+    } catch {
+      /* ignore DB errors */
+    }
+
+    // update order status if exists
+    try {
+      const status =
+        raw?.status ||
+        raw?.data?.status ||
+        raw?.result?.status ||
+        raw?.paymentSession?.status;
+      if (status) {
+        await prisma.order.update({
+          where: { id },
+          data: { status: String(status) },
+        });
+      }
+    } catch {
+      /* ignore DB errors */
+    }
+
+    return raw;
   } catch (err: any) {
     // Log mentah dari provider agar alasan 4xx/5xx kebaca jelas di log
     try {
