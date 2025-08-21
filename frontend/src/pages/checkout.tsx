@@ -1,147 +1,166 @@
-import { useState } from 'react'
-import axios from 'axios'
-import JSEncrypt from 'jsencrypt'
+"use client";
 
-import styles from './AdminAuth.module.css'
+import { useState } from 'react';
+import axios from 'axios';
+import styles from './AdminAuth.module.css';
+import { normalizeToBase64Spki, encryptHybrid } from '@/utils/hybrid-encryption';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-type CaptureMethod = 'automatic' | 'manual'
-type ThreeDsMethod = 'CHALLENGE' | 'AUTO'
-
-function toPemIfNeeded(key: string): string {
-  // Kalau sudah PEM, return apa adanya
-  if (key.includes('BEGIN PUBLIC KEY')) return key
-  // Wrap base64/key pendek ke PEM (pecah tiap 64 char biar valid)
-  const chunk = (s: string, n = 64) => s.match(new RegExp(`.{1,${n}}`, 'g'))?.join('\n') || s
-  const body = chunk(key.replace(/[\r\n\s]/g, ''))
-  return `-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----`
-}
+type CaptureMethod = 'automatic' | 'manual';
+type ThreeDsMethod = 'CHALLENGE' | 'AUTO';
 
 export default function CheckoutPage() {
-  const [cardNumber, setCardNumber] = useState('')
-  const [expiry, setExpiry] = useState('')    // format: MM/YY
-  const [cvv, setCvv] = useState('')
-  const [amount, setAmount] = useState('')
+  const [cardNumber, setCardNumber] = useState('');
+  const [nameOnCard, setNameOnCard] = useState('');
+  const [expiry, setExpiry] = useState(''); // MM/YY
+  const [cvv, setCvv] = useState('');
+  const [amount, setAmount] = useState('');
 
-  const [captureMethod, setCaptureMethod] = useState<CaptureMethod>('automatic')
-  const [threeDsMethod, setThreeDsMethod] = useState<ThreeDsMethod>('CHALLENGE')
+  const [captureMethod, setCaptureMethod] = useState<CaptureMethod>('automatic');
+  const [threeDsMethod, setThreeDsMethod] = useState<ThreeDsMethod>('CHALLENGE');
 
-  const [sessionId, setSessionId] = useState('')
-  const [encryptionKey, setEncryptionKey] = useState('')
+  const [sessionId, setSessionId] = useState('');
+  const [encryptionKey, setEncryptionKey] = useState(''); // base64 SPKI atau PEM dari backend
 
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const validate = () => {
-    const panOk = /^\d{12,19}$/.test(cardNumber.replace(/\s+/g, ''))
-    const expOk = /^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)
-    const cvvOk = /^\d{3,4}$/.test(cvv)
-    const amtOk = Number(amount) > 0
-    if (!panOk) return 'Invalid card number'
-    if (!expOk) return 'Invalid expiry (MM/YY)'
-    if (!cvvOk) return 'Invalid CVV'
-    if (!amtOk) return 'Amount must be > 0'
-    return ''
-  }
+    const panOk = /^\d{12,19}$/.test(cardNumber.replace(/\s+/g, ''));
+    const expOk = /^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry);
+    const cvvOk = /^\d{3,4}$/.test(cvv);
+    const amtOk = Number(amount) > 0;
+    if (!panOk) return 'Invalid card number';
+    if (!expOk) return 'Invalid expiry (MM/YY)';
+    if (!cvvOk) return 'Invalid CVV';
+    if (!amtOk) return 'Amount must be > 0';
+    return '';
+  };
 
-  const ensureSession = async () => {
-    // Buat Payment Session sesuai dok:
-    // amount: { value, currency }, paymentMethod.type=CARD, autoConfirm=false
-    // sertakan minimal customer + orderInformation
+ // SELALU buat session baru (fresh) setiap dipanggil
+const ensureSession = async () => {
+  const res = await axios.post(`${API_URL}/v2/payments/session`, {
+    amount: { value: Number(amount), currency: 'IDR' },
+  });
+
+  // backend sekarang memastikan { id, encryptionKey } sudah normalized
+  const { id, encryptionKey } = res.data || {};
+  if (!id || !encryptionKey) throw new Error('Missing session id / encryptionKey');
+
+  // simpan state
+  setSessionId(id);
+  setEncryptionKey(encryptionKey);
+  return { id, encryptionKey };
+};
+// taruh di atas (dekat import/konstanta)
+function extractPaymentUrl(d: any): string | null {
+  if (!d || typeof d !== 'object') return null;
+  const cands = [
+    d.paymentUrl,
+    d?.data?.paymentUrl,
+    d?.result?.paymentUrl,
+    d?.paymentSession?.paymentUrl,
+    d.redirectUrl,
+    d?.data?.redirectUrl,
+    d?.nextAction?.url,
+    d?.next_action?.url,
+    d?.actions?.threeDs?.url,
+    d?.payment?.paymentUrl,
+    d?.links?.redirect,
+  ];
+  for (const v of cands) {
+    if (typeof v === 'string' && /^https?:\/\//i.test(v)) return v;
+  }
+  return null;
+}
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setError('');
+
+  const v = validate();
+  if (v) { setError(v); return; }
+
+  setBusy(true);
+  try {
+    // 1) Selalu buat session BARU
+    const { id, encryptionKey: ek } = await ensureSession();
+
+    // 2) Normalisasi public key → base64 SPKI (DER)
+    const base64Spki = normalizeToBase64Spki(ek);
+
+    // 3) Payload kartu + device sesuai dok
+    const [mm, yy] = expiry.split('/');
     const payload = {
-      amount: { value: Number(amount), currency: 'IDR' },
-      customer: {
-        email: 'customer@example.com',
-        phoneNumber: { countryCode: '+62', number: '8120000000' },
+      card: {
+        number: cardNumber.replace(/\s+/g, ''),
+        expiryMonth: (mm || '').padStart(2, '0'),
+        expiryYear: yy || '',
+        cvc: cvv,
+        nameOnCard,
       },
-      orderInformation: {
-        productDetails: [
-          {
-            type: 'PHYSICAL',
-            category: 'GENERAL',
-            subCategory: 'GENERAL',
-            name: 'Order',
-            description: 'Card payment',
-            quantity: 1,
-            price: { value: Number(amount), currency: 'IDR' },
-          },
-        ],
+      deviceInformations: {
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        country: 'ID', // minimum, boleh diperluas sesuai kebutuhan
       },
-      // opsi tambahan? boleh tambahkan statementDescriptor/expiryAt/metadata di sini
-    }
+      metadata: {},
+    };
 
-    const res = await axios.post(`${API_URL}/v2/payments/session`, payload)
-    setSessionId(res.data.id)
-    setEncryptionKey(res.data.encryptionKey)
-    return res.data
+    // 4) Enkripsi hybrid
+    const encryptedCard = await encryptHybrid(JSON.stringify(payload), base64Spki);
+
+    // 5) Confirm
+    const res = await axios.post(`${API_URL}/v2/payments/${id}/confirm`, {
+      encryptedCard,
+      paymentMethodOptions: {
+        card: { captureMethod, threeDsMethod },
+      },
+    });
+
+    // 6) Ambil 3DS URL dari berbagai kemungkinan field
+    const data = res.data || {};
+    const url = extractPaymentUrl(data);
+
+    // Debug agar kelihatan bentuk respons sebenarnya
+    // eslint-disable-next-line no-console
+    console.log('[Confirm response]', data);
+
+    if (url) {
+      // Redirect ke halaman 3DS
+      window.location.replace(url); // atau window.location.assign(url)
+    } else {
+      // Tidak ada URL di respons → tampilkan pesan yang berguna
+      setError('Provider tidak mengembalikan paymentUrl / 3DS URL. Cek console untuk payload lengkap.');
+    }
+  } catch (err: any) {
+    const status = err?.response?.status;
+    const providerRaw = err?.response?.data;
+    const msg =
+      providerRaw?.provider?.message ||
+      providerRaw?.error ||
+      providerRaw?.message ||
+      err?.message ||
+      'Payment failed';
+
+    if (
+      status === 409 ||
+      /cannot be confirmed/i.test(String(msg)) ||
+      /not allowed to confirm/i.test(JSON.stringify(providerRaw || {}))
+    ) {
+      setSessionId('');
+      setEncryptionKey('');
+      setError('Session tidak bisa dikonfirmasi. Silakan klik Pay lagi untuk membuat sesi baru.');
+    } else {
+      setError(msg);
+    }
+  } finally {
+    setBusy(false);
   }
+};
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const v = validate()
-    if (v) {
-      setError(v)
-      return
-    }
 
-    setBusy(true)
-    setError('')
-    try {
-      // Pastikan session sudah ada (dan gunakan amount yang diinput user)
-      if (!sessionId || !encryptionKey) {
-        await ensureSession()
-      }
-
-      const pemKey = toPemIfNeeded(encryptionKey || '')
-      const encryptor = new JSEncrypt()
-      encryptor.setPublicKey(pemKey)
-
-      // HANYA data kartu yang dienkripsi (sesuai dok)
-      const payload = JSON.stringify({
-        cardNumber: cardNumber.replace(/\s+/g, ''),
-        expiry, // MM/YY
-        cvv,
-      })
-
-      const encryptedCard = encryptor.encrypt(payload)
-      if (!encryptedCard) throw new Error('Encryption failed')
-
-      // Kirim confirm sesuai dok
-      const res = await axios.post(
-        `${API_URL}/v2/payments/${sessionId}/confirm`,
-        {
-          encryptedCard,
-          paymentMethodOptions: {
-            card: {
-              captureMethod,   // 'automatic' | 'manual'
-              threeDsMethod,   // 'CHALLENGE' | 'AUTO'
-              // processingConfig bisa ditambahkan bila perlu
-            },
-          },
-        }
-      )
-
-      const { paymentUrl } = res.data
-      if (paymentUrl) {
-        window.location.href = paymentUrl
-      }
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.providerError ||
-        err?.response?.data?.error ||
-        err?.message ||
-        'Payment failed'
-      setError(msg)
-      if (msg.toLowerCase().includes('session')) {
-        setSessionId('')
-        setEncryptionKey('')
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
+  
   return (
     <div className={styles.container}>
       <div className={styles.card}>
@@ -160,6 +179,19 @@ export default function CheckoutPage() {
               autoComplete="cc-number"
             />
           </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>Name on Card</label>
+            <input
+              type="text"
+              value={nameOnCard}
+              onChange={e => setNameOnCard(e.target.value)}
+              required
+              className={styles.input}
+              autoComplete="cc-name"
+            />
+          </div>
+
           <div className={styles.field}>
             <label className={styles.label}>Expiry (MM/YY)</label>
             <input
@@ -173,6 +205,7 @@ export default function CheckoutPage() {
               autoComplete="cc-exp"
             />
           </div>
+
           <div className={styles.field}>
             <label className={styles.label}>CVV</label>
             <input
@@ -185,6 +218,7 @@ export default function CheckoutPage() {
               autoComplete="cc-csc"
             />
           </div>
+
           <div className={styles.field}>
             <label className={styles.label}>Amount (IDR)</label>
             <input
@@ -227,7 +261,7 @@ export default function CheckoutPage() {
         </form>
       </div>
     </div>
-  )
+  );
 }
 
-CheckoutPage.disableLayout = true
+CheckoutPage.disableLayout = true;

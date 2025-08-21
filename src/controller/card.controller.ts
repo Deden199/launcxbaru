@@ -2,46 +2,34 @@ import { Request, Response } from 'express';
 import cardService from '../service/card.service';
 import logger from '../logger';
 
+/** Support amount in two shapes:
+ *  - new: { amount: { value, currency }, ... }
+ *  - legacy: { amount: number, currency: string, ... }
+ */
+function parseAmountCurrency(body: any): { amountValue: number; currency: string } {
+  const amt = body?.amount;
+
+  // New shape
+  if (amt && typeof amt === 'object') {
+    const value = Number(amt.value);
+    const ccy = String(amt.currency || body.currency || 'IDR').toUpperCase();
+    if (!value || value <= 0) throw new Error('amount.value must be > 0');
+    return { amountValue: Math.round(value), currency: ccy };
+  }
+
+  // Legacy shape
+  const value = Number(amt);
+  const ccy = String(body?.currency || 'IDR').toUpperCase();
+  if (!value || value <= 0) throw new Error('amount must be > 0');
+  return { amountValue: Math.round(value), currency: ccy };
+}
+
 export const createCardSession = async (req: Request, res: Response) => {
   try {
-    const {
-      // Skema baru (sesuai dok)
-      amount: amountObj,
-      customer,
-      orderInformation,
+    const { amountValue, currency } = parseAmountCurrency(req.body);
 
-      // Backward compatibility (skema lama)
-      amount: amountLegacy,
-      currency: currencyLegacy,
-      order,
-
-      // Opsional sesuai contoh dok
-      statementDescriptor,
-      expiryAt,
-      metadata,
-      paymentType,
-    } = req.body || {};
-
-    // Normalisasi amount & currency:
-    // - Utamakan skema baru: amount: { value, currency }
-    // - Fallback ke skema lama: amount (number) + currency (string)
-    const amountValue =
-      (amountObj && typeof amountObj.value === 'number' && amountObj.value) ??
-      (typeof amountLegacy === 'number' ? amountLegacy : undefined);
-
-    const currency =
-      (amountObj && typeof amountObj.currency === 'string' && amountObj.currency) ??
-      (typeof currencyLegacy === 'string' ? currencyLegacy : undefined);
-
-    if (!amountValue || !currency) {
-      return res.status(400).json({
-        error:
-          'Invalid amount/currency. Expected amount.value:number and amount.currency:string (or legacy amount:number + currency:string).',
-      });
-    }
-
-    // Normalisasi orderInformation (sesuai dok). Fallback ke field lama `order`.
-    const orderInfo = orderInformation ?? order ?? undefined;
+    const customer = req.body?.customer;
+    const orderInfo = req.body?.orderInformation ?? req.body?.order ?? undefined;
 
     const session = await cardService.createCardSession(
       amountValue,
@@ -49,15 +37,35 @@ export const createCardSession = async (req: Request, res: Response) => {
       customer,
       orderInfo,
       {
-        statementDescriptor,
-        expiryAt,
-        metadata,
-        paymentType, // default ke 'SINGLE' di service bila undefined
+        statementDescriptor: req.body?.statementDescriptor,
+        expiryAt: req.body?.expiryAt,
+        metadata: req.body?.metadata,
+        paymentType: req.body?.paymentType, // service akan default 'SINGLE' jika undefined
+        clientReferenceId: req.body?.clientReferenceId,
       }
     );
 
-    return res.status(201).json(session);
+    // Pastikan FE selalu dapat { id, encryptionKey }
+    const id =
+      session?.id ?? session?.data?.id ?? session?.result?.id ?? session?.paymentSession?.id;
+    const encryptionKey =
+      session?.encryptionKey ??
+      session?.data?.encryptionKey ??
+      session?.result?.encryptionKey ??
+      session?.paymentSession?.encryptionKey ??
+      session?.publicKey ??
+      session?.rsaPublicKey ??
+      session?.encryption?.publicKey;
+
+    if (!id || !encryptionKey) {
+      logger.error('[createCardSession] Missing id/encryptionKey', { session });
+      return res.status(502).json({ error: 'Provider did not return encryptionKey' });
+    }
+
+    // Kembalikan bentuk stabil yang dipakai FE
+    return res.status(201).json({ id, encryptionKey });
   } catch (err: any) {
+    logger.error('[createCardSession] error', { err: err?.response?.data || err?.message });
     return res
       .status(err?.status || 500)
       .json({ error: err?.message || 'Failed to create session' });
@@ -69,18 +77,12 @@ export const confirmCardSession = async (req: Request, res: Response) => {
     const { encryptedCard, paymentMethodOptions } = req.body || {};
     const { id } = req.params;
 
-    if (!id) {
-      return res.status(400).json({ error: 'Missing payment session id' });
-    }
+    if (!id) return res.status(400).json({ error: 'Missing payment session id' });
     if (!encryptedCard || typeof encryptedCard !== 'string') {
       return res.status(400).json({ error: 'Missing or invalid encryptedCard' });
     }
 
-    const result = await cardService.confirmCardSession(
-      id,
-      encryptedCard,
-      paymentMethodOptions
-    );
+    const result = await cardService.confirmCardSession(id, encryptedCard, paymentMethodOptions);
 
     if (result?.paymentUrl) {
       logger.info(`[CardPayment] 3DS redirect URL: ${result.paymentUrl}`);
@@ -97,9 +99,8 @@ export const confirmCardSession = async (req: Request, res: Response) => {
 export const getPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({ error: 'Missing payment id' });
-    }
+    if (!id) return res.status(400).json({ error: 'Missing payment id' });
+
     const payment = await cardService.getPayment(id);
     return res.status(200).json(payment);
   } catch (err: any) {
