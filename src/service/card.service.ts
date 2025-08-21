@@ -29,11 +29,9 @@ export const createCardSession = async () => {
         mode: 'API',
         paymentMethod: { type: 'CARD' },
         autoConfirm: false,
-        redirectUrl: {
-          success: `${base}/payment-success`,
-          failure: `${base}/payment-failure`,
-          expired: `${base}/payment-expired`,
-        },
+        successReturnUrl: `${base}/payment-success`,
+        failureReturnUrl: `${base}/payment-failure`,
+        expirationReturnUrl: `${base}/payment-expired`,
       },
       buildAuth()
     );
@@ -52,7 +50,7 @@ export const confirmCardSession = async (
     const resp = await axios.post(
       `${baseUrl}/v2/payments/${id}/confirm`,
       {
-        paymentMethod: { type: 'CARD', encryptedCard },
+        paymentMethod: { type: 'CARD', card: { encryptedCard } },
         paymentMethodOptions,
       },
       buildAuth()

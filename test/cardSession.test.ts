@@ -21,15 +21,15 @@ test('creates card session', async () => {
     assert.equal(url, 'https://provider.test/v2/payments');
     assert.equal(body.mode, 'API');
     assert.equal(
-      body.redirectUrl.success,
+      body.successReturnUrl,
       'https://merchant.test/payment-success'
     );
     assert.equal(
-      body.redirectUrl.failure,
+      body.failureReturnUrl,
       'https://merchant.test/payment-failure'
     );
     assert.equal(
-      body.redirectUrl.expired,
+      body.expirationReturnUrl,
       'https://merchant.test/payment-expired'
     );
     return { data: { id: 'sess1', encryptionKey: 'encKey' } };
@@ -57,7 +57,10 @@ test('gets payment detail', async () => {
 test('confirms card session', async () => {
   const m = mock.method(axios, 'post', async (url, body) => {
     assert.equal(url, 'https://provider.test/v2/payments/abc/confirm');
-    assert.equal(body.paymentMethod.encryptedCard, 'encrypted');
+    assert.equal(
+      body.paymentMethod.card.encryptedCard,
+      'encrypted'
+    );
     return { data: { paymentUrl: 'https://3ds.test' } };
   });
   const res = await request(app)
