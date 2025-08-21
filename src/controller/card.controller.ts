@@ -2,9 +2,15 @@ import { Request, Response } from 'express';
 import cardService from '../service/card.service';
 import logger from '../logger';
 
-export const createCardSession = async (_req: Request, res: Response) => {
+export const createCardSession = async (req: Request, res: Response) => {
   try {
-    const session = await cardService.createCardSession();
+    const { amount, currency, customer, order } = req.body;
+    const session = await cardService.createCardSession(
+      amount,
+      currency,
+      customer,
+      order
+    );
     return res.status(201).json(session);
   } catch (err: any) {
     return res
