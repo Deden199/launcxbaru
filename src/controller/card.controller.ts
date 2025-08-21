@@ -33,4 +33,16 @@ export const confirmCardSession = async (req: Request, res: Response) => {
   }
 };
 
-export default { createCardSession, confirmCardSession };
+export const getPayment = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const payment = await cardService.getPayment(id);
+    return res.status(200).json(payment);
+  } catch (err: any) {
+    return res
+      .status(err.status || 500)
+      .json({ error: err.message || 'Failed to fetch payment' });
+  }
+};
+
+export default { createCardSession, confirmCardSession, getPayment };

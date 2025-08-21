@@ -2,6 +2,7 @@ process.env.JWT_SECRET = 'test';
 process.env.PAYMENT_API_URL = 'https://provider.test';
 process.env.PAYMENT_API_KEY = 'key';
 process.env.PAYMENT_API_SECRET = 'secret';
+process.env.CARD_REDIRECT_BASE_URL = 'https://merchant.test';
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,12 +20,36 @@ test('creates card session', async () => {
   const m = mock.method(axios, 'post', async (url, body) => {
     assert.equal(url, 'https://provider.test/v2/payments');
     assert.equal(body.mode, 'API');
+    assert.equal(
+      body.redirectUrl.success,
+      'https://merchant.test/payment-success'
+    );
+    assert.equal(
+      body.redirectUrl.failure,
+      'https://merchant.test/payment-failure'
+    );
+    assert.equal(
+      body.redirectUrl.expired,
+      'https://merchant.test/payment-expired'
+    );
     return { data: { id: 'sess1', encryptionKey: 'encKey' } };
   });
   const res = await request(app).post('/v2/payments/session').send({});
   assert.equal(res.status, 201);
   assert.equal(res.body.id, 'sess1');
   assert.equal(res.body.encryptionKey, 'encKey');
+  assert.equal(m.mock.callCount(), 1);
+  m.mock.restore();
+});
+
+test('gets payment detail', async () => {
+  const m = mock.method(axios, 'get', async url => {
+    assert.equal(url, 'https://provider.test/v2/payments/xyz');
+    return { data: { id: 'xyz', amount: 100 } };
+  });
+  const res = await request(app).get('/v2/payments/xyz');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.id, 'xyz');
   assert.equal(m.mock.callCount(), 1);
   m.mock.restore();
 });
