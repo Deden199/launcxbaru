@@ -12,6 +12,9 @@ export default function CheckoutPage() {
   const [cvv, setCvv] = useState('')
   const [amount, setAmount] = useState('')
 
+  const [captureMethod, setCaptureMethod] = useState('AUTOMATIC')
+  const [threeDsMethod, setThreeDsMethod] = useState('AUTO')
+
   const [sessionId, setSessionId] = useState('')
   const [encryptionKey, setEncryptionKey] = useState('')
 
@@ -52,7 +55,15 @@ export default function CheckoutPage() {
 
       const res = await axios.post(
         `${API_URL}/v2/payments/${sessionId}/confirm`,
-        { encryptedCard }
+        {
+          encryptedCard,
+          paymentMethodOptions: {
+            card: {
+              captureMethod,
+              threeDsMethod
+            }
+          }
+        }
       )
 
       const { paymentUrl } = res.data
@@ -60,7 +71,11 @@ export default function CheckoutPage() {
         window.location.href = paymentUrl
       }
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || 'Payment failed'
+      const msg =
+        err.response?.data?.providerError ||
+        err.response?.data?.error ||
+        err.message ||
+        'Payment failed'
       setError(msg)
       if (msg.toLowerCase().includes('session')) {
         setSessionId('')
@@ -116,6 +131,28 @@ export default function CheckoutPage() {
               required
               className={styles.input}
             />
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>Capture Method</label>
+            <select
+              value={captureMethod}
+              onChange={e => setCaptureMethod(e.target.value)}
+              className={styles.input}
+            >
+              <option value="AUTOMATIC">Automatic</option>
+              <option value="MANUAL">Manual</option>
+            </select>
+          </div>
+          <div className={styles.field}>
+            <label className={styles.label}>3DS Method</label>
+            <select
+              value={threeDsMethod}
+              onChange={e => setThreeDsMethod(e.target.value)}
+              className={styles.input}
+            >
+              <option value="AUTO">Auto</option>
+              <option value="MANUAL">Manual</option>
+            </select>
           </div>
           <button type="submit" className={styles.button} disabled={busy || !sessionId}>
             {busy ? 'Processing...' : 'Pay'}
