@@ -45,7 +45,7 @@ paths:
       responses:
         "200":
           description: Callback processed
-  /order/{id}:
+  "/order/{id}":
     get:
       summary: Retrieve order details by ID
       security:
@@ -69,7 +69,7 @@ paths:
       responses:
         "200":
           description: Callback processed
-  /order/{id}/status:
+  "/order/{id}/status":
     get:
       summary: Check payment status by order ID
       security:
@@ -87,7 +87,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentStatus"
-  /transaction/callback/oy/retry/{referenceId}:
+  "/transaction/callback/oy/retry/{referenceId}":
     post:
       summary: Retry OY! callback
       parameters:

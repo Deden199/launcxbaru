@@ -50,7 +50,7 @@ paths:
       responses:
         "200":
           description: List of sub merchants
-  /{id}/retry:
+  "/{id}/retry":
     post:
       summary: Retry a failed withdrawal
       security:
