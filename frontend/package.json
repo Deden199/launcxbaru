@@ -19,7 +19,8 @@
     "react-day-picker": "^9.8.0",
     "react-dom": "^19.1.0",
     "react-select": "^5.10.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "jsencrypt": "^3.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.10",
