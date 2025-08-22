@@ -244,6 +244,7 @@ async function processBatchLoop(): Promise<{ settledCount: number; netAmount: nu
 
 let cutoffTime: Date | null = null;
 let settlementTask: ScheduledTask | null = null;
+let settlementCronExpr = '0 16 * * *';
 
 async function runSettlementJob() {
   try {
@@ -327,13 +328,25 @@ export async function scheduleSettlementChecker() {
 
   const setting = await prisma.setting.findUnique({ where: { key: 'settlement_cron' } });
   const expr = setting?.value || '0 16 * * *';
+  settlementCronExpr = expr;
   settlementTask = createTask(expr);
 }
 
 export function restartSettlementChecker(expr: string) {
   settlementTask?.stop();
   settlementTask?.destroy();
-  settlementTask = createTask(expr || '0 16 * * *');
+  settlementCronExpr = expr || settlementCronExpr || '0 16 * * *';
+  settlementTask = createTask(settlementCronExpr);
+}
+
+export function resetSettlementState() {
+  settlementTask?.stop();
+  settlementTask?.destroy();
+  settlementTask = null;
+  lastCreatedAt = null;
+  lastId = null;
+  cutoffTime = null;
+  restartSettlementChecker(settlementCronExpr);
 }
 
 export async function runManualSettlement(
@@ -344,6 +357,7 @@ export async function runManualSettlement(
     batchAmount: number
   }) => void
 ) {
+  resetSettlementState()
   cutoffTime = new Date()
   lastCreatedAt = null
   lastId = null
