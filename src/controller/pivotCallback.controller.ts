@@ -79,10 +79,19 @@ function extractPaymentId(body: any): string | undefined {
   const chargeDetails = body?.data?.chargeDetails;
   if (Array.isArray(chargeDetails)) {
     for (const ch of chargeDetails) {
-      const sid = ch?.paymentSessionId;
+      const sid = ch?.paymentSessionId || ch?.paymentSessionClientReferenceId;
       if (typeof sid === 'string' && sid) return sid;
     }
   }
+
+  const rootChargeDetails = body?.chargeDetails;
+  if (Array.isArray(rootChargeDetails)) {
+    for (const ch of rootChargeDetails) {
+      const sid = ch?.paymentSessionId || ch?.paymentSessionClientReferenceId;
+      if (typeof sid === 'string' && sid) return sid;
+    }
+  }
+
   return undefined;
 }
 
