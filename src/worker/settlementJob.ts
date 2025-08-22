@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { runManualSettlement } from '../cron/settlement'
+import { runManualSettlement, resetSettlementState, restartSettlementChecker } from '../cron/settlement'
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
@@ -20,6 +20,7 @@ function runNext() {
   const job = queue.shift()!
   current = job
   job.status = 'running'
+  resetSettlementState()
   runManualSettlement(p => {
     job.settledOrders = p.settledOrders
     job.netAmount = p.netAmount
@@ -32,6 +33,7 @@ function runNext() {
       job.error = err instanceof Error ? err.message : String(err)
     })
     .finally(() => {
+      restartSettlementChecker('')
       current = null
       runNext()
     })

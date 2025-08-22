@@ -27,6 +27,9 @@ import { prisma } from '../src/core/prisma';
 
 nock.disableNetConnect();
 nock.enableNetConnect('127.0.0.1');
+nock('https://provider.test')
+  .post('/v1/access-token')
+  .reply(200, { data: { accessToken: 'token', expiresIn: 3600 } });
 
 const app = express();
 app.use(express.json());
@@ -53,12 +56,12 @@ test('creates card session', async () => {
       assert.equal(body.redirectUrl.expirationReturnUrl, 'https://merchant.test/payment-expired');
       return true;
     })
-    .reply(201, { id: 'sess1', encryptionKey: 'encKey' });
+    .reply(201, { id: 'sess1', encryptionKey: 'a'.repeat(64) });
 
   const res = await request(app).post('/v2/payments/session').send(payload);
 
   assert.equal(res.status, 201);
-  assert.deepEqual(res.body, { id: 'sess1', encryptionKey: 'encKey' });
+  assert.deepEqual(res.body, { id: 'sess1', encryptionKey: 'a'.repeat(64) });
   assert.ok(nock.isDone());
   nock.cleanAll();
 });
@@ -99,7 +102,7 @@ test('handles provider error on session creation', async () => {
   const res = await request(app).post('/v2/payments/session').send(payload);
 
   assert.equal(res.status, 400);
-  assert.equal(res.body.error, 'bad request');
+  assert.equal(res.body.error, '[Provider 400] bad request');
   assert.ok(nock.isDone());
   nock.cleanAll();
 });
@@ -114,7 +117,7 @@ test('handles provider error on confirmation', async () => {
     .send({ encryptedCard: 'enc' });
 
   assert.equal(res.status, 402);
-  assert.equal(res.body.error, 'payment required');
+  assert.equal(res.body.error, '[Provider 402] payment required');
   assert.ok(nock.isDone());
   nock.cleanAll();
 });

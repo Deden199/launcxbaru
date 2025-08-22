@@ -11,6 +11,7 @@ settlement.runManualSettlement = async (cb?: any) => {
   cb?.({ settledOrders: 2, netAmount: 200, batchSettled: 2, batchAmount: 200 })
   return { settledOrders: 2, netAmount: 200 }
 }
+settlement.restartSettlementChecker = () => {}
 
 import * as adminLog from '../src/util/adminLog'
 ;(adminLog as any).logAdminAction = async () => {}
