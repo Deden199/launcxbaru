@@ -203,13 +203,24 @@ export const pivotPaymentCallback = async (req: Request, res: Response) => {
     const event = extractEvent(anyBody);
     const paymentId = extractPaymentId(anyBody);
 
-    if (!event || !paymentId) {
-      logger.warn('[PivotCallback] Invalid payload', {
+    if (!event) {
+      logger.warn('[PivotCallback] Missing event', {
         ct,
         len: req.headers['content-length'],
         sample: JSON.stringify(anyBody).slice(0, 800),
       });
-      return res.status(400).json({ ok: false, error: 'Invalid callback payload' });
+      return res.status(400).json({ ok: false, error: 'Missing event' });
+    }
+    if (!paymentId) {
+      logger.warn('[PivotCallback] Missing payment ID', {
+        ct,
+        len: req.headers['content-length'],
+        sample: JSON.stringify(anyBody).slice(0, 800),
+      });
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing payment ID (expected data.id or paymentSessionId)',
+      });
     }
 
     // 3) Whitelist event (kalau mau tetap strict)
