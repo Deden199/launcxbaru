@@ -126,6 +126,22 @@ test('pivot callback accepts PAYMENT.TEST event by default', async () => {
   assert.deepEqual(res.body, { ok: true });
 });
 
+test('pivot callback ignores missing payment ID for PAYMENT.TEST', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/payments', pivotCallbackRouter);
+
+  const res = await request(app)
+    .post('/v1/payments/callback/pivot')
+    .send({
+      event: 'PAYMENT.TEST',
+      data: { test: 'OK' }
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true });
+});
+
 test('pivot callback uses PIVOT_CALLBACK_ALLOWED_EVENTS env var', async () => {
   const original = process.env.PIVOT_CALLBACK_ALLOWED_EVENTS;
   process.env.PIVOT_CALLBACK_ALLOWED_EVENTS = 'PAYMENT.TEST';

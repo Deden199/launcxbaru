@@ -211,7 +211,7 @@ export const pivotPaymentCallback = async (req: Request, res: Response) => {
       });
       return res.status(400).json({ ok: false, error: 'Missing event' });
     }
-    if (!paymentId) {
+    if (event !== 'PAYMENT.TEST' && !paymentId) {
       logger.warn('[PivotCallback] Missing payment ID', {
         ct,
         len: req.headers['content-length'],
@@ -231,6 +231,9 @@ export const pivotPaymentCallback = async (req: Request, res: Response) => {
 
     // 4) ACK cepat
     res.status(200).type('application/json').send(JSON.stringify({ ok: true }));
+
+    // Skip background processing for test callbacks
+    if (event === 'PAYMENT.TEST') return;
 
     // 5) Background processing
     setImmediate(async () => {
