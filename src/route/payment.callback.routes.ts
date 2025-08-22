@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import pivotCallbackAuth from '../middleware/pivotCallbackAuth';
 import { pivotPaymentCallback } from '../controller/pivotCallback.controller';
 
 const pivotCallbackRouter = Router();
@@ -13,13 +12,6 @@ const pivotCallbackRouter = Router();
  *     tags:
  *       - V2 Payment
  *     security: []
- *     parameters:
- *       - in: header
- *         name: X-API-Key
- *         required: true
- *         schema:
- *           type: string
- *         description: Callback API Key (server-to-server)
  *     requestBody:
  *       description: Callback body from Pivot
  *       required: true
@@ -46,8 +38,6 @@ const pivotCallbackRouter = Router();
  *                 ok:
  *                   type: boolean
  *                   example: true
- *       '401':
- *         description: Unauthorized (invalid X-API-Key)
  *       '400':
  *         description: Bad request (invalid payload)
  *       '500':
@@ -55,7 +45,6 @@ const pivotCallbackRouter = Router();
  */
 pivotCallbackRouter.post(
   '/callback/pivot',
-  pivotCallbackAuth,
   // JSON parser khusus callback
   // (Kalau kamu butuh raw body untuk verifikasi signature, tambah verify di sini)
   (req, res, next) => {
