@@ -46,6 +46,8 @@ export interface PivotPaymentData {
 }
 
 export interface PivotCallbackBody {
-  event: PivotCallbackEvent;
+  event?: PivotCallbackEvent;
+  eventType?: PivotCallbackEvent;
+  type?: PivotCallbackEvent;
   data: PivotPaymentData;
 }

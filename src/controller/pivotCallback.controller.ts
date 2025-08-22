@@ -60,6 +60,7 @@ function extractEvent(body: any): string | undefined {
   return (
     (typeof body?.event === 'string' && body.event) ||
     (typeof body?.type === 'string' && body.type) ||
+    (typeof body?.eventType === 'string' && body.eventType) ||
     undefined
   );
 }
