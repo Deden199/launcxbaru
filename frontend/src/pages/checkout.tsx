@@ -159,7 +159,7 @@ export default function CheckoutPage() {
     const cvvOk = new RegExp(`^\\d{${cvvLen},4}$`).test(cvv);
     const amtOk = Number(onlyDigits(amount)) > 0;
     if (!buyerId) return "Buyer ID is required";
-    if (!subMerchantId) return "Sub-merchant ID is required";
+    if (!subMerchantId) return "Address ID is required";
     if (!panOk) return "Invalid card number";
     if (!expOk) return "Invalid expiry (MM/YY)";
     if (!cvvOk) return `Invalid CVV (${cvvLen} digits)`;
@@ -295,7 +295,7 @@ export default function CheckoutPage() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="buyerId" className="text-[12px]">Buyer ID</Label>
+                    <Label htmlFor="buyerId" className="text-[12px]">User ID</Label>
                     <Input
                       id="buyerId"
                       value={buyerId}
@@ -307,7 +307,7 @@ export default function CheckoutPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="subMerchantId" className="text-[12px]">Sub‑merchant ID</Label>
+                    <Label htmlFor="subMerchantId" className="text-[12px]">Address</Label>
                     <Input
                       id="subMerchantId"
                       value={subMerchantId}
@@ -481,7 +481,7 @@ export default function CheckoutPage() {
                     <span className="font-medium">{buyerId || "—"}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between text-[13px]">
-                    <span className="text-slate-600">Sub‑merchant</span>
+                    <span className="text-slate-600">Address</span>
                     <span className="font-medium">{subMerchantId || "—"}</span>
                   </div>
                 </div>
