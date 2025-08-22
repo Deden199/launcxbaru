@@ -11,6 +11,26 @@ Endpoints served under `/api/v1/payment`.
 - `GET /order/:id` – retrieve order details.
 - `GET /order/:id/status` – check payment status.
 
+## Callback Requirements
+
+Callbacks from payment providers must include a payment identifier and are processed only for specific event types.
+
+### Payment ID
+
+Include the payment ID in one of the following fields: `data.id`, `data.paymentSessionId`, or `paymentSessionId`. Callbacks missing these fields are rejected.
+
+### Allowed events
+
+Only callbacks with these events are processed:
+
+- `PAYMENT.PROCESSING`
+- `PAYMENT.PAID`
+- `CHARGE.SUCCESS`
+- `PAYMENT.CANCELLED`
+- `PAYMENT.TEST`
+
+Other events are ignored.
+
 ## Dependencies
 - Prisma Client for persistence.
 - Provider SDKs and HTTP requests via `axios`.

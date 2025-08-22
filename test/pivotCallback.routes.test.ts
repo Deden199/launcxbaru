@@ -23,6 +23,25 @@ test('pivot callback accepts JSON and returns ok', async () => {
   assert.deepEqual(res.body, { ok: true });
 });
 
+test('pivot callback returns error when payment ID is missing', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/payments', pivotCallbackRouter);
+
+  const res = await request(app)
+    .post('/v1/payments/callback/pivot')
+    .send({
+      event: 'PAYMENT.PAID',
+      data: { amount: { value: 1000, currency: 'IDR' }, status: 'PAID' }
+    });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(res.body, {
+    ok: false,
+    error: 'Missing payment ID (expected data.id or paymentSessionId)'
+  });
+});
+
 test('pivot callback handles data.paymentSessionId', async () => {
   const app = express();
   app.use(express.json());
