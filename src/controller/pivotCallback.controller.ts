@@ -4,13 +4,20 @@ import { PivotCallbackBody } from '../types/pivot-callback';
 import cardService from '../service/card.service';
 
 const CALLBACK_API_KEY = process.env.PIVOT_CALLBACK_API_KEY || '';
-
-const ALLOWED_EVENTS = new Set([
+const DEFAULT_ALLOWED_EVENTS = [
   'PAYMENT.PROCESSING',
   'PAYMENT.PAID',
   'CHARGE.SUCCESS',
   'PAYMENT.CANCELLED',
-]);
+  'PAYMENT.TEST',
+];
+
+const envEvents = process.env.PIVOT_CALLBACK_ALLOWED_EVENTS
+  ?.split(',')
+  .map((e) => e.trim())
+  .filter(Boolean);
+
+const ALLOWED_EVENTS = new Set(envEvents?.length ? envEvents : DEFAULT_ALLOWED_EVENTS);
 
 function parseDateSafe(v: unknown): Date | null {
   if (v == null) return null;

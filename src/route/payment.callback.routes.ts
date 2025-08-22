@@ -44,10 +44,10 @@ function debugBody(req: Request, _res: Response, next: NextFunction) {
  *             properties:
  *               event:
  *                 type: string
- *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED]
+ *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED, PAYMENT.TEST]
  *               eventType:
  *                 type: string
- *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED]
+ *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED, PAYMENT.TEST]
  *               data:
  *                 type: object
  *                 description: Payment Session data dari Pivot
