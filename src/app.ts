@@ -131,9 +131,9 @@ app.use('/api/v1/auth', authRoutes);       // login / register for admins and cl
 app.use('/api/v1', ewalletRoutes);         // public e-wallet endpoints
 
 /* ========== 2. PROTECTED – API-KEY (SERVER-TO-SERVER) ========== */
-app.use('/api/v1/payments', apiKeyAuth, paymentRouter);
-app.use('/api/v2/payments', paymentRouterV2);
-app.use('/api/v2/payments', pivotCallbackRouter);
+app.use('/api/v1/payments/legacy', apiKeyAuth, paymentRouter);
+app.use('/api/v1/payments', paymentRouterV2);
+app.use('/api/v1/payments', pivotCallbackRouter);
 
 // app.use('/api/v1/disbursements', apiKeyAuth, disbursementRouter);
 app.use('/api/v1', simulateRoutes);

@@ -33,7 +33,7 @@ nock('https://provider.test')
 
 const app = express();
 app.use(express.json());
-app.use('/v2/payments', paymentRouterV2);
+app.use('/v1/payments', paymentRouterV2);
 
 test('creates card session', async () => {
   const payload = {
@@ -45,7 +45,7 @@ test('creates card session', async () => {
   };
 
   nock('https://provider.test')
-    .post('/v2/payments', body => {
+    .post('/v1/payments', body => {
       assert.equal(body.mode, 'API');
       assert.equal(body.amount.value, 1000);
       assert.equal(body.amount.currency, 'IDR');
@@ -58,7 +58,7 @@ test('creates card session', async () => {
     })
     .reply(201, { id: 'sess1', encryptionKey: 'a'.repeat(64) });
 
-  const res = await request(app).post('/v2/payments/session').send(payload);
+  const res = await request(app).post('/v1/payments/session').send(payload);
 
   assert.equal(res.status, 201);
   assert.deepEqual(res.body, { id: 'sess1', encryptionKey: 'a'.repeat(64) });
@@ -68,14 +68,14 @@ test('creates card session', async () => {
 
 test('confirms card session', async () => {
   nock('https://provider.test')
-    .post('/v2/payments/abc/confirm', body => {
+    .post('/v1/payments/abc/confirm', body => {
       assert.equal(body.paymentMethod.card.encryptedCard, 'encrypted');
       return true;
     })
     .reply(200, { paymentUrl: 'https://3ds.test' });
 
   const res = await request(app)
-    .post('/v2/payments/abc/confirm')
+    .post('/v1/payments/abc/confirm')
     .send({ encryptedCard: 'encrypted' });
 
   assert.equal(res.status, 200);
@@ -86,7 +86,7 @@ test('confirms card session', async () => {
 
 test('rejects invalid encryptedCard', async () => {
   const res = await request(app)
-    .post('/v2/payments/abc/confirm')
+    .post('/v1/payments/abc/confirm')
     .send({ encryptedCard: '' });
 
   assert.equal(res.status, 400);
@@ -95,11 +95,11 @@ test('rejects invalid encryptedCard', async () => {
 
 test('handles provider error on session creation', async () => {
   nock('https://provider.test')
-    .post('/v2/payments')
+    .post('/v1/payments')
     .reply(400, { message: 'bad request' });
 
   const payload = { amount: { value: 1000, currency: 'IDR' }, buyerId: 'b1', subMerchantId: 's1' };
-  const res = await request(app).post('/v2/payments/session').send(payload);
+  const res = await request(app).post('/v1/payments/session').send(payload);
 
   assert.equal(res.status, 400);
   assert.equal(res.body.error, '[Provider 400] bad request');
@@ -109,11 +109,11 @@ test('handles provider error on session creation', async () => {
 
 test('handles provider error on confirmation', async () => {
   nock('https://provider.test')
-    .post('/v2/payments/xyz/confirm')
+    .post('/v1/payments/xyz/confirm')
     .reply(402, { message: 'payment required' });
 
   const res = await request(app)
-    .post('/v2/payments/xyz/confirm')
+    .post('/v1/payments/xyz/confirm')
     .send({ encryptedCard: 'enc' });
 
   assert.equal(res.status, 402);
