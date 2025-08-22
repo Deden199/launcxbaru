@@ -58,7 +58,11 @@ const requestNewToken = async (): Promise<string> => {
 const refreshPivotToken = async (): Promise<string> => requestNewToken();
 
 const withBearer = (token: string) => ({
-  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  headers: {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  },
   timeout: 20000,
 });
 
