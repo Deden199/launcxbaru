@@ -27,6 +27,8 @@ const paymentRouterV2 = Router();
  *             type: object
  *             required:
  *               - amount
+ *               - buyerId
+ *               - subMerchantId
  *             properties:
  *               amount:
  *                 type: object
@@ -39,6 +41,14 @@ const paymentRouterV2 = Router();
  *                     type: string
  *                     description: 3-letter ISO code
  *                     example: IDR
+ *               buyerId:
+ *                 type: string
+ *                 description: Buyer ID associated with the transaction
+ *                 example: b1
+ *               subMerchantId:
+ *                 type: string
+ *                 description: Sub-merchant identifier
+ *                 example: s1
  *               customer:
  *                 type: object
  *                 description: Customer info (opsional)

@@ -6,6 +6,8 @@ import styles from './AdminAuth.module.css';
 import { normalizeToBase64Spki, encryptHybrid } from '@/utils/hybrid-encryption';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const DEMO_BUYER_ID = 'b1';
+const DEMO_SUBMERCHANT_ID = 's1';
 
 type CaptureMethod = 'automatic' | 'manual';
 type ThreeDsMethod = 'CHALLENGE' | 'AUTO';
@@ -42,6 +44,8 @@ export default function CheckoutPage() {
 const ensureSession = async () => {
   const res = await axios.post(`${API_URL}/payments/session`, {
     amount: { value: Number(amount), currency: 'IDR' },
+    buyerId: DEMO_BUYER_ID,
+    subMerchantId: DEMO_SUBMERCHANT_ID,
   });
 
   // backend sekarang memastikan { id, encryptionKey } sudah normalized
