@@ -40,9 +40,12 @@ function debugBody(req: Request, _res: Response, next: NextFunction) {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [event, data]
+ *             required: [data]
  *             properties:
  *               event:
+ *                 type: string
+ *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED]
+ *               eventType:
  *                 type: string
  *                 enum: [PAYMENT.PROCESSING, PAYMENT.PAID, CHARGE.SUCCESS, PAYMENT.CANCELLED]
  *               data:
@@ -58,7 +61,7 @@ function debugBody(req: Request, _res: Response, next: NextFunction) {
  *                     description: Alternative ID when `id` is absent
  *                     example: psess_123
  *           example:
- *             event: PAYMENT.PAID
+ *             eventType: PAYMENT.PAID
  *             data:
  *               paymentSessionId: psess_123
  *               amount:
