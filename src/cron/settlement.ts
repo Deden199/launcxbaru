@@ -335,3 +335,21 @@ export function restartSettlementChecker(expr: string) {
   settlementTask?.destroy();
   settlementTask = createTask(expr || '0 16 * * *');
 }
+
+export async function runManualSettlement(batches = 1) {
+  cutoffTime = new Date();
+  lastCreatedAt = null;
+  lastId = null;
+
+  let settledOrders = 0;
+  let netAmount = 0;
+
+  for (let i = 0; i < batches; i++) {
+    const { settledCount, netAmount: na } = await processBatchOnce();
+    if (!settledCount) break;
+    settledOrders += settledCount;
+    netAmount += na;
+  }
+
+  return { settledOrders, netAmount };
+}
