@@ -90,3 +90,45 @@ test('pivot callback accepts eventType field', async () => {
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { ok: true });
 });
+
+test('pivot callback accepts PAYMENT.TEST event by default', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/payments', pivotCallbackRouter);
+
+  const res = await request(app)
+    .post('/v1/payments/callback/pivot')
+    .send({
+      event: 'PAYMENT.TEST',
+      data: { id: 'pay_test', amount: { value: 500, currency: 'IDR' }, status: 'PAID' }
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true });
+});
+
+test('pivot callback uses PIVOT_CALLBACK_ALLOWED_EVENTS env var', async () => {
+  const original = process.env.PIVOT_CALLBACK_ALLOWED_EVENTS;
+  process.env.PIVOT_CALLBACK_ALLOWED_EVENTS = 'PAYMENT.TEST';
+
+  delete require.cache[require.resolve('../src/controller/pivotCallback.controller')];
+  delete require.cache[require.resolve('../src/route/payment.callback.routes')];
+  const { default: envRouter } = await import('../src/route/payment.callback.routes');
+
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/payments', envRouter);
+
+  const res = await request(app)
+    .post('/v1/payments/callback/pivot')
+    .send({
+      event: 'PAYMENT.TEST',
+      data: { id: 'pay_env', amount: { value: 100, currency: 'IDR' }, status: 'PAID' }
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true });
+
+  if (original === undefined) delete process.env.PIVOT_CALLBACK_ALLOWED_EVENTS;
+  else process.env.PIVOT_CALLBACK_ALLOWED_EVENTS = original;
+});
