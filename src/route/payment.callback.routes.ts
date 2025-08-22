@@ -1,11 +1,32 @@
-import { Router } from 'express';
+import { Router, json, Request, Response, NextFunction } from 'express';
 import { pivotPaymentCallback } from '../controller/pivotCallback.controller';
 
 const pivotCallbackRouter = Router();
 
+// Parser JSON khusus route ini (longgar + limit besar)
+const jsonParser = json({
+  limit: '1mb',
+  type: (req) => {
+    const ct = String(req.headers['content-type'] || '').toLowerCase();
+    // izinkan application/json, */json, +json, dan tanpa content-type (beberapa proxy)
+    return (
+      ct === '' ||
+      ct.includes('application/json') ||
+      ct.endsWith('/json') ||
+      ct.includes('+json')
+    );
+  },
+});
+
+// (Opsional) debug tipis; boleh dihapus kalau sudah stabil
+function debugBody(req: Request, _res: Response, next: NextFunction) {
+  (req as any)._ct = req.headers['content-type'];
+  next();
+}
+
 /**
  * @swagger
- * /v2/payments/callback/pivot:
+ * /api/v1/payments/callback/pivot:
  *   post:
  *     summary: Pivot Payment Callback
  *     description: Endpoint untuk menerima callback status pembayaran dari Pivot.
@@ -45,17 +66,8 @@ const pivotCallbackRouter = Router();
  */
 pivotCallbackRouter.post(
   '/callback/pivot',
-  // JSON parser khusus callback
-  // (Kalau kamu butuh raw body untuk verifikasi signature, tambah verify di sini)
-  (req, res, next) => {
-    // batasan ukuran & content-type sudah diatur global, tapi kita pastikan
-    if (!req.is('application/json')) {
-      return res.status(415).json({ ok: false, error: 'Unsupported Media Type' });
-    }
-    next();
-  },
-  // express.json() sudah dipasang global di app.ts; kalau belum, aktifkan di sini:
-  // express.json({ limit: '200kb' }),
+  debugBody,
+  jsonParser,
   pivotPaymentCallback
 );
 
