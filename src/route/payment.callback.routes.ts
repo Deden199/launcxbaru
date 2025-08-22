@@ -48,6 +48,23 @@ function debugBody(req: Request, _res: Response, next: NextFunction) {
  *               data:
  *                 type: object
  *                 description: Payment Session data dari Pivot
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     description: Payment session identifier
+ *                     example: pay_123
+ *                   paymentSessionId:
+ *                     type: string
+ *                     description: Alternative ID when `id` is absent
+ *                     example: psess_123
+ *           example:
+ *             event: PAYMENT.PAID
+ *             data:
+ *               paymentSessionId: psess_123
+ *               amount:
+ *                 value: 1000
+ *                 currency: IDR
+ *               status: PAID
  *     responses:
  *       '200':
  *         description: Acknowledged

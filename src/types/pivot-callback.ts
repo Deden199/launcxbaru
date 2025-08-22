@@ -23,6 +23,7 @@ export interface PivotCharge {
 
 export interface PivotPaymentData {
   id: string;
+  paymentSessionId?: string;
   clientReferenceId?: string;
   amount: PivotAmount;
   autoConfirm?: boolean;
