@@ -3,10 +3,8 @@ import logger from '../logger';
 import { PivotCallbackBody } from '../types/pivot-callback';
 import cardService from '../service/card.service';
 
-// === Config ===
-const CALLBACK_API_KEY = process.env.PIVOT_CALLBACK_API_KEY || ''; // simpan di .env
+const CALLBACK_API_KEY = process.env.PIVOT_CALLBACK_API_KEY || '';
 
-// Event yang diijinkan sesuai dok
 const ALLOWED_EVENTS = new Set([
   'PAYMENT.PROCESSING',
   'PAYMENT.PAID',
@@ -14,57 +12,6 @@ const ALLOWED_EVENTS = new Set([
   'PAYMENT.CANCELLED',
 ]);
 
-/**
- * Mapper status provider -> status internal (sesuaikan dengan enum di sistemmu)
- */
-function mapPaymentStatus(providerStatus?: string) {
-  switch (providerStatus) {
-    case 'PAID':
-      return 'SUCCESS';
-    case 'PROCESSING':
-      return 'PENDING';
-    case 'CANCELLED':
-      return 'CANCELLED';
-    default:
-      // UNKNOWN / FAILED / dll → sesuaikan kalau ada
-      return providerStatus || 'UNKNOWN';
-  }
-}
-
-function toNumberSafe(v: any): number | null {
-  if (v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * Normalisasi data Pivot -> shape DB internal (contoh)
- * Silakan sesuaikan dengan model prisma/mongoose kamu.
- */
-function normalizePaymentForDB(data: PivotCallbackBody['data']) {
-  return {
-    provider: 'PIVOT',
-    providerPaymentId: data.id,
-    clientReferenceId: data.clientReferenceId,
-    paymentType: data.paymentType, // SINGLE / MULTIPLE
-    paymentMethodType: data.paymentMethod?.type, // CARD
-    statementDescriptor: data.statementDescriptor,
-    statusProvider: data.status, // e.g. PAID
-    status: mapPaymentStatus(data.status), // e.g. SUCCESS
-    amount: toNumberSafe(data.amount?.value),
-    currency: data.amount?.currency || 'IDR',
-    autoConfirm: !!data.autoConfirm,
-    mode: data.mode, // REDIRECT
-    redirectUrlSuccess: data.redirectUrl?.successReturnUrl || null,
-    redirectUrlFailure: data.redirectUrl?.failureReturnUrl || null,
-    redirectUrlExpiration: data.redirectUrl?.expirationReturnUrl || null,
-    paymentUrl: data.paymentUrl || null,
-    createdAtProvider: data.createdAt ? new Date(data.createdAt) : null,
-    updatedAtProvider: data.updatedAt ? new Date(data.updatedAt) : null,
-    expiryAtProvider: data.expiryAt ? new Date(data.expiryAt) : null,
-    metadata: data.metadata ?? null,
-  };
-}
 function parseDateSafe(v: unknown): Date | null {
   if (v == null) return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
@@ -75,77 +22,126 @@ function parseDateSafe(v: unknown): Date | null {
   return null;
 }
 
+function toNumberSafe(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapPaymentStatus(providerStatus?: string) {
+  switch (providerStatus) {
+    case 'PAID': return 'SUCCESS';
+    case 'PROCESSING': return 'PENDING';
+    case 'CANCELLED': return 'CANCELLED';
+    default: return providerStatus || 'UNKNOWN';
+  }
+}
+
+// --- Robust body parsing (body or rawBody, string/buffer) ---
+function getParsedBody(req: Request): any {
+  const b: any = (req as any).body;
+  if (b && typeof b === 'object') return b;
+
+  const raw = (req as any).rawBody;
+  if (typeof raw === 'string' && raw.trim()) {
+    try { return JSON.parse(raw); } catch {}
+  }
+  if (raw instanceof Buffer && raw.length) {
+    try { return JSON.parse(raw.toString('utf8')); } catch {}
+  }
+  if (typeof b === 'string' && b.trim()) {
+    try { return JSON.parse(b); } catch {}
+  }
+  return b ?? {};
+}
+
+// --- Flexible extractors ---
+function extractEvent(body: any): string | undefined {
+  return (
+    (typeof body?.event === 'string' && body.event) ||
+    (typeof body?.type === 'string' && body.type) ||
+    undefined
+  );
+}
+function extractPaymentId(body: any): string | undefined {
+  return (
+    body?.data?.id ??
+    body?.id ??
+    body?.paymentId ??
+    body?.paymentSessionId ??
+    body?.payment?.id ??
+    body?.charge?.paymentSessionId
+  );
+}
+
+// --- Normalizers (unchanged logic, just types defensive) ---
+function normalizePaymentForDB(data: PivotCallbackBody['data']) {
+  return {
+    provider: 'PIVOT',
+    providerPaymentId: (data as any).id,
+    clientReferenceId: (data as any).clientReferenceId,
+    paymentType: (data as any).paymentType,
+    paymentMethodType: (data as any).paymentMethod?.type,
+    statementDescriptor: (data as any).statementDescriptor,
+    statusProvider: (data as any).status,
+    status: mapPaymentStatus((data as any).status),
+    amount: toNumberSafe((data as any).amount?.value),
+    currency: (data as any).amount?.currency || 'IDR',
+    autoConfirm: !!(data as any).autoConfirm,
+    mode: (data as any).mode,
+    redirectUrlSuccess: (data as any).redirectUrl?.successReturnUrl ?? null,
+    redirectUrlFailure: (data as any).redirectUrl?.failureReturnUrl ?? null,
+    redirectUrlExpiration: (data as any).redirectUrl?.expirationReturnUrl ?? null,
+    paymentUrl: (data as any).paymentUrl ?? null,
+    createdAtProvider: parseDateSafe((data as any).createdAt),
+    updatedAtProvider: parseDateSafe((data as any).updatedAt),
+    expiryAtProvider: parseDateSafe((data as any).expiryAt),
+    metadata: (data as any).metadata ?? null,
+  };
+}
 
 function normalizeChargeForDB(
   charge: NonNullable<PivotCallbackBody['data']>['chargeDetails'][number]
 ) {
   return {
     provider: 'PIVOT',
-    providerChargeId: charge.id,
-    providerPaymentId: charge.paymentSessionId,
-    paymentSessionClientReferenceId: charge.paymentSessionClientReferenceId,
-    statementDescriptor: charge.statementDescriptor,
-    statusProvider: charge.status, // e.g. SUCCESS
-
-    authorizedAmount: toNumberSafe(charge.authorizedAmount?.value),
-    capturedAmount: toNumberSafe(charge.capturedAmount?.value),
-    amount: toNumberSafe(charge.amount?.value),
-    currency: charge.amount?.currency || 'IDR',
-    isCaptured: !!charge.isCaptured,
-
+    providerChargeId: (charge as any).id,
+    providerPaymentId: (charge as any).paymentSessionId,
+    paymentSessionClientReferenceId: (charge as any).paymentSessionClientReferenceId,
+    statementDescriptor: (charge as any).statementDescriptor,
+    statusProvider: (charge as any).status,
+    authorizedAmount: toNumberSafe((charge as any).authorizedAmount?.value),
+    capturedAmount: toNumberSafe((charge as any).capturedAmount?.value),
+    amount: toNumberSafe((charge as any).amount?.value),
+    currency: (charge as any).amount?.currency || 'IDR',
+    isCaptured: !!(charge as any).isCaptured,
     createdAtProvider: parseDateSafe((charge as any).createdAt),
     updatedAtProvider: parseDateSafe((charge as any).updatedAt),
     paidAtProvider: parseDateSafe((charge as any).paidAt),
-
-    fds: charge.fdsRiskAssessment
+    fds: (charge as any).fdsRiskAssessment
       ? {
-          score: charge.fdsRiskAssessment.score,
-          level: charge.fdsRiskAssessment.level,
-          recommendation: charge.fdsRiskAssessment.recommendation,
-          status: charge.fdsRiskAssessment.status,
-          evaluatedAt: parseDateSafe(
-            (charge.fdsRiskAssessment as any).evaluatedAt
-          ),
+          score: (charge as any).fdsRiskAssessment.score,
+          level: (charge as any).fdsRiskAssessment.level,
+          recommendation: (charge as any).fdsRiskAssessment.recommendation,
+          status: (charge as any).fdsRiskAssessment.status,
+          evaluatedAt: parseDateSafe((charge as any).fdsRiskAssessment.evaluatedAt),
         }
       : null,
   };
 }
 
-/**
- * TODO: Ganti dengan implementasi real ke DB kamu.
- * - Gunakan upsert by providerPaymentId
- * - Terapkan idempoten berdasar updatedAtProvider (jika lebih lama → skip)
- */
-async function upsertPaymentAndCharges(normalizedPayment: ReturnType<typeof normalizePaymentForDB>, chargeDetails?: PivotCallbackBody['data']['chargeDetails']) {
-  // Contoh pseudo:
-  // const existing = await prisma.payment.findUnique({ where: { providerPaymentId: normalizedPayment.providerPaymentId } });
-  // if (existing && existing.updatedAtProvider && normalizedPayment.updatedAtProvider && existing.updatedAtProvider >= normalizedPayment.updatedAtProvider) {
-  //   logger.info('[PivotCallback] Skip update (idempotent, older payload)', { id: normalizedPayment.providerPaymentId });
-  //   return;
-  // }
-  // await prisma.$transaction(async (tx) => {
-  //   await tx.payment.upsert({ ...normalizedPayment });
-  //   if (Array.isArray(chargeDetails)) {
-  //     for (const ch of chargeDetails) {
-  //       const normCh = normalizeChargeForDB(ch);
-  //       await tx.charge.upsert({
-  //         where: { providerChargeId: normCh.providerChargeId },
-  //         update: normCh,
-  //         create: normCh,
-  //       });
-  //     }
-  //   }
-  // });
-
-  // Untuk contoh, cukup log:
+// TODO: replace with real DB upsert
+async function upsertPaymentAndCharges(
+  normalizedPayment: ReturnType<typeof normalizePaymentForDB>,
+  chargeDetails?: PivotCallbackBody['data']['chargeDetails']
+) {
   logger.info('[PivotCallback] Upsert payment (sample)', {
     id: normalizedPayment.providerPaymentId,
     status: normalizedPayment.status,
     amount: normalizedPayment.amount,
   });
-
   if (Array.isArray(chargeDetails)) {
-    for (const ch of chargeDetails) {
+    for (const ch of chargeDetails as any[]) {
       const normCh = normalizeChargeForDB(ch);
       logger.info('[PivotCallback] Upsert charge (sample)', {
         chargeId: normCh.providerChargeId,
@@ -156,83 +152,79 @@ async function upsertPaymentAndCharges(normalizedPayment: ReturnType<typeof norm
   }
 }
 
-/**
- * Handler menerima callback dari Pivot, sesuai dok:
- * - Header: X-API-Key (wajib), Content-Type: application/json, Accept: application/json
- * - Body: { event, data{...} }
- */
+// === FINAL HANDLER (robust) ===
 export const pivotPaymentCallback = async (req: Request, res: Response) => {
   try {
-    // 1) Validasi header
-    const apiKey = String(req.header('x-api-key') || req.header('X-API-Key') || '');
-    if (!CALLBACK_API_KEY || apiKey !== CALLBACK_API_KEY) {
-      logger.warn('[PivotCallback] Invalid X-API-Key');
-      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    // 0) API Key (jika diaktifkan)
+    if (CALLBACK_API_KEY) {
+      const apiKey = String(req.header('x-api-key') || req.header('X-API-Key') || '');
+      if (apiKey !== CALLBACK_API_KEY) {
+        return res.status(401).json({ ok: false, error: 'Unauthorized' });
+      }
     }
 
-    const contentType = String(req.header('content-type') || '');
-    if (!contentType.toLowerCase().includes('application/json')) {
-      logger.warn('[PivotCallback] Invalid Content-Type', { contentType });
-      return res.status(415).json({ ok: false, error: 'Unsupported Media Type' });
+    // 1) Content-Type longgar (application/json, */json, +json)
+    const ct = String(req.header('content-type') || '').toLowerCase();
+    if (ct && !(ct.includes('application/json') || ct.endsWith('/json') || ct.includes('+json'))) {
+      // Jangan blokir dengan 415 — provider kadang salah header. Cukup warning.
+      logger.warn('[PivotCallback] Unexpected Content-Type', { contentType: ct });
     }
 
-    // (Optional) Accept header check – tidak wajib diblokir kalau kosong
-    const accept = String(req.header('accept') || '');
-    if (accept && !accept.toLowerCase().includes('application/json')) {
-      logger.warn('[PivotCallback] Unexpected Accept header', { accept });
-    }
+    // 2) Parse body defensif
+    const anyBody = getParsedBody(req);
+    const event = extractEvent(anyBody);
+    const paymentId = extractPaymentId(anyBody);
 
-    // 2) Validasi body minimal
-    const body = req.body as PivotCallbackBody;
-    if (!body || typeof body.event !== 'string' || !body.data || !body.data.id) {
+    if (!event || !paymentId) {
+      logger.warn('[PivotCallback] Invalid payload', {
+        ct,
+        len: req.headers['content-length'],
+        sample: JSON.stringify(anyBody).slice(0, 800),
+      });
       return res.status(400).json({ ok: false, error: 'Invalid callback payload' });
     }
 
-    if (!ALLOWED_EVENTS.has(body.event)) {
-      logger.warn('[PivotCallback] Event not allowed/recognized', { event: body.event });
-      // Tetap 200 agar tidak di-retry tanpa guna
-      return res.json({ ok: true });
+    // 3) Whitelist event (kalau mau tetap strict)
+    if (!ALLOWED_EVENTS.has(event)) {
+      logger.warn('[PivotCallback] Event not allowed/recognized', { event });
+      return res.status(200).json({ ok: true });
     }
 
-    // Log singkat
-    logger.info('[PivotCallback] Received', {
-      event: body.event,
-      id: body.data.id,
-      status: body.data.status,
-      paymentType: body.data.paymentType,
-    });
+    // 4) ACK cepat
+    res.status(200).type('application/json').send(JSON.stringify({ ok: true }));
 
-    // 3) ACK CEPAT agar Pivot tidak timeout/retry
-    res.json({ ok: true });
-
-    // 4) Proses di background (fire-and-forget)
+    // 5) Background processing
     setImmediate(async () => {
       try {
-        // Jika perlu memastikan sinkron, tarik status terbaru dari provider
-        let sourceData = body.data;
+        logger.info('[PivotCallback] Received', {
+          event,
+          id: paymentId,
+          status: anyBody?.data?.status ?? anyBody?.status,
+        });
+
+        // Sync status terbaru (opsional)
+        let sourceData = (anyBody as PivotCallbackBody).data as any;
         try {
-          const latest = await cardService.getPayment(body.data.id);
+          const latest = await cardService.getPayment(paymentId);
           if (latest?.data?.id) {
-            sourceData = latest.data; // sesuaikan shape hasil getPayment
+            sourceData = latest.data;
             logger.info('[PivotCallback] Synced latest provider status', {
-              id: body.data.id,
+              id: paymentId,
               status: latest.data.status,
             });
           }
         } catch (e: any) {
           logger.warn('[PivotCallback] getPayment failed; fallback to callback body', {
-            id: body.data.id,
+            id: paymentId,
             err: e?.response?.data || e?.message,
           });
         }
 
-        // 5) Normalisasi & upsert DB
-        const normalized = normalizePaymentForDB(sourceData);
-        await upsertPaymentAndCharges(normalized, sourceData.chargeDetails);
-
-        // 6) (Opsional) Trigger proses lanjutan kalau status final (e.g., SUCCESS)
-        // if (normalized.status === 'SUCCESS') await settlementQueue.enqueue(...)
-
+        // Normalize & upsert
+        if (sourceData) {
+          const normalized = normalizePaymentForDB(sourceData);
+          await upsertPaymentAndCharges(normalized, (sourceData as any).chargeDetails);
+        }
       } catch (bgErr: any) {
         logger.error('[PivotCallback] Background processing error', {
           err: bgErr?.response?.data || bgErr?.message,
@@ -241,10 +233,7 @@ export const pivotPaymentCallback = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     logger.error('[PivotCallback] Handler error', { err: err?.response?.data || err?.message });
-    // kalau belum sempat kirim response
-    if (!res.headersSent) {
-      return res.status(500).json({ ok: false });
-    }
+    if (!res.headersSent) return res.status(500).json({ ok: false });
   }
 };
 
