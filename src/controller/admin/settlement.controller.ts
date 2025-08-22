@@ -1,10 +1,11 @@
 import { Response } from 'express'
-import { runManualSettlement } from '../../cron/settlement'
+import { runManualSettlement, resetSettlementState } from '../../cron/settlement'
 import { AuthRequest } from '../../middleware/auth'
 import { logAdminAction } from '../../util/adminLog'
 import { startSettlementJob, getSettlementJob } from '../../worker/settlementJob'
 
 export async function manualSettlement(req: AuthRequest, res: Response) {
+  resetSettlementState()
   const result = await runManualSettlement()
   if (req.userId) {
     await logAdminAction(req.userId, 'manualSettlement', null, result)
@@ -13,6 +14,7 @@ export async function manualSettlement(req: AuthRequest, res: Response) {
 }
 
 export async function startSettlement(req: AuthRequest, res: Response) {
+  resetSettlementState()
   const jobId = startSettlementJob()
   if (req.userId) {
     await logAdminAction(req.userId, 'manualSettlementStart', null, { jobId })
