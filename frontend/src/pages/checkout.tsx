@@ -40,7 +40,7 @@ export default function CheckoutPage() {
 
  // SELALU buat session baru (fresh) setiap dipanggil
 const ensureSession = async () => {
-  const res = await axios.post(`${API_URL}/v2/payments/session`, {
+  const res = await axios.post(`${API_URL}/payments/session`, {
     amount: { value: Number(amount), currency: 'IDR' },
   });
 
@@ -111,7 +111,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     const encryptedCard = await encryptHybrid(JSON.stringify(payload), base64Spki);
 
     // 5) Confirm
-    const res = await axios.post(`${API_URL}/v2/payments/${id}/confirm`, {
+    const res = await axios.post(`${API_URL}/payments/${id}/confirm`, {
       encryptedCard,
       paymentMethodOptions: {
         card: { captureMethod, threeDsMethod },

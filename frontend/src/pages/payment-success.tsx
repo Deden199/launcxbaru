@@ -14,7 +14,7 @@ export default function PaymentSuccess() {
   useEffect(() => {
     if (id) {
       axios
-        .get(`${API_URL}/v2/payments/${id}`)
+        .get(`${API_URL}/payments/${id}`)
         .then(res => setDetails(res.data))
         .catch(() => {})
     }
