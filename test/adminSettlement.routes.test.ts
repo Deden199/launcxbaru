@@ -5,11 +5,14 @@ import request from 'supertest'
 
 // Patch runManualSettlement before loading controller
 const settlement = require('../src/cron/settlement')
-let lastBatches: number | null = null
-settlement.runManualSettlement = async (batches: number) => {
-  lastBatches = batches
+let called = 0
+settlement.runManualSettlement = async () => {
+  called++
   return { settledOrders: 0, netAmount: 0 }
 }
+
+import * as adminLog from '../src/util/adminLog'
+;(adminLog as any).logAdminAction = async () => {}
 
 const { manualSettlement } = require('../src/controller/admin/settlement.controller')
 
@@ -20,10 +23,10 @@ app.post('/settlement', (req, res) => {
   manualSettlement(req as any, res)
 })
 
-test('manual settlement passes batch count', async () => {
-  lastBatches = null
+test('manual settlement runs without batches param', async () => {
+  called = 0
   const res = await request(app).post('/settlement').send({ batches: 5 })
   assert.equal(res.status, 200)
-  assert.equal(lastBatches, 5)
+  assert.equal(called, 1)
 })
 

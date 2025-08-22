@@ -336,7 +336,7 @@ export function restartSettlementChecker(expr: string) {
   settlementTask = createTask(expr || '0 16 * * *');
 }
 
-export async function runManualSettlement(batches = 1) {
+export async function runManualSettlement() {
   cutoffTime = new Date();
   lastCreatedAt = null;
   lastId = null;
@@ -344,7 +344,7 @@ export async function runManualSettlement(batches = 1) {
   let settledOrders = 0;
   let netAmount = 0;
 
-  for (let i = 0; i < batches; i++) {
+  while (true) {
     const { settledCount, netAmount: na } = await processBatchOnce();
     if (!settledCount) break;
     settledOrders += settledCount;

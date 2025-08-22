@@ -4,14 +4,9 @@ import { AuthRequest } from '../../middleware/auth'
 import { logAdminAction } from '../../util/adminLog'
 
 export async function manualSettlement(req: AuthRequest, res: Response) {
-  const batches =
-    typeof req.body?.batches === 'number' && req.body.batches > 0
-      ? req.body.batches
-      : 1
-
-  const result = await runManualSettlement(batches)
+  const result = await runManualSettlement()
   if (req.userId) {
-    await logAdminAction(req.userId, 'manualSettlement', null, { batches })
+    await logAdminAction(req.userId, 'manualSettlement', null, result)
   }
   res.json({ data: result })
 }
