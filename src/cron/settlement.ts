@@ -346,7 +346,6 @@ export function resetSettlementState() {
   lastCreatedAt = null;
   lastId = null;
   cutoffTime = null;
-  restartSettlementChecker(settlementCronExpr);
 }
 
 export async function runManualSettlement(
@@ -357,7 +356,6 @@ export async function runManualSettlement(
     batchAmount: number
   }) => void
 ) {
-  resetSettlementState()
   cutoffTime = new Date()
   lastCreatedAt = null
   lastId = null
