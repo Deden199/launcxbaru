@@ -6,8 +6,6 @@ import styles from './AdminAuth.module.css';
 import { normalizeToBase64Spki, encryptHybrid } from '@/utils/hybrid-encryption';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-const DEMO_BUYER_ID = 'b1';
-const DEMO_SUBMERCHANT_ID = 's1';
 
 type CaptureMethod = 'automatic' | 'manual';
 type ThreeDsMethod = 'CHALLENGE' | 'AUTO';
@@ -18,6 +16,8 @@ export default function CheckoutPage() {
   const [expiry, setExpiry] = useState(''); // MM/YY
   const [cvv, setCvv] = useState('');
   const [amount, setAmount] = useState('');
+  const [buyerId, setBuyerId] = useState('');
+  const [subMerchantId, setSubMerchantId] = useState('');
 
   const [captureMethod, setCaptureMethod] = useState<CaptureMethod>('automatic');
   const [threeDsMethod, setThreeDsMethod] = useState<ThreeDsMethod>('CHALLENGE');
@@ -33,6 +33,8 @@ export default function CheckoutPage() {
     const expOk = /^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry);
     const cvvOk = /^\d{3,4}$/.test(cvv);
     const amtOk = Number(amount) > 0;
+    if (!buyerId) return 'Buyer ID is required';
+    if (!subMerchantId) return 'Sub-merchant ID is required';
     if (!panOk) return 'Invalid card number';
     if (!expOk) return 'Invalid expiry (MM/YY)';
     if (!cvvOk) return 'Invalid CVV';
@@ -44,8 +46,8 @@ export default function CheckoutPage() {
 const ensureSession = async () => {
   const res = await axios.post(`${API_URL}/payments/session`, {
     amount: { value: Number(amount), currency: 'IDR' },
-    buyerId: DEMO_BUYER_ID,
-    subMerchantId: DEMO_SUBMERCHANT_ID,
+    buyerId,
+    subMerchantId,
   });
 
   // backend sekarang memastikan { id, encryptionKey } sudah normalized
@@ -171,6 +173,28 @@ const handleSubmit = async (e: React.FormEvent) => {
         <h1 className={styles.title}>Checkout</h1>
         {error && <div className={styles.error}>{error}</div>}
         <form onSubmit={handleSubmit} className={styles.form}>
+          <div className={styles.field}>
+            <label className={styles.label}>Buyer ID</label>
+            <input
+              type="text"
+              value={buyerId}
+              onChange={e => setBuyerId(e.target.value)}
+              required
+              className={styles.input}
+            />
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>Sub-merchant ID</label>
+            <input
+              type="text"
+              value={subMerchantId}
+              onChange={e => setSubMerchantId(e.target.value)}
+              required
+              className={styles.input}
+            />
+          </div>
+
           <div className={styles.field}>
             <label className={styles.label}>Card Number</label>
             <input
