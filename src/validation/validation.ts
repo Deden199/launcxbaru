@@ -103,6 +103,16 @@ const createCardSessionValidation = [
       return true;
     }),
 
+  body('buyerId')
+    .isString()
+    .notEmpty()
+    .withMessage('buyerId is required and must be a string'),
+
+  body('subMerchantId')
+    .isString()
+    .notEmpty()
+    .withMessage('subMerchantId is required and must be a string'),
+
   body('customer')
     .optional()
     .isObject()

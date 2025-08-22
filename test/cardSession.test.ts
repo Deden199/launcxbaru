@@ -45,7 +45,7 @@ test('creates card session', async () => {
   };
 
   nock('https://provider.test')
-    .post('/v1/payments', body => {
+    .post('/v2/payments', body => {
       assert.equal(body.mode, 'API');
       assert.equal(body.amount.value, 1000);
       assert.equal(body.amount.currency, 'IDR');
@@ -68,7 +68,7 @@ test('creates card session', async () => {
 
 test('confirms card session', async () => {
   nock('https://provider.test')
-    .post('/v1/payments/abc/confirm', body => {
+    .post('/v2/payments/abc/confirm', body => {
       assert.equal(body.paymentMethod.card.encryptedCard, 'encrypted');
       return true;
     })
@@ -93,9 +93,37 @@ test('rejects invalid encryptedCard', async () => {
   assert.ok(Array.isArray(res.body.errors));
 });
 
+test('rejects missing buyerId', async () => {
+  const scope = nock('https://provider.test')
+    .post('/v2/payments')
+    .reply(201, {});
+
+  const payload = { amount: { value: 1000, currency: 'IDR' }, subMerchantId: 's1' };
+  const res = await request(app).post('/v1/payments/session').send(payload);
+
+  assert.equal(res.status, 400);
+  assert.ok(Array.isArray(res.body.errors));
+  assert.ok(!scope.isDone());
+  nock.cleanAll();
+});
+
+test('rejects missing subMerchantId', async () => {
+  const scope = nock('https://provider.test')
+    .post('/v2/payments')
+    .reply(201, {});
+
+  const payload = { amount: { value: 1000, currency: 'IDR' }, buyerId: 'b1' };
+  const res = await request(app).post('/v1/payments/session').send(payload);
+
+  assert.equal(res.status, 400);
+  assert.ok(Array.isArray(res.body.errors));
+  assert.ok(!scope.isDone());
+  nock.cleanAll();
+});
+
 test('handles provider error on session creation', async () => {
   nock('https://provider.test')
-    .post('/v1/payments')
+    .post('/v2/payments')
     .reply(400, { message: 'bad request' });
 
   const payload = { amount: { value: 1000, currency: 'IDR' }, buyerId: 'b1', subMerchantId: 's1' };
@@ -109,7 +137,7 @@ test('handles provider error on session creation', async () => {
 
 test('handles provider error on confirmation', async () => {
   nock('https://provider.test')
-    .post('/v1/payments/xyz/confirm')
+    .post('/v2/payments/xyz/confirm')
     .reply(402, { message: 'payment required' });
 
   const res = await request(app)
