@@ -1,67 +1,123 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
 
-interface Result {
+type JobStatus = 'queued' | 'running' | 'completed' | 'failed'
+
+interface Status {
   settledOrders: number
   netAmount: number
+  status: JobStatus
 }
 
 export default function ManualSettlementPage() {
   useRequireAuth()
-  const [batches, setBatches] = useState('1')
-  const [loading, setLoading] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [status, setStatus] = useState<Status | null>(null)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<Result | null>(null)
 
-  const run = async () => {
-    setLoading(true)
+  const start = async () => {
     setError('')
-    setResult(null)
+    setStatus(null)
+    setJobId(null)
+    setStarting(true)
     try {
-      const res = await api.post<{ data: Result }>('/admin/settlement', {
-        batches: Number(batches) || 1,
-      })
-      setResult(res.data.data)
+      const res = await api.post<{ data: { jobId: string } }>(
+        '/admin/settlement/start',
+        {}
+      )
+      setJobId(res.data.data.jobId)
     } catch (e: any) {
-      setError(e.response?.data?.error || 'Failed to run settlement')
-    } finally {
-      setLoading(false)
+      setError(e.response?.data?.error || 'Failed to start settlement')
+      setStarting(false)
     }
   }
 
+  useEffect(() => {
+    if (!jobId) return
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.get<{ data: Status }>(
+          `/admin/settlement/status/${jobId}`
+        )
+        const data = res.data.data
+        setStatus(data)
+        if (['completed', 'failed'].includes(data.status)) {
+          clearInterval(interval)
+          setStarting(false)
+        }
+      } catch (e: any) {
+        setError(e.response?.data?.error || 'Failed to fetch status')
+        clearInterval(interval)
+        setStarting(false)
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [jobId])
+
+  const inProgress =
+    starting || (status && ['queued', 'running'].includes(status.status))
+
+  const progressPercent =
+    status?.status === 'queued'
+      ? 25
+      : status?.status === 'running'
+        ? 75
+        : status?.status === 'completed' || status?.status === 'failed'
+          ? 100
+          : 0
+
   return (
-    <div className="p-8 max-w-md">
-      <h1 className="text-3xl font-bold mb-4">Manual Settlement</h1>
-      {error && <div className="text-red-600 mb-3">{error}</div>}
-      <div className="flex items-center space-x-2 mb-4">
-        <input
-          type="number"
-          min={1}
-          value={batches}
-          onChange={e => setBatches(e.target.value)}
-          className="border px-3 py-2 rounded w-24"
-        />
-        <button
-          onClick={run}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded"
-        >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </div>
-      {result && (
-        <div className="mt-4">
-          <p>Settled Orders: {result.settledOrders}</p>
-          <p>
-            Net Amount:{' '}
-            {result.netAmount.toLocaleString('id-ID', {
-              style: 'currency',
-              currency: 'IDR',
-            })}
-          </p>
+    <div className="p-4 md:p-8 max-w-xl mx-auto">
+      <h1 className="text-2xl md:text-3xl font-bold mb-6">
+        Manual Settlement
+      </h1>
+      {error && <div className="text-red-600 mb-4">{error}</div>}
+      <button
+        onClick={start}
+        disabled={!!inProgress}
+        className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+      >
+        {inProgress ? 'Processing…' : 'Start Settlement'}
+      </button>
+      {status && (
+        <div className="mt-6 space-y-4">
+          <div className="w-full bg-gray-200 rounded h-4 overflow-hidden">
+            <div
+              className={`h-4 ${
+                status.status === 'failed' ? 'bg-red-500' : 'bg-blue-600'
+              } transition-all`}
+              style={{ width: `${progressPercent}%` }}
+            ></div>
+          </div>
+          {['queued', 'running'].includes(status.status) && (
+            <div className="flex items-center space-x-2 text-gray-700">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+              <span>
+                {status.status === 'queued'
+                  ? 'Waiting to run…'
+                  : 'Processing…'}
+              </span>
+            </div>
+          )}
+          {status.status === 'completed' && (
+            <div className="space-y-1">
+              <p>Settled Orders: {status.settledOrders}</p>
+              <p>
+                Net Amount:{' '}
+                {status.netAmount.toLocaleString('id-ID', {
+                  style: 'currency',
+                  currency: 'IDR',
+                })}
+              </p>
+            </div>
+          )}
+          {status.status === 'failed' && (
+            <div className="text-red-600">Settlement failed.</div>
+          )}
         </div>
       )}
     </div>
