@@ -336,20 +336,33 @@ export function restartSettlementChecker(expr: string) {
   settlementTask = createTask(expr || '0 16 * * *');
 }
 
-export async function runManualSettlement() {
-  cutoffTime = new Date();
-  lastCreatedAt = null;
-  lastId = null;
+export async function runManualSettlement(
+  onProgress?: (p: {
+    settledOrders: number
+    netAmount: number
+    batchSettled: number
+    batchAmount: number
+  }) => void
+) {
+  cutoffTime = new Date()
+  lastCreatedAt = null
+  lastId = null
 
-  let settledOrders = 0;
-  let netAmount = 0;
+  let settledOrders = 0
+  let netAmount = 0
 
   while (true) {
-    const { settledCount, netAmount: na } = await processBatchOnce();
-    if (!settledCount) break;
-    settledOrders += settledCount;
-    netAmount += na;
+    const { settledCount, netAmount: na } = await processBatchOnce()
+    if (!settledCount) break
+    settledOrders += settledCount
+    netAmount += na
+    onProgress?.({
+      settledOrders,
+      netAmount,
+      batchSettled: settledCount,
+      batchAmount: na,
+    })
   }
 
-  return { settledOrders, netAmount };
+  return { settledOrders, netAmount }
 }
