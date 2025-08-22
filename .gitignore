@@ -56,6 +56,10 @@ coverage/
 *.jsx
 *.jsx.map
 
+# Allow configuration JS files
+!frontend/tailwind.config.js
+!frontend/postcss.config.js
+
 # Optional npm cache directory
 .npm/
 
