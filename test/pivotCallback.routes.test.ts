@@ -39,6 +39,26 @@ test('pivot callback handles data.paymentSessionId', async () => {
   assert.deepEqual(res.body, { ok: true });
 });
 
+test('pivot callback handles chargeDetails paymentSessionId', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/v1/payments', pivotCallbackRouter);
+
+  const res = await request(app)
+    .post('/v1/payments/callback/pivot')
+    .send({
+      event: 'PAYMENT.PAID',
+      data: {
+        chargeDetails: [{ paymentSessionId: 'psess_789' }],
+        amount: { value: 1000, currency: 'IDR' },
+        status: 'PAID'
+      }
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true });
+});
+
 test('pivot callback accepts eventType field', async () => {
   const app = express();
   app.use(express.json());

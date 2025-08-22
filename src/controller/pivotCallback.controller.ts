@@ -65,15 +65,25 @@ function extractEvent(body: any): string | undefined {
   );
 }
 function extractPaymentId(body: any): string | undefined {
-  return (
+  const topLevel =
     body?.data?.id ??
     body?.data?.paymentSessionId ??
     body?.id ??
     body?.paymentId ??
     body?.paymentSessionId ??
     body?.payment?.id ??
-    body?.charge?.paymentSessionId
-  );
+    body?.charge?.paymentSessionId;
+
+  if (topLevel) return topLevel;
+
+  const chargeDetails = body?.data?.chargeDetails;
+  if (Array.isArray(chargeDetails)) {
+    for (const ch of chargeDetails) {
+      const sid = ch?.paymentSessionId;
+      if (typeof sid === 'string' && sid) return sid;
+    }
+  }
+  return undefined;
 }
 
 // --- Normalizers (unchanged logic, just types defensive) ---
