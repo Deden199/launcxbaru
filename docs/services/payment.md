@@ -13,11 +13,11 @@ Endpoints served under `/api/v1/payment`.
 
 ## Callback Requirements
 
-Callbacks from payment providers must include a payment identifier and are processed only for specific event types.
+Callbacks from payment providers must include a payment identifier and are processed only for specific event types. The only exception is the `PAYMENT.TEST` event used for testing.
 
 ### Payment ID
 
-Include the payment ID in one of the following fields: `data.id`, `data.paymentSessionId`, or `paymentSessionId`. Callbacks missing these fields are rejected.
+Include the payment ID in one of the following fields: `data.id`, `data.paymentSessionId`, or `paymentSessionId`. Callbacks missing these fields are rejected, except when the event is `PAYMENT.TEST`.
 
 ### Allowed events
 
