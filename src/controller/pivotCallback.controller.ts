@@ -66,6 +66,7 @@ function extractEvent(body: any): string | undefined {
 function extractPaymentId(body: any): string | undefined {
   return (
     body?.data?.id ??
+    body?.data?.paymentSessionId ??
     body?.id ??
     body?.paymentId ??
     body?.paymentSessionId ??
@@ -78,7 +79,7 @@ function extractPaymentId(body: any): string | undefined {
 function normalizePaymentForDB(data: PivotCallbackBody['data']) {
   return {
     provider: 'PIVOT',
-    providerPaymentId: (data as any).id,
+    providerPaymentId: (data as any).id ?? (data as any).paymentSessionId,
     clientReferenceId: (data as any).clientReferenceId,
     paymentType: (data as any).paymentType,
     paymentMethodType: (data as any).paymentMethod?.type,
