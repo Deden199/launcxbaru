@@ -135,8 +135,9 @@ app.use('/api/v1', ewalletRoutes);
 /** ⬇⬇⬇ PENTING: pasang PIVOT CALLBACK DULU biar ga ketabrak router lain ⬇⬇⬇ */
 app.use('/api/v1/payments', pivotCallbackRouter);
 /** Legacy & V2 menyusul */
-app.use('/api/v1/payments/legacy', apiKeyAuth, paymentRouter);
+app.use('/api/v1/payments', apiKeyAuth, paymentRouter);
 app.use('/api/v1/payments', paymentRouterV2);
+app.use('/api/v1/payments/legacy', apiKeyAuth, paymentRouter);
 
 // app.use('/api/v1/disbursements', apiKeyAuth, disbursementRouter);
 app.use('/api/v1', simulateRoutes);
