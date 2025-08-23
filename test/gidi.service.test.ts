@@ -42,3 +42,32 @@ test('generateDynamicQris regenerates numeric request and transaction ids', asyn
 
   (axios as any).create = origCreate;
 });
+
+test('generateDynamicQris sanitizes DOUBLE_REQUEST_ID message', async () => {
+  const origCreate = axios.create;
+  (axios as any).create = () => ({
+    post: async () => ({
+      data: {
+        responseCode: 'DOUBLE_REQUEST_ID',
+        responseMessage: 'Gidi DOUBLE_REQUEST_ID: Double Request Id',
+      },
+    }),
+  });
+
+  const config = {
+    baseUrl,
+    merchantId: '123',
+    subMerchantId: '456',
+    credentialKey: 'secret',
+  };
+
+  await assert.rejects(
+    () => generateDynamicQris(config, { amount: 1000 }),
+    (err: any) => {
+      assert.equal(err.message, 'Gidi DOUBLE_REQUEST_ID: Double Request Id');
+      return true;
+    }
+  );
+
+  (axios as any).create = origCreate;
+});
