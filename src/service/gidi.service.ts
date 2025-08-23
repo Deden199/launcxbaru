@@ -228,7 +228,11 @@ export async function generateDynamicQris(
           throw new Error(`Gidi invalid signature: ${respMsg}`);
         }
         if (respCode === 'DOUBLE_REQUEST_ID') {
-          throw new Error(`Gidi DOUBLE_REQUEST_ID: ${respMsg || 'Double Request Id'}`);
+          const cleanedMsg = String(respMsg || 'Double Request Id').replace(
+            /^Gidi DOUBLE_REQUEST_ID:\s*/i,
+            ''
+          );
+          throw new Error(`Gidi DOUBLE_REQUEST_ID: ${cleanedMsg}`);
         }
         throw new Error(`Gidi non-success response ${respCode}: ${respMsg}`);
       }
@@ -256,9 +260,9 @@ export async function generateDynamicQris(
       const respCodeCheck = String(responseData?.responseCode || '').toUpperCase();
       if (respCodeCheck === 'DOUBLE_REQUEST_ID' || /DOUBLE_REQUEST_ID/i.test(lastErr.message || '')) {
         console.error(`[Gidi][generateDynamicQris] abort due to DOUBLE_REQUEST_ID for ${t}`);
-        throw new Error(
-          `Gidi DOUBLE_REQUEST_ID: ${responseData?.responseMessage || lastErr.message || 'Double Request Id'}`
-        );
+        const rawMsg = responseData?.responseMessage || lastErr.message || 'Double Request Id';
+        const cleanedMsg = String(rawMsg).replace(/^Gidi DOUBLE_REQUEST_ID:\s*/i, '');
+        throw new Error(`Gidi DOUBLE_REQUEST_ID: ${cleanedMsg}`);
       }
 
       let respMsg = '';
