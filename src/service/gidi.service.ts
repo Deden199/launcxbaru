@@ -119,8 +119,8 @@ export async function generateDynamicQris(
     throw new Error(`Invalid Gidi subMerchantId, must be integer-like: ${config.subMerchantId}`);
   }
 
-  let requestId = config.requestId ?? generateRequestId();
-  let transactionId = config.transactionId ?? generateRequestId();
+  let requestId = config.requestId?.trim() || generateRequestId();
+  let transactionId = config.transactionId?.trim() || generateRequestId();
   if (requestId === transactionId) {
     transactionId = generateRequestId();
     console.info(
@@ -130,10 +130,23 @@ export async function generateDynamicQris(
 
   const m = clean(config.merchantId);
   const s = clean(config.subMerchantId);
-  const r = clean(requestId);
-  const t = clean(transactionId);
+  let r = clean(requestId);
+  let t = clean(transactionId);
   const k = clean(config.credentialKey);
   const amt = String(params.amount);
+
+  if (!r) {
+    r = clean(generateRequestId());
+  }
+
+  if (!t || t === r) {
+    do {
+      t = clean(generateRequestId());
+    } while (t === r);
+    console.info(
+      '[Gidi][generateDynamicQris] sanitized transactionId matched requestId or empty; regenerated to avoid DOUBLE_REQUEST_ID.'
+    );
+  }
 
   const innerRaw = `${s}${r}${t}${amt}${k}`;
   const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex');
