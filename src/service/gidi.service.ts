@@ -152,46 +152,45 @@ export async function generateDynamicQris(
       '[Gidi][generateDynamicQris] sanitized transactionId matched requestId or empty; regenerated to avoid DOUBLE_REQUEST_ID.'
     );
   }
-
-  const innerRaw = `${s}${r}${t}${amt}${k}`;
-  const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex');
-  const outerRaw = `${m}${innerHash}`;
-  const signature = crypto.createHash('sha256').update(outerRaw, 'utf8').digest('hex');
-
-  console.debug('[Gidi][generateDynamicQris] signature components', {
-    merchantId: m,
-    subMerchantId: s,
-    requestId: r,
-    transactionId: t,
-    amount: amt,
-    credentialKeySnippet: k.slice(0, 6) + '…',
-    innerRaw,
-    innerHash,
-    outerRaw,
-    signature,
-  });
-
-  const body: Record<string, any> = {
-    merchantId: parseInt(m, 10),
-    subMerchantId: parseInt(s, 10),
-    requestId: r,
-    transactionId: t,
-    amount: params.amount,
-    signature,
-  };
-  if (params.datetimeExpired) {
-    body.datetimeExpired = params.datetimeExpired;
-  }
-
-  console.debug('[Gidi][generateDynamicQris] sending request', {
-    body: { ...body, signature: '[redacted]' },
-  });
-
   const maxRetries = 2;
   let attempt = 0;
   let lastErr: any = null;
 
   while (attempt <= maxRetries) {
+    const innerRaw = `${s}${r}${t}${amt}${k}`;
+    const innerHash = crypto.createHash('sha256').update(innerRaw, 'utf8').digest('hex');
+    const outerRaw = `${m}${innerHash}`;
+    const signature = crypto.createHash('sha256').update(outerRaw, 'utf8').digest('hex');
+
+    console.debug('[Gidi][generateDynamicQris] signature components', {
+      merchantId: m,
+      subMerchantId: s,
+      requestId: r,
+      transactionId: t,
+      amount: amt,
+      credentialKeySnippet: k.slice(0, 6) + '…',
+      innerRaw,
+      innerHash,
+      outerRaw,
+      signature,
+    });
+
+    const body: Record<string, any> = {
+      merchantId: parseInt(m, 10),
+      subMerchantId: parseInt(s, 10),
+      requestId: r,
+      transactionId: t,
+      amount: params.amount,
+      signature,
+    };
+    if (params.datetimeExpired) {
+      body.datetimeExpired = params.datetimeExpired;
+    }
+
+    console.debug('[Gidi][generateDynamicQris] sending request', {
+      body: { ...body, signature: '[redacted]' },
+    });
+
     try {
       const res = await client.post('/QrisMpm/generateDynamic', body);
       const rawResponse = res.data || {};
@@ -289,6 +288,17 @@ export async function generateDynamicQris(
       );
 
       if (attempt >= maxRetries) break;
+
+      const oldRequestId = r;
+      const oldTransactionId = t;
+      r = clean(generateRequestId());
+      do {
+        t = clean(generateRequestId());
+      } while (t === r);
+      console.info(
+        `[Gidi][generateDynamicQris] regenerating ids for retry requestId ${oldRequestId} -> ${r}, transactionId ${oldTransactionId} -> ${t}`
+      );
+
       await sleep(200 * Math.pow(2, attempt));
       attempt += 1;
     }
