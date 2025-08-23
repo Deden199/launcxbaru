@@ -139,7 +139,6 @@ export default function CheckoutPage() {
   const [cvv, setCvv] = useState("");
   const [amount, setAmount] = useState("");
   const [buyerId, setBuyerId] = useState("");
-  const [subMerchantId, setSubMerchantId] = useState("");
 
   const [captureMethod, setCaptureMethod] = useState<CaptureMethod>("automatic");
   const [threeDsMethod, setThreeDsMethod] = useState<ThreeDsMethod>("CHALLENGE");
@@ -159,7 +158,6 @@ export default function CheckoutPage() {
     const cvvOk = new RegExp(`^\\d{${cvvLen},4}$`).test(cvv);
     const amtOk = Number(onlyDigits(amount)) > 0;
     if (!buyerId) return "Buyer ID is required";
-    if (!subMerchantId) return "Address ID is required";
     if (!panOk) return "Invalid card number";
     if (!expOk) return "Invalid expiry (MM/YY)";
     if (!cvvOk) return `Invalid CVV (${cvvLen} digits)`;
@@ -171,7 +169,6 @@ export default function CheckoutPage() {
     const res = await axios.post(`${API_URL}/payments/session`, {
       amount: { value: Number(onlyDigits(amount)), currency: "IDR" },
       buyerId,
-      subMerchantId,
     });
 
     const { id, encryptionKey } = res.data || {};
@@ -301,18 +298,6 @@ export default function CheckoutPage() {
                       value={buyerId}
                       onChange={(e) => setBuyerId(e.target.value)}
                       placeholder="user_123"
-                      autoComplete="off"
-                      className="h-10 text-[14px]"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="subMerchantId" className="text-[12px]">Address</Label>
-                    <Input
-                      id="subMerchantId"
-                      value={subMerchantId}
-                      onChange={(e) => setSubMerchantId(e.target.value)}
-                      placeholder="sm_001"
                       autoComplete="off"
                       className="h-10 text-[14px]"
                       required
@@ -479,10 +464,6 @@ export default function CheckoutPage() {
                   <div className="mt-2 flex items-center justify-between text-[13px]">
                     <span className="text-slate-600">Buyer</span>
                     <span className="font-medium">{buyerId || "—"}</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-[13px]">
-                    <span className="text-slate-600">Address</span>
-                    <span className="font-medium">{subMerchantId || "—"}</span>
                   </div>
                 </div>
 

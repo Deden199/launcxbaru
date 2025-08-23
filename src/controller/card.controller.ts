@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import cardService from '../service/card.service';
 import logger from '../logger';
 
+const DEFAULT_SUB_MERCHANT_ID = '000000000000000000000000';
+
 /** Support amount in two shapes:
  *  - new: { amount: { value, currency }, ... }
  *  - legacy: { amount: number, currency: string, ... }
@@ -32,10 +34,14 @@ export const createCardSession = async (req: Request, res: Response) => {
     const orderInfo = req.body?.orderInformation ?? req.body?.order ?? undefined;
 
     const buyerId = req.body?.buyerId;
-    const subMerchantId = req.body?.subMerchantId;
+    let subMerchantId = req.body?.subMerchantId;
     const playerId = req.body?.playerId;
-    if (!buyerId || !subMerchantId) {
-      return res.status(400).json({ error: 'Missing buyerId or subMerchantId' });
+    if (!buyerId) {
+      return res.status(400).json({ error: 'Missing buyerId' });
+    }
+
+    if (typeof subMerchantId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(subMerchantId)) {
+      subMerchantId = DEFAULT_SUB_MERCHANT_ID;
     }
 
     const session = await cardService.createCardSession(

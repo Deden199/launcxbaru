@@ -107,17 +107,17 @@ test('rejects missing buyerId', async () => {
   nock.cleanAll();
 });
 
-test('rejects missing subMerchantId', async () => {
-  const scope = nock('https://provider.test')
+test('uses dummy subMerchantId when missing', async () => {
+  nock('https://provider.test')
     .post('/v2/payments')
-    .reply(201, {});
+    .reply(201, { id: 'sess2', encryptionKey: 'a'.repeat(64) });
 
   const payload = { amount: { value: 1000, currency: 'IDR' }, buyerId: 'b1' };
   const res = await request(app).post('/v1/payments/session').send(payload);
 
-  assert.equal(res.status, 400);
-  assert.ok(Array.isArray(res.body.errors));
-  assert.ok(!scope.isDone());
+  assert.equal(res.status, 201);
+  assert.deepEqual(res.body, { id: 'sess2', encryptionKey: 'a'.repeat(64) });
+  assert.ok(nock.isDone());
   nock.cleanAll();
 });
 
