@@ -40,7 +40,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const clean = (s: string) => String(s).trim();
 
 export function generateRequestId(): string {
-  return crypto.randomUUID().replace(/-/g, '');
+  // combine timestamp with random digits to ensure a numeric-only id
+  const ts = Date.now().toString();
+  const rand = Math.floor(Math.random() * 1_000_000)
+    .toString()
+    .padStart(6, '0');
+  return ts + rand;
 }
 
 function normalizeGidiResponse(rawResponse: any): {
@@ -135,11 +140,11 @@ export async function generateDynamicQris(
   const k = clean(config.credentialKey);
   const amt = String(params.amount);
 
-  if (!r) {
+  if (!/^[0-9]+$/.test(r)) {
     r = clean(generateRequestId());
   }
 
-  if (!t || t === r) {
+  if (!/^[0-9]+$/.test(t) || t === r) {
     do {
       t = clean(generateRequestId());
     } while (t === r);
