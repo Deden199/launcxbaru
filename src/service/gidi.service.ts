@@ -334,17 +334,28 @@ export async function generateDynamicQrisWithAutoPoll(
   throw new Error('Unexpected outcome from generateDynamicQris');
 }
 
+/**
+ * Generate a QR with automatic fallback handling.
+ *
+ * @param baseConfig Base configuration without identifiers.
+ * @param params     Request parameters for Gidi.
+ * @param opts.maxFallbacks Number of additional attempts after the first try.
+ *                          Each retry regenerates request and transaction IDs.
+ *                          Defaults to 5.
+ * @param opts.autoPoll Whether to poll until the QR is ready.
+ */
 export async function generateDynamicQrisFinal(
   baseConfig: Omit<GidiConfig, 'requestId' | 'transactionId'>,
   params: GenerateDynamicQrisParams,
   opts?: {
+    /** Number of extra attempts after the initial call (default 5). */
     maxFallbacks?: number;
     autoPoll?: boolean;
   }
 ): Promise<GidiQrisResult> {
-  const maxFallbacks = opts?.maxFallbacks ?? 2;
-  let fallbackCount = 0;
-  while (true) {
+  const maxFallbacks = opts?.maxFallbacks ?? 5;
+
+  for (let fallbackCount = 0; fallbackCount <= maxFallbacks; fallbackCount++) {
     const requestId = generateRequestId();
     const transactionId = generateRequestId();
     const config: GidiConfig = {
@@ -368,16 +379,23 @@ export async function generateDynamicQrisFinal(
       return result;
     } catch (e: any) {
       const msg = String(e.message || '');
-      if (/DOUBLE_REQUEST_ID/i.test(msg) && fallbackCount < maxFallbacks) {
-        fallbackCount += 1;
+      if (/DOUBLE_REQUEST_ID/i.test(msg)) {
         console.warn(
-          `[Gidi][generateDynamicQrisFinal] got DOUBLE_REQUEST_ID, regenerating ids and retrying fallback #${fallbackCount}`
+          `[Gidi][generateDynamicQrisFinal] got DOUBLE_REQUEST_ID, regenerating ids and retrying fallback #${fallbackCount + 1}`
         );
-        continue;
+      } else {
+        console.warn(
+          `[Gidi][generateDynamicQrisFinal] attempt #${fallbackCount + 1} failed: ${msg}; regenerating ids and retrying`
+        );
       }
-      throw e;
+      if (fallbackCount >= maxFallbacks) {
+        throw e;
+      }
+      // Otherwise loop to next iteration with new IDs
     }
   }
+  // Should be unreachable
+  throw new Error('generateDynamicQrisFinal exhausted retries');
 }
 
 /**
