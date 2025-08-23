@@ -113,7 +113,11 @@ app.get('/api/v1/qris/:orderId', proxyOyQris);
 // Global middleware
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(rateLimit({ windowMs: 60_000, max: 100, message: 'Too many requests, try again later.' }));
+app.use(rateLimit({
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_MAX ?? 1000),
+  message: 'Too many requests, try again later.'
+}));
 app.use(cors({ origin: true, credentials: true }));
 app.use(requestLogger);
 
