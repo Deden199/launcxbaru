@@ -295,7 +295,7 @@ if (mName === 'gidi') {
   });
   if (!gidiSubs.length) throw new Error('No active Gidi credentials');
 
-  // asumsi ResultSub<GidiConfig> memberikan config dengan placeholders kosong untuk requestId/transactionId
+  // ResultSub<GidiConfig> tidak menyertakan requestId/transactionId; keduanya akan digenerate otomatis
   const rawCfg = gidiSubs[0].config as any;
 
   // validasi minimal

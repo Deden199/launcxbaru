@@ -7,8 +7,8 @@ export interface GidiConfig {
   baseUrl: string;
   merchantId: string;        // numeric string per doc
   subMerchantId: string;     // numeric string
-  requestId?: string;        // unique per request
-  transactionId?: string;    // unique per request
+  requestId?: string;        // unique per request; auto-generated if omitted
+  transactionId?: string;    // unique per request; auto-generated if omitted
   credentialKey: string;     // secret used in signature layering
 }
 

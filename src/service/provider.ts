@@ -150,8 +150,7 @@ export async function getActiveProviders(
         baseUrl: raw.baseUrl,
         merchantId: String(raw.merchantId ?? merchantId),
         subMerchantId: String(raw.subMerchantId ?? ''), // caller should supply a proper one if needed
-        requestId: '', // caller must fill before use
-        transactionId: '', // caller must fill before use
+        // requestId & transactionId will be auto-generated in generateDynamicQris/generateDynamicQrisFinal
         credentialKey: raw.credentialKey,
       };
       return {
