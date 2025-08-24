@@ -8,7 +8,7 @@ import axios from 'axios'
 import {HilogateClient ,HilogateConfig} from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
-import { GidiClient } from '../../service/gidiClient'
+import { GidiClient, GidiError } from '../../service/gidiClient'
 import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
@@ -1159,7 +1159,16 @@ export const adminValidateAccount = async (req: Request, res: Response) => {
         merchantId: cfg.merchantId,
         credentialKey: cfg.credentialKey,
       })
-      const result = await client.inquiryAccount(bank_code, account_number, Date.now().toString())
+      let result
+      try {
+        result = await client.inquiryAccount(
+          bank_code,
+          account_number,
+          Date.now().toString()
+        )
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message })
+      }
       if (!result || !result.beneficiaryAccountName) {
         return res.status(400).json({ error: 'Invalid account' })
       }
@@ -1253,7 +1262,16 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
       const banks = await (client as HilogateClient).getBankCodes()
       bankName = banks.find(b => b.code === bank_code)?.name || ''
     } else if (provider === 'gidi') {
-      const valid = await (client as GidiClient).inquiryAccount(bank_code, account_number, Date.now().toString())
+      let valid
+      try {
+        valid = await (client as GidiClient).inquiryAccount(
+          bank_code,
+          account_number,
+          Date.now().toString()
+        )
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message })
+      }
       acctName = valid.beneficiaryAccountName
       bankName = req.body.bank_name || ''
     }
@@ -1372,6 +1390,9 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
           data: { status: DisbursementStatus.FAILED }
         })
       } catch {}
+    }
+    if (err instanceof GidiError) {
+      return res.status(400).json({ error: err.message })
     }
     if (err?.response?.data) {
       return res.status(400).json(err.response.data)

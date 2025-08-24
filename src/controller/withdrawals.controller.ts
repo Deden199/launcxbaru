@@ -3,7 +3,7 @@ import { prisma } from '../core/prisma'
 import { retryDisbursement } from '../service/hilogate.service'
 import { ClientAuthRequest } from '../middleware/clientAuth'
 import { HilogateClient,HilogateConfig } from '../service/hilogateClient'
-import { GidiClient, GidiDisbursementConfig } from '../service/gidiClient'
+import { GidiClient, GidiDisbursementConfig, GidiError } from '../service/gidiClient'
 import crypto from 'crypto'
 import { config } from '../config'
 import logger from '../logger'
@@ -570,7 +570,16 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       if (!b) return res.status(400).json({ error: 'Bank code tidak dikenal' })
       bankName = b.name
     } else if (sourceProvider === 'gidi') {
-      const inq = await (pgClient as GidiClient).inquiryAccount(bank_code, account_number, Date.now().toString())
+      let inq
+      try {
+        inq = await (pgClient as GidiClient).inquiryAccount(
+          bank_code,
+          account_number,
+          Date.now().toString()
+        )
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message })
+      }
       acctHolder = inq.beneficiaryAccountName
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
@@ -740,11 +749,14 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       } catch (rollbackErr) {
         logger.error('[requestWithdraw rollback]', rollbackErr)
       }
-      return res.status(500).json({ error: err.message || 'Internal server error' })
+      const status = err instanceof GidiError ? 400 : 500
+      return res.status(status).json({ error: err.message || 'Internal server error' })
     }
   } catch (err: any) {
     if (err.message === 'InsufficientBalance')
       return res.status(400).json({ error: 'Saldo tidak mencukupi' })
+    if (err instanceof GidiError)
+      return res.status(400).json({ error: err.message })
     logger.error('[requestWithdraw]', err)
     return res.status(500).json({ error: err.message || 'Internal server error' })
   }

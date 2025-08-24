@@ -3,6 +3,13 @@
 import axios, { AxiosInstance } from 'axios'
 import crypto from 'crypto'
 
+export class GidiError extends Error {
+  constructor(public code: string, message: string) {
+    super(`${message} (${code})`)
+    this.name = 'GidiError'
+  }
+}
+
 export interface GidiDisbursementConfig {
   baseUrl: string
   merchantId: string
@@ -44,6 +51,9 @@ export class GidiClient {
       signature: this.signInquiry(requestId),
     }
     const { data } = await this.axiosInst.post('/Transfer/InquiryAccount', body)
+    if (data.responseCode !== 'SUCCESS') {
+      throw new GidiError(data.responseCode, data.responseMessage)
+    }
     return data.responseDetail
   }
 
@@ -89,6 +99,9 @@ export class GidiClient {
       ),
     }
     const { data } = await this.axiosInst.post('/Transfer/Bifast', body)
+    if (data.responseCode !== 'SUCCESS') {
+      throw new GidiError(data.responseCode, data.responseMessage)
+    }
     return data.responseDetail
   }
 
@@ -109,6 +122,9 @@ export class GidiClient {
       signature: this.signQuery(requestId, transactionId),
     }
     const { data } = await this.axiosInst.post('/Transfer/BifastQuery', body)
+    if (data.responseCode !== 'SUCCESS') {
+      throw new GidiError(data.responseCode, data.responseMessage)
+    }
     return data.responseDetail
   }
 }
