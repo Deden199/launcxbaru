@@ -154,12 +154,13 @@ export default function TransactionsTable({
               aria-label="Filter status transaksi"
               className="w-full h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm text-neutral-100 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
             >
+              <option value="all">ALL</option>
               <option value="SUCCESS">SUCCESS</option>
               <option value="PAID">PAID</option>
               <option value="PENDING">PENDING</option>
               <option value="EXPIRED">EXPIRED</option>
-            </select>
-          </div>
+              </select>
+            </div>
 
           {/* Date range */}
           <div className="relative">

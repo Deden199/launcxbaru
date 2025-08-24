@@ -183,7 +183,7 @@ export default function DashboardPage() {
   const [from, setFrom] = useState(() => fmtISODateJak(new Date()))
   const [to, setTo] = useState(() => fmtISODateJak(new Date()))
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'SUCCESS' | 'PAID' | string>('PAID')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [withdrawStatusFilter, setWithdrawStatusFilter] = useState('')
 
   const [totalPages, setTotalPages] = useState(1)
