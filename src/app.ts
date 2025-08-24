@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import cors from 'cors';
 import cron from 'node-cron';
 import { errorHandler } from './middleware/errorHandler'
-
+import { scheduleSettlementChecker } from './cron/settlement'
 
 import subMerchantRoutes from './route/admin/subMerchant.routes';
 import pgProviderRoutes from './route/admin/pgProvider.routes';
@@ -172,5 +172,6 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 app.use(errorHandler);
 
 app.listen(config.api.port, () => {});
+scheduleSettlementChecker().catch(err => logger.error(err));
 
 export default app;
