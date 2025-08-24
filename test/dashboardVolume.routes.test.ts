@@ -9,12 +9,13 @@ import { prisma } from '../src/core/prisma'
 const { getDashboardVolume } = require('../src/controller/admin/merchant.controller')
 
 test('getDashboardVolume returns raw transactions', async () => {
-  const now = new Date()
+  const paidAt = new Date()
+  const createdAt = new Date(paidAt.getTime() - 60_000)
   ;(prisma as any).order = {
     findMany: async () => [
       {
         id: '1',
-        createdAt: now,
+        createdAt,
         playerId: 'p1',
         qrPayload: 'ref1',
         rrn: 'rrn1',
@@ -26,9 +27,9 @@ test('getDashboardVolume returns raw transactions', async () => {
         status: 'PAID',
         settlementStatus: 'DONE',
         channel: 'QR',
-        paymentReceivedTime: now,
-        settlementTime: now,
-        trxExpirationTime: now,
+        paymentReceivedTime: paidAt,
+        settlementTime: paidAt,
+        trxExpirationTime: paidAt,
       },
     ],
   }
@@ -37,14 +38,14 @@ test('getDashboardVolume returns raw transactions', async () => {
 
   const res = await request(app)
     .get('/dashboard/volume')
-    .query({ date_from: now.toISOString(), date_to: now.toISOString() })
+    .query({ date_from: paidAt.toISOString(), date_to: paidAt.toISOString() })
 
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, {
     transactions: [
       {
         id: '1',
-        date: now.toISOString(),
+        date: paidAt.toISOString(),
         reference: 'ref1',
         rrn: 'rrn1',
         playerId: 'p1',
@@ -55,9 +56,9 @@ test('getDashboardVolume returns raw transactions', async () => {
         status: 'PAID',
         settlementStatus: 'DONE',
         channel: 'QR',
-        paymentReceivedTime: now.toISOString(),
-        settlementTime: now.toISOString(),
-        trxExpirationTime: now.toISOString(),
+        paymentReceivedTime: paidAt.toISOString(),
+        settlementTime: paidAt.toISOString(),
+        trxExpirationTime: paidAt.toISOString(),
       },
     ],
   })
