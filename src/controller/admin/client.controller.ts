@@ -433,17 +433,30 @@ export const getClientDashboardAdmin = async (req: Request, res: Response) => {
 
 export const getClientWithdrawalsAdmin = async (req: AuthRequest, res: Response) => {
   const { clientId } = req.params
-  const { status, date_from, date_to, page = '1', limit = '20' } = req.query
+  const {
+    status,
+    date_from,
+    date_to,
+    fromDate,
+    toDate,
+    page = '1',
+    limit = '20',
+    ref,
+    search,
+  } = req.query
 
-  const fromDate = parseDateSafely(date_from)
-  const toDate   = parseDateSafely(date_to)
+  const fromDt = parseDateSafely(fromDate || date_from)
+  const toDt   = parseDateSafely(toDate   || date_to)
 
   const where: any = { partnerClientId: clientId }
   if (status) where.status = status as string
-  if (fromDate || toDate) {
+  if (ref || search) {
+    where.refId = { contains: String(ref || search), mode: 'insensitive' }
+  }
+  if (fromDt || toDt) {
     where.createdAt = {}
-    if (fromDate) where.createdAt.gte = fromDate
-    if (toDate)   where.createdAt.lte = toDate
+    if (fromDt) where.createdAt.gte = fromDt
+    if (toDt)   where.createdAt.lte = toDt
   }
 
   const pageNum  = Math.max(1, parseInt(page as string, 10))
