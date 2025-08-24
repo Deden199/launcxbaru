@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import apiClient from '@/lib/apiClient'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -81,11 +81,10 @@ export default function WithdrawPage() {
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
+  const [total, setTotal] = useState(0)
   const [startDate, endDate] = dateRange
 
-  // ── Fetch stabil: cache + inflight dedupe + unmount guard + abort
-  const cacheRef = useRef<Map<string, Withdrawal[]>>(new Map())
-  const inflightRef = useRef<Map<string, Promise<Withdrawal[]>>>(new Map())
+  // ── Fetch stabil: unmount guard
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -117,59 +116,56 @@ export default function WithdrawPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChild])
 
-  async function fetchAllWithdrawals(cid: string | 'all') {
-    const key = String(cid)
-    const cached = cacheRef.current.get(key)
-    if (cached) return cached
-
-    const inflight = inflightRef.current.get(key)
-    if (inflight) return inflight
-
-    const req = (async () => {
-      const controller = new AbortController()
-      const limit = 200
-      let pageNum = 1
-
-      // page 1
-      const first = await apiClient.get<{ data: Withdrawal[]; total: number }>(
-        '/client/withdrawals',
-        { params: { clientId: cid, page: pageNum, limit }, signal: controller.signal }
-      )
-      let all = first.data.data
-      const total = first.data.total
-
-      while (all.length < total) {
-        pageNum += 1
-        const res = await apiClient.get<{ data: Withdrawal[]; total: number }>(
-          '/client/withdrawals',
-          { params: { clientId: cid, page: pageNum, limit }, signal: controller.signal }
-        )
-        all = all.concat(res.data.data)
-      }
-      cacheRef.current.set(key, all)
-      inflightRef.current.delete(key)
-      return all
-    })()
-
-    inflightRef.current.set(key, req)
-    return req
+  async function fetchWithdrawals() {
+    const res = await apiClient.get<{ data: Withdrawal[]; total: number }>(
+      '/client/withdrawals',
+      {
+        params: {
+          clientId: selectedChild,
+          page,
+          limit: perPage,
+          status: statusFilter,
+          date_from: startDate?.toISOString(),
+          date_to: endDate?.toISOString(),
+          ref: searchRef,
+        },
+      },
+    )
+    return res.data
   }
 
-  // Dashboard + withdrawals on child change
+  // Dashboard on child change
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const dash = await apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>(
+          '/client/dashboard', { params: { clientId: selectedChild } }
+        )
+        if (cancelled || !mountedRef.current) return
+        setBalance(dash.data.balance)
+        setPending(dash.data.totalPending ?? 0)
+        if (children.length === 0) setChildren(dash.data.children || [])
+      } catch (e: any) {
+        if (cancelled || !mountedRef.current) return
+        setPageError(e?.message || 'Failed to load data')
+      }
+    }
+    load()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChild])
+
+  // Withdrawals - refetch on pagination/filter change
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       setLoading(true); setPageError('')
       try {
-        const dash = await apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>(
-          '/client/dashboard', { params: { clientId: selectedChild } }
-        )
-        const all = await fetchAllWithdrawals(selectedChild)
+        const res = await fetchWithdrawals()
         if (cancelled || !mountedRef.current) return
-        setBalance(dash.data.balance)
-        setPending(dash.data.totalPending ?? 0)
-        if (children.length === 0) setChildren(dash.data.children || [])
-        setWithdrawals(all)
+        setWithdrawals(res.data)
+        setTotal(res.total)
       } catch (e: any) {
         if (cancelled || !mountedRef.current) return
         setPageError(e?.message || 'Failed to load data')
@@ -181,7 +177,7 @@ export default function WithdrawPage() {
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChild])
+  }, [selectedChild, page, statusFilter, startDate, endDate, searchRef, perPage])
 
   // ── Handlers
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -260,15 +256,15 @@ export default function WithdrawPage() {
 
       const res = await apiClient.post('/client/withdrawals', body, { validateStatus: () => true })
       if (res.status === 201) {
-        cacheRef.current.delete(String(selectedChild)) // invalidate cache
-        const [dash, all] = await Promise.all([
+        const [dash, list] = await Promise.all([
           apiClient.get('/client/dashboard', { params: { clientId: selectedChild } }),
-          fetchAllWithdrawals(selectedChild),
+          fetchWithdrawals(),
         ])
         if (!mountedRef.current) return
         setBalance(dash.data.balance)
         setPending(dash.data.totalPending ?? 0)
-        setWithdrawals(all)
+        setWithdrawals(list.data)
+        setTotal(list.total)
         setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '', otp: '' }))
         setIsValid(false)
         setOpen(false)
@@ -302,26 +298,8 @@ export default function WithdrawPage() {
     XLSX.writeFile(wb, 'withdrawals.xlsx')
   }
 
-  // ── Filter + paginate (client side)
-  const filtered = useMemo(() => {
-    return withdrawals.filter(w => {
-      if (searchRef && !w.refId.toLowerCase().includes(searchRef.toLowerCase())) return false
-      if (statusFilter && w.status !== statusFilter) return false
-      const d = new Date(w.createdAt)
-      if (startDate && d < startDate) return false
-      if (endDate) {
-        const eod = new Date(endDate.getTime()); eod.setHours(23,59,59,999)
-        if (d > eod) return false
-      }
-      return true
-    })
-  }, [withdrawals, searchRef, statusFilter, startDate, endDate])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
-  const pageData = useMemo(
-    () => filtered.slice((page - 1) * perPage, page * perPage),
-    [filtered, page, perPage]
-  )
+  // ── Pagination
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
 
   return (
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100">
@@ -505,7 +483,7 @@ export default function WithdrawPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageData.length ? pageData.map(w => (
+                  {withdrawals.length ? withdrawals.map(w => (
                     <tr key={w.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-900/60">
                       <td className="px-3 py-2 whitespace-nowrap">
                         {new Date(w.createdAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' })}
