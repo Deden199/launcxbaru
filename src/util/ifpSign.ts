@@ -1,11 +1,12 @@
 import crypto from 'crypto';
-import { readFileSync } from 'fs';
-import path from 'path';
+import fs from 'fs';
 
-const PRIVATE_KEY = readFileSync(
-  process.env.IFP_PRIV_PEM_PATH     || '/opt/ifp_keys/private_key.pem',
-  'utf8'
-);
+const keyPath =
+  process.env.IFP_PRIV_PEM_PATH || '/opt/ifp_keys/private_key.pem';
+if (!fs.existsSync(keyPath)) {
+  throw new Error(`IFP private key not found at: ${keyPath}`);
+}
+const PRIVATE_KEY = fs.readFileSync(keyPath, 'utf8');
 const CLIENT_SECRET = process.env.IFP_CLIENT_SECRET!;
 
 /** RSA-SHA256 → Base64, untuk getAccessToken */
