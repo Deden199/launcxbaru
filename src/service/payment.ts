@@ -20,6 +20,7 @@ import { config } from '../config';
 import { getActiveProvidersForClient, Provider } from './provider';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
+import { IfpClient, IfpConfig } from './ifpClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQrisFinal, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
@@ -376,7 +377,87 @@ if (mName === 'gidi') {
     expiredTs,
   };
 }
-  // —— GV branch —— 
+
+// ─── IFP branch ───────────────────────────────────
+if (mName === 'ifp') {
+  const merchantRec = await prisma.merchant.findFirst({ where: { name: 'ifp' } });
+  if (!merchantRec) throw new Error('Internal IFP merchant not found');
+
+  const trx = await prisma.transaction_request.create({
+    data: {
+      merchantId:       merchantRec.id,
+      subMerchantId:    request.subMerchantId,
+      buyerId:          request.buyer,
+      playerId:         pid,
+      amount,
+      status:           'PENDING',
+      settlementAmount: amount,
+    },
+  });
+  const refId = trx.id;
+
+  const ifpSubs = await getActiveProviders(merchantRec.id, 'ifp', {
+    schedule: forceSchedule as any || undefined,
+  });
+  if (!ifpSubs.length) throw new Error('No active IFP credentials');
+  const ifpCfg = ifpSubs[0].config as IfpConfig;
+  const ifpClient = new IfpClient(ifpCfg);
+
+  const payResp = await ifpClient.createQrPayment({
+    external_id: refId,
+    order_id: refId,
+    amount,
+    customer_details: { customer_id: pid },
+    wallet_details: {},
+    callback_url: config.api.callbackUrl,
+  });
+  const respData = (payResp && payResp.data) ? payResp.data : payResp;
+  const qrPayload =
+    respData.qrPayload ||
+    respData.qr_payload ||
+    respData.qrString ||
+    respData.qr_string ||
+    respData.qr_url ||
+    null;
+
+  await prisma.transaction_response.create({
+    data: {
+      referenceId: refId,
+      responseBody: payResp,
+      playerId: pid,
+    },
+  });
+
+  const host = pickRandomHost();
+  const checkoutUrl = `${host}/order/${refId}`;
+
+  await prisma.order.create({
+    data: {
+      id: refId,
+      userId: request.buyer,
+      merchantId: merchantRec.id,
+      subMerchant: { connect: { id: request.subMerchantId } },
+      partnerClient: { connect: { id: request.buyer } },
+      playerId: pid,
+      amount,
+      channel: 'ifp',
+      status: 'PENDING',
+      qrPayload,
+      checkoutUrl,
+      fee3rdParty: 0,
+      settlementAmount: null,
+    },
+  });
+
+  return {
+    orderId: refId,
+    checkoutUrl,
+    qrPayload: qrPayload || undefined,
+    playerId: pid,
+    totalAmount: amount,
+  };
+}
+  // —— GV branch ——
   if (mName === 'gv' || mName === 'gudangvoucher') {
     let transactionObj;
     try {

@@ -6,12 +6,13 @@ import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
 import { GidiConfig } from '../service/gidi.service';
+import { IfpConfig } from '../service/ifpClient';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
   id: string;
-  provider: 'hilogate' | 'oy' | 'gidi';
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp';
   fee: number;
   credentials: unknown;
   schedule: unknown;
@@ -69,13 +70,20 @@ export async function getActiveProviders(
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<GidiConfig>[]>;
 
+// overload untuk IFP
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'ifp',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<IfpConfig>[]>;
+
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy' | 'gidi',
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp',
   opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
-  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig>>
+  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig> | ResultSub<IfpConfig>>
 > {
   const isWeekend = opts.schedule
     ? opts.schedule === 'weekend'
@@ -139,7 +147,7 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<OyConfig>;
-    } else {
+    } else if (provider === 'gidi') {
       // gidi
       const raw = s.credentials as any;
       if (!raw?.baseUrl || !raw?.credentialKey) {
@@ -157,6 +165,20 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<GidiConfig>;
+    } else {
+      const raw = s.credentials as any;
+      if (!raw?.baseUrl || !raw?.clientId || !raw?.clientSecret) {
+        throw new Error(`Invalid IFP credentials for sub_merchant ${s.id}`);
+      }
+      const cfg: IfpConfig = {
+        baseUrl: raw.baseUrl,
+        clientId: raw.clientId,
+        clientSecret: raw.clientSecret,
+      };
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<IfpConfig>;
     }
   });
 }
