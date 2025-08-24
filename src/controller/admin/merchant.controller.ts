@@ -629,7 +629,37 @@ export async function getDashboardVolume(req: Request, res: Response) {
         count: Number(r.count ?? 0),
       }));
 
-    return res.json({ buckets });
+    // Ensure continuous buckets between dateFrom and dateTo
+    const bucketMap = new Map(buckets.map(b => [b.bucket, b]));
+
+    // Helper to truncate a date to the start of the bucket
+    const truncate = (d: Date) => {
+      const nd = new Date(d);
+      nd.setUTCMinutes(0, 0, 0);
+      if (gran === 'day') nd.setUTCHours(0);
+      return nd;
+    };
+
+    const start = truncate(dateFrom);
+    const end = truncate(dateTo);
+
+    const padded: typeof buckets = [];
+    for (let cursor = start; cursor <= end; ) {
+      const bucketStr = cursor.toISOString().split('.')[0] + '.000Z';
+      const found = bucketMap.get(bucketStr);
+      if (found) {
+        padded.push(found);
+      } else {
+        padded.push({ bucket: bucketStr, totalAmount: 0, count: 0 });
+      }
+      if (gran === 'day') {
+        cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+      } else {
+        cursor = new Date(cursor.getTime() + 60 * 60 * 1000);
+      }
+    }
+
+    return res.json({ buckets: padded });
   } catch (err: any) {
     console.error('[getDashboardVolume]', err);
     return res.status(500).json({ error: 'Failed to fetch dashboard volume' });
