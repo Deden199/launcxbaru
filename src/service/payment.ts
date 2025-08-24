@@ -44,6 +44,14 @@ export interface Transaction {
   playerId?: string;
   subMerchantId: string;         // ← tambahkan
   sourceProvider: string;       // ← tambahkan
+  paymentChannel?: string;
+  transactionDescription?: string;
+  expiredTime?: number;
+  customerEmail?: string;
+  customerFullName?: string;
+  customerPhone?: string;
+  walletId?: string;
+  walletIdType?: string;
 }
 export interface OrderRequest {
   amount: number;
@@ -295,13 +303,36 @@ if (mName === 'ifp') {
   const ifpCfg = ifpSubs[0].config as IfpConfig;
   const ifpClient = new IfpClient(ifpCfg);
 
+  const paymentChannel = request.paymentChannel || ifpCfg.paymentChannel || 'qris';
+
+  const paymentDetails: any = {
+    amount,
+    transaction_description:
+      request.transactionDescription || `Payment ${refId}`,
+  };
+  if (request.expiredTime) paymentDetails.expired_time = request.expiredTime;
+
+  const customerDetails: any = {
+    email: request.customerEmail || `${pid}@mail.local`,
+    full_name: request.customerFullName || pid,
+  };
+  if (request.customerPhone) customerDetails.phone = request.customerPhone;
+
+  const walletDetails: any = {
+    id: request.walletId || pid,
+    id_type: request.walletIdType || 'phone_number',
+  };
+
   const qrResp = await ifpClient.createQrPayment({
     external_id: refId,
     order_id: refId,
     amount,
-    payment_channel: 'qris',
-    customer_details: { id: pid, name: pid },
-    wallet_details: {},
+    currency: 'IDR',
+    payment_method: 'wallet',
+    payment_channel: paymentChannel,
+    payment_details: paymentDetails,
+    customer_details: customerDetails,
+    wallet_details: walletDetails,
     callback_url: config.api.callbackUrl,
   });
 

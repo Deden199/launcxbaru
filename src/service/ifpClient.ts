@@ -40,17 +40,20 @@ export interface IfpConfig {
   baseUrl: string;
   clientId: string;
   clientSecret: string;
+  paymentChannel?: string;
 }
 
 export class IfpClient {
   private baseUrl: string;
   private clientId: string;
   private clientSecret: string;
+  private paymentChannel?: string;
 
   constructor(opts: Partial<IfpConfig> = {}) {
     this.baseUrl = opts.baseUrl || process.env.IFP_BASE_URL || process.env.SENMO_DNS || '';
     this.clientId = opts.clientId || process.env.IFP_CLIENT_ID || '';
     this.clientSecret = opts.clientSecret || process.env.IFP_CLIENT_SECRET || '';
+    this.paymentChannel = opts.paymentChannel;
   }
 
   private async getToken(): Promise<string> {

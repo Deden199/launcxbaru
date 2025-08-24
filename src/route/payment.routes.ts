@@ -37,6 +37,22 @@ import apiKeyAuth from '../middleware/apiKeyAuth'
  *           type: string
  *         sourceProvider:
  *           type: string
+ *         paymentChannel:
+ *           type: string
+ *         customerEmail:
+ *           type: string
+ *         customerFullName:
+ *           type: string
+ *         customerPhone:
+ *           type: string
+ *         walletId:
+ *           type: string
+ *         walletIdType:
+ *           type: string
+ *         transactionDescription:
+ *           type: string
+ *         expiredTime:
+ *           type: number
  *     OrderRequest:
  *       type: object
  *       required:
