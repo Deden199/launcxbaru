@@ -18,6 +18,15 @@ export interface QrPaymentRequest {
   customer_details?: Record<string, any>;
   wallet_details?: Record<string, any>;
   callback_url?: string;
+  currency?: string;
+  payment_method?: string;
+  payment_channel: string;
+  payment_details?: {
+    amount?: number;
+    expired_time?: number;
+    transaction_description?: string;
+    [key: string]: any;
+  };
   [key: string]: any;
 }
 
@@ -69,11 +78,19 @@ export class IfpClient {
     let body: any;
     let extId = req.external_id || Date.now().toString();
 
+    const paymentDetails = {
+      amount: req.amount,
+      ...(req.payment_details || {}),
+    };
+
     if (req.external_id) {
       body = {
         external_id: req.external_id,
         order_id: req.order_id || req.external_id,
-        amount: req.amount,
+        currency: req.currency || 'IDR',
+        payment_method: req.payment_method || 'wallet',
+        payment_channel: req.payment_channel,
+        payment_details: paymentDetails,
         customer_details: req.customer_details || {},
         wallet_details: req.wallet_details || {},
         callback_url: req.callback_url,
@@ -81,7 +98,10 @@ export class IfpClient {
     } else {
       body = {
         partnerReferenceNo: req.customer?.id || extId,
-        amount: { value: Number(req.amount).toFixed(2), currency: 'IDR' },
+        currency: req.currency || 'IDR',
+        payment_method: req.payment_method || 'wallet',
+        payment_channel: req.payment_channel,
+        payment_details: paymentDetails,
         additionalInfo: {
           customerName: req.customer?.name,
           customerPhone: req.customer?.phone,

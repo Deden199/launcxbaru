@@ -23,7 +23,7 @@ if (!amount || !customer.name) {
 (async () => {
   try {
     const client = new IfpClient();
-    const res = await client.createQrPayment({ amount, customer });
+    const res = await client.createQrPayment({ amount, customer, payment_channel: 'qris' });
     console.log('qr_string:', res.qr_string);
     console.log('qr_url   :', res.qr_url);
   } catch (err: any) {

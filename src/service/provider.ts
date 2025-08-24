@@ -255,6 +255,7 @@ export async function getActiveProvidersForClient(
         const client = new IfpClient(cfg);
         const resp = await client.createQrPayment({
           amount,
+          payment_channel: 'qris',
           customer: { name: orderId },
         });
         return resp.qr_string;
@@ -265,6 +266,7 @@ export async function getActiveProvidersForClient(
         const client = new IfpClient(cfg);
         const resp = await client.createQrPayment({
           amount,
+          payment_channel: 'qris',
           customer: { name: orderId },
         });
         return resp.qr_url;

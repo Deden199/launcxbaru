@@ -299,6 +299,7 @@ if (mName === 'ifp') {
     external_id: refId,
     order_id: refId,
     amount,
+    payment_channel: 'qris',
     customer_details: { id: pid, name: pid },
     wallet_details: {},
     callback_url: config.api.callbackUrl,
