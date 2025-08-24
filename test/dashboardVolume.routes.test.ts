@@ -5,15 +5,32 @@ import request from 'supertest'
 
 process.env.JWT_SECRET = 'test'
 
-import { prisma } from '../src/core/prisma'
+const prisma = { order: { findMany: async () => [] } } as any
+(require as any).cache[require.resolve('../src/core/prisma')] = { exports: { prisma } }
 const { getDashboardVolume } = require('../src/controller/admin/merchant.controller')
 
-test('getDashboardVolume returns points', async () => {
-  const ts = new Date().toISOString()
-  let receivedPipeline: any[] | undefined
-  ;(prisma as any).order.aggregateRaw = async (args: any) => {
-    receivedPipeline = args.pipeline
-    return [{ timestamp: ts, totalAmount: 100, count: 2 }]
+test('getDashboardVolume groups orders', async () => {
+  const orders = [
+    {
+      amount: 100,
+      paymentReceivedTime: new Date('2023-01-01T00:10:00.000Z'),
+      createdAt: new Date('2023-01-01T00:05:00.000Z'),
+    },
+    {
+      amount: 200,
+      paymentReceivedTime: null,
+      createdAt: new Date('2023-01-01T00:50:00.000Z'),
+    },
+    {
+      amount: 300,
+      paymentReceivedTime: new Date('2023-01-01T01:20:00.000Z'),
+      createdAt: new Date('2023-01-01T01:00:00.000Z'),
+    },
+  ]
+  let receivedWhere: any
+  ;(prisma as any).order.findMany = async (args: any) => {
+    receivedWhere = args.where
+    return orders
   }
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
@@ -24,22 +41,15 @@ test('getDashboardVolume returns points', async () => {
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, {
     points: [
-      {
-        timestamp: ts,
-        totalAmount: 100,
-        count: 2,
-      },
+      { timestamp: '2023-01-01T00:00:00.000Z', totalAmount: 300, count: 2 },
+      { timestamp: '2023-01-01T01:00:00.000Z', totalAmount: 300, count: 1 },
     ],
   })
-  assert(receivedPipeline?.some(s => s.$project?.timestamp?.$dateTrunc))
-  assert(receivedPipeline?.some(s => s.$group?.count))
-  assert(receivedPipeline?.[0]?.$addFields?.baseTime?.$toDate)
-  assert(receivedPipeline?.[1]?.$match?.baseTime)
-  assert(receivedPipeline?.[1]?.$match?.status?.$in)
+  assert(receivedWhere?.AND?.some((f: any) => f.status?.in))
 })
 
 test('getDashboardVolume handles empty result', async () => {
-  ;(prisma as any).order.aggregateRaw = async () => []
+  ;(prisma as any).order.findMany = async () => []
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
 

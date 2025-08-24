@@ -558,68 +558,71 @@ export async function getDashboardVolume(req: Request, res: Response) {
     }
 
     const statuses = statusList ?? [...allowedStatuses];
-    const match: any = {
-      baseTime: { $gte: dateFrom, $lte: dateTo },
-      status: { $in: statuses },
-    };
+
+    const filters: any[] = [
+      {
+        OR: [
+          { paymentReceivedTime: { gte: dateFrom, lte: dateTo } },
+          {
+            AND: [
+              { paymentReceivedTime: null },
+              { createdAt: { gte: dateFrom, lte: dateTo } },
+            ],
+          },
+        ],
+      },
+      { status: { in: statuses } },
+    ];
 
     if (partnerClientId && partnerClientId !== 'all') {
-      match.partnerClientId = partnerClientId;
+      filters.push({ partnerClientId });
     }
 
     if (searchStr) {
-      const regex = { $regex: searchStr, $options: 'i' };
-      match.$or = [{ _id: regex }, { rrn: regex }, { playerId: regex }];
+      filters.push({
+        OR: [
+          { id: { contains: searchStr, mode: 'insensitive' } },
+          { rrn: { contains: searchStr, mode: 'insensitive' } },
+          { playerId: { contains: searchStr, mode: 'insensitive' } },
+        ],
+      });
     }
 
-    const pipeline: any[] = [
-      {
-        $addFields: {
-          baseTime: {
-            $toDate: {
-              $ifNull: ['$paymentReceivedTime', '$createdAt'],
-            },
-          },
-        },
-      },
-      { $match: match },
-      {
-        $project: {
-          timestamp: {
-            $dateTrunc: { date: '$baseTime', unit: gran },
-          },
-          amount: '$amount',
-        },
-      },
-      {
-        $group: {
-          _id: '$timestamp',
-          totalAmount: { $sum: '$amount' },
-          count: { $count: {} },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          timestamp: '$_id',
-          totalAmount: 1,
-          count: 1,
-        },
-      },
-      { $sort: { timestamp: 1 } },
-    ];
+    const where = { AND: filters };
 
-    const rows = (await prisma.order.aggregateRaw({ pipeline })) as unknown as {
-      timestamp: string;
-      totalAmount: number;
-      count: number;
-    }[];
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        amount: true,
+        paymentReceivedTime: true,
+        createdAt: true,
+      },
+    });
 
-    const points = rows.map(r => ({
-      timestamp: r.timestamp,
-      totalAmount: Number(r.totalAmount ?? 0),
-      count: Number(r.count ?? 0),
-    }));
+    const map = new Map<string, { totalAmount: number; count: number }>();
+
+    for (const o of orders) {
+      const baseTime = o.paymentReceivedTime ?? o.createdAt;
+      const dt = new Date(baseTime);
+      if (gran === 'day') {
+        dt.setUTCHours(0, 0, 0, 0);
+      } else {
+        dt.setUTCMinutes(0, 0, 0);
+      }
+      const key = dt.toISOString();
+      const agg = map.get(key) || { totalAmount: 0, count: 0 };
+      agg.totalAmount += Number(o.amount ?? 0);
+      agg.count += 1;
+      map.set(key, agg);
+    }
+
+    const points = Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([timestamp, { totalAmount, count }]) => ({
+        timestamp,
+        totalAmount,
+        count,
+      }));
 
     return res.json({ points });
   } catch (err: any) {
