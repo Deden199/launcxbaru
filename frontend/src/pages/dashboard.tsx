@@ -137,7 +137,7 @@ function getGranularity(
   startDate: Date | null,
   endDate: Date | null
 ): Granularity {
-  if (range === 'today') return 'hour'
+  if (range === 'today' || range === 'yesterday') return 'hour'
   if (range === 'custom' && startDate && endDate && isSameJakDay(startDate, endDate)) return 'hour'
   return 'day'
 }
@@ -666,11 +666,15 @@ export default function DashboardPage() {
 
   const volumeTitle = (() => {
     if (granularity === 'hour') {
-      const day =
-        range === 'today'
-          ? nowJak().toLocaleDateString('id-ID', { timeZone: TZ })
-          : (startDate || new Date()).toLocaleDateString('id-ID', { timeZone: TZ })
-      return `Payment Volume (${day} • per jam)`
+      let day: Date
+      if (range === 'today') {
+        day = nowJak()
+      } else if (range === 'yesterday') {
+        day = getPresetBounds('yesterday').start
+      } else {
+        day = startDate || nowJak()
+      }
+      return `Payment Volume (${day.toLocaleDateString('id-ID', { timeZone: TZ })} • per jam)`
     }
     if (range === 'custom' && startDate && endDate) {
       return `Payment Volume (${startDate.toLocaleDateString('id-ID')} – ${endDate.toLocaleDateString('id-ID')})`
