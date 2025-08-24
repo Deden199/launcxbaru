@@ -532,10 +532,6 @@ export async function getDashboardVolume(req: Request, res: Response) {
       dateToParsed && !isNaN(dateToParsed.getTime()) ? dateToParsed : defaultEnd;
 
     const gran = granularity === 'day' ? 'day' : 'hour';
-    const dateFormat =
-      gran === 'day'
-        ? '%Y-%m-%dT00:00:00.000Z'
-        : '%Y-%m-%dT%H:00:00.000Z';
 
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
@@ -595,11 +591,10 @@ export async function getDashboardVolume(req: Request, res: Response) {
       { $match: match },
       {
         $project: {
-          bucket: {
-            $dateToString: {
+          timestamp: {
+            $dateTrunc: {
               date: { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
-              format: dateFormat,
-              timezone: 'UTC',
+              unit: gran,
             },
           },
           amount: '$amount',
@@ -607,59 +602,35 @@ export async function getDashboardVolume(req: Request, res: Response) {
       },
       {
         $group: {
-          _id: '$bucket',
+          _id: '$timestamp',
           totalAmount: { $sum: '$amount' },
-          count: { $sum: 1 },
+          count: { $count: {} },
         },
       },
-      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          timestamp: '$_id',
+          totalAmount: 1,
+          count: 1,
+        },
+      },
+      { $sort: { timestamp: 1 } },
     ];
 
     const rows = (await prisma.order.aggregateRaw({ pipeline })) as unknown as {
-      _id: string | null;
+      timestamp: string;
       totalAmount: number;
       count: number;
     }[];
 
-    const buckets = rows
-      .filter(r => r._id != null)
-      .map(r => ({
-        bucket: r._id as string,
-        totalAmount: Number(r.totalAmount ?? 0),
-        count: Number(r.count ?? 0),
-      }));
+    const points = rows.map(r => ({
+      timestamp: r.timestamp,
+      totalAmount: Number(r.totalAmount ?? 0),
+      count: Number(r.count ?? 0),
+    }));
 
-    // Ensure continuous buckets between dateFrom and dateTo
-    const bucketMap = new Map(buckets.map(b => [b.bucket, b]));
-
-    // Helper to truncate a date to the start of the bucket
-    const truncate = (d: Date) => {
-      const nd = new Date(d);
-      nd.setUTCMinutes(0, 0, 0);
-      if (gran === 'day') nd.setUTCHours(0);
-      return nd;
-    };
-
-    const start = truncate(dateFrom);
-    const end = truncate(dateTo);
-
-    const padded: typeof buckets = [];
-    for (let cursor = start; cursor <= end; ) {
-      const bucketStr = cursor.toISOString().split('.')[0] + '.000Z';
-      const found = bucketMap.get(bucketStr);
-      if (found) {
-        padded.push(found);
-      } else {
-        padded.push({ bucket: bucketStr, totalAmount: 0, count: 0 });
-      }
-      if (gran === 'day') {
-        cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
-      } else {
-        cursor = new Date(cursor.getTime() + 60 * 60 * 1000);
-      }
-    }
-
-    return res.json({ buckets: padded });
+    return res.json({ points });
   } catch (err: any) {
     console.error('[getDashboardVolume]', err);
     return res.status(500).json({ error: 'Failed to fetch dashboard volume' });
