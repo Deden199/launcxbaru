@@ -20,6 +20,7 @@ import { config } from '../config';
 import { getActiveProvidersForClient, Provider } from './provider';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from './oyClient';
+import { IfpClient, IfpConfig } from './ifpClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQrisFinal, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
@@ -266,6 +267,85 @@ const qrResp = await oyClient.createQRISTransaction({
     playerId:    pid,
     totalAmount: amount,
   }
+}
+
+
+if (mName === 'ifp') {
+  const merchantRec = await prisma.merchant.findFirst({ where: { name: 'ifp' } });
+  if (!merchantRec) throw new Error('Internal IFP merchant not found');
+
+  const trx = await prisma.transaction_request.create({
+    data: {
+      merchantId:      merchantRec.id,
+      subMerchantId:   request.subMerchantId,
+      buyerId:         request.buyer,
+      playerId:        pid,
+      amount,
+      status:          'PENDING',
+      settlementAmount: amount,
+    },
+  });
+  const refId = trx.id;
+
+  const ifpSubs = await getActiveProviders(merchantRec.id, 'ifp', {
+    schedule: forceSchedule as any || undefined,
+  });
+  if (!ifpSubs.length) throw new Error('No active IFP credentials');
+
+  const ifpCfg = ifpSubs[0].config as IfpConfig;
+  const ifpClient = new IfpClient(ifpCfg);
+
+  const qrResp = await ifpClient.createQrPayment({
+    external_id: refId,
+    order_id: refId,
+    amount,
+    customer_details: { id: pid, name: pid },
+    wallet_details: {},
+    callback_url: config.api.callbackUrl,
+  });
+
+  await prisma.transaction_response.create({
+    data: {
+      referenceId: refId,
+      responseBody: qrResp,
+      playerId: pid,
+    },
+  });
+
+  const host = pickRandomHost();
+  const checkoutUrl = `${host}/order/${refId}`;
+  const qrPayload =
+    (qrResp as any).qr_string ||
+    (qrResp as any).qrString ||
+    (qrResp as any).qr_url ||
+    (qrResp as any).qrUrl ||
+    '';
+
+  await prisma.order.create({
+    data: {
+      id:            refId,
+      userId:        request.buyer,
+      merchantId:    merchantRec.id,
+      subMerchant:   { connect: { id: request.subMerchantId } },
+      partnerClient: { connect: { id: request.buyer } },
+      playerId:      pid,
+      amount,
+      channel:       'ifp',
+      status:        'PENDING',
+      qrPayload,
+      checkoutUrl,
+      fee3rdParty:   0,
+      settlementAmount: null,
+    },
+  });
+
+  return {
+    orderId:     refId,
+    checkoutUrl,
+    qrPayload,
+    playerId:    pid,
+    totalAmount: amount,
+  };
 }
 
 

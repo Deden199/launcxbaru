@@ -12,7 +12,13 @@ export interface QrCustomer {
 
 export interface QrPaymentRequest {
   amount: number;
-  customer: QrCustomer;
+  customer?: QrCustomer;
+  external_id?: string;
+  order_id?: string;
+  customer_details?: Record<string, any>;
+  wallet_details?: Record<string, any>;
+  callback_url?: string;
+  [key: string]: any;
 }
 
 export interface QrPaymentResponse {
@@ -59,15 +65,30 @@ export class IfpClient {
   async createQrPayment(req: QrPaymentRequest): Promise<QrPaymentResponse> {
     const token = await this.getToken();
     const ts = isoTimestamp();
-    const body = {
-      partnerReferenceNo: req.customer.id || Date.now().toString(),
-      amount: { value: Number(req.amount).toFixed(2), currency: 'IDR' },
-      additionalInfo: {
-        customerName: req.customer.name,
-        customerPhone: req.customer.phone,
-        customerEmail: req.customer.email,
-      },
-    };
+
+    let body: any;
+    let extId = req.external_id || Date.now().toString();
+
+    if (req.external_id) {
+      body = {
+        external_id: req.external_id,
+        order_id: req.order_id || req.external_id,
+        amount: req.amount,
+        customer_details: req.customer_details || {},
+        wallet_details: req.wallet_details || {},
+        callback_url: req.callback_url,
+      };
+    } else {
+      body = {
+        partnerReferenceNo: req.customer?.id || extId,
+        amount: { value: Number(req.amount).toFixed(2), currency: 'IDR' },
+        additionalInfo: {
+          customerName: req.customer?.name,
+          customerPhone: req.customer?.phone,
+          customerEmail: req.customer?.email,
+        },
+      };
+    }
 
     const payloadHex = crypto
       .createHash('sha256')
@@ -87,7 +108,7 @@ export class IfpClient {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
         'X-PARTNER-ID': this.clientId,
-        'X-EXTERNAL-ID': Date.now().toString(),
+        'X-EXTERNAL-ID': extId,
         'X-TIMESTAMP': ts,
         'X-SIGNATURE': signature,
         'CHANNEL-ID': 'api',
@@ -96,7 +117,7 @@ export class IfpClient {
 
     return {
       qr_string: data.qrString ?? data.qr_string,
-      qr_url: data.qrUrl ?? data.qr_url,
+      qr_url: data.qrUrl ?? data.qr_url ?? data.checkout_url,
     };
   }
 }
