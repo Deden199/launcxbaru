@@ -52,7 +52,13 @@ import { config } from './config';
 import logger from './logger';
 import requestLogger from './middleware/log';
 
+// ⬇️ Tambahan anti-crash IFP
+import { ensureIfpReady } from './util/ifpSign';
+
 const app = express();
+
+// cek readiness IFP sekali di startup (tidak melempar error)
+const IFP_ENABLED = ensureIfpReady();
 
 loadWeekendOverrideDates().catch(err => console.error('[init]', err));
 
@@ -77,7 +83,7 @@ app.post(
   express.raw({
     limit: '20kb',
     type: () => true,
-    verify: (req, _res, buf: Buffer) => { (req as any).rawBody = buf; }
+    verify: (req, _res, buf: Buffer) => { (req as any).rawBody = buf }
   }),
   express.json(),
   transactionCallback
@@ -123,6 +129,11 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(requestLogger);
 
 // (hapus duplikat parser global yang kedua)
+
+// Ops endpoint: pantau status IFP (berguna lihat di prod)
+app.get('/ops/ifp-status', (_req, res) => {
+  res.json({ ifpEnabled: IFP_ENABLED });
+});
 
 // Routes ringan lain
 app.use('/api/v1/withdrawals', withdrawalRoutes);

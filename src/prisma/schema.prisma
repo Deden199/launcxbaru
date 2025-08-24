@@ -352,7 +352,7 @@ enum AdminRole {
 model AdminLog {
   id        String   @id @default(uuid()) @map("_id")
   adminId   String
-  adminName String
+  adminName  String   @default("Unknown") // ⬅️ default
   action    String
   target    String?
   detail    Json?
