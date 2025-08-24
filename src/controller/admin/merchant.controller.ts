@@ -523,9 +523,9 @@ export async function getDashboardVolume(req: Request, res: Response) {
     const dateTo = date_to ? new Date(String(date_to)) : undefined;
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
-    const createdAtFilter: any = {};
-    if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom;
-    if (dateTo && !isNaN(dateTo.getTime())) createdAtFilter.lte = dateTo;
+    const paymentTimeFilter: any = {};
+    if (dateFrom && !isNaN(dateFrom.getTime())) paymentTimeFilter.gte = dateFrom;
+    if (dateTo && !isNaN(dateTo.getTime())) paymentTimeFilter.lte = dateTo;
 
     const allowedStatuses = [
       'SUCCESS',
@@ -549,7 +549,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
     }
 
     const whereOrders: any = {
-      ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {}),
+      ...(dateFrom || dateTo ? { paymentReceivedTime: paymentTimeFilter } : {}),
     };
     if (statusList) {
       whereOrders.status = { in: statusList };
@@ -569,7 +569,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
 
     const orders = await prisma.order.findMany({
       where: whereOrders,
-      orderBy: { createdAt: 'asc' },
+      orderBy: { paymentReceivedTime: 'asc' },
       select: {
         id: true,
         createdAt: true,
@@ -597,7 +597,9 @@ export async function getDashboardVolume(req: Request, res: Response) {
 
       return {
         id: o.id,
-        date: o.createdAt.toISOString(),
+        date: o.paymentReceivedTime
+          ? o.paymentReceivedTime.toISOString()
+          : o.createdAt.toISOString(),
         reference: o.qrPayload ?? '',
         rrn: o.rrn ?? '',
         playerId: o.playerId,
