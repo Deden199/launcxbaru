@@ -559,22 +559,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
 
     const statuses = statusList ?? [...allowedStatuses];
     const match: any = {
-      $expr: {
-        $and: [
-          {
-            $gte: [
-              { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
-              dateFrom,
-            ],
-          },
-          {
-            $lte: [
-              { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
-              dateTo,
-            ],
-          },
-        ],
-      },
+      baseTime: { $gte: dateFrom, $lte: dateTo },
       status: { $in: statuses },
     };
 
@@ -588,14 +573,20 @@ export async function getDashboardVolume(req: Request, res: Response) {
     }
 
     const pipeline: any[] = [
+      {
+        $addFields: {
+          baseTime: {
+            $toDate: {
+              $ifNull: ['$paymentReceivedTime', '$createdAt'],
+            },
+          },
+        },
+      },
       { $match: match },
       {
         $project: {
           timestamp: {
-            $dateTrunc: {
-              date: { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
-              unit: gran,
-            },
+            $dateTrunc: { date: '$baseTime', unit: gran },
           },
           amount: '$amount',
         },

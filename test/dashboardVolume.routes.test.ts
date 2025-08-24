@@ -33,6 +33,9 @@ test('getDashboardVolume returns points', async () => {
   })
   assert(receivedPipeline?.some(s => s.$project?.timestamp?.$dateTrunc))
   assert(receivedPipeline?.some(s => s.$group?.count))
+  assert(receivedPipeline?.[0]?.$addFields?.baseTime?.$toDate)
+  assert(receivedPipeline?.[1]?.$match?.baseTime)
+  assert(receivedPipeline?.[1]?.$match?.status?.$in)
 })
 
 test('getDashboardVolume handles empty result', async () => {
