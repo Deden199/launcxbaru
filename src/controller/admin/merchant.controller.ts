@@ -10,7 +10,7 @@ import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
 import { GidiClient, GidiError } from '../../service/gidiClient'
 import { config } from '../../config';
-import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
+import { isJakartaWeekend, formatDateJakarta, parseDateSafely, wibLast24HoursRange } from '../../util/time'
 import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
 import { getCache, setCache } from '../../util/cache'
 import pLimit from 'p-limit'
@@ -514,9 +514,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
   try {
     const { partnerClientId, status, search } = req.query as any;
 
-    const now = new Date();
-    const dateFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const dateTo = now;
+    const { start: dateFrom, end: dateTo } = wibLast24HoursRange();
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allowedStatuses = [

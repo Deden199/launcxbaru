@@ -15,6 +15,12 @@ export function wibTimestampString(): string {
   return moment().tz('Asia/Jakarta').format('YYYY-MM-DDTHH:mm:ss+07:00');
 }
 
+export function wibLast24HoursRange(): { start: Date; end: Date } {
+  const end = wibTimestamp();
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
 
 let weekendOverrideDates = new Set<string>()
 
