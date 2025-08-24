@@ -531,7 +531,7 @@ export default function DashboardPage() {
           : ''
         return {
           id: o.id,
-          date: o.date,
+          date: o.paymentReceivedTime || o.date,
           rrn: o.rrn ?? '-',
           playerId: o.playerId,
           amount: o.amount ?? 0,
@@ -584,7 +584,7 @@ export default function DashboardPage() {
           : ''
         return {
           id: o.id,
-          date: o.date,
+          date: o.paymentReceivedTime || o.date,
           rrn: o.rrn ?? '-',
           playerId: o.playerId,
           amount: o.amount ?? 0,
