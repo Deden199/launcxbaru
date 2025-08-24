@@ -512,17 +512,11 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 
 export async function getDashboardVolume(req: Request, res: Response) {
   try {
-    const {
-      date_from,
-      date_to,
-      partnerClientId,
-      status,
-      search,
-      granularity = 'day',
-    } = req.query as any;
+    const { partnerClientId, status, search } = req.query as any;
 
-    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
-    const dateTo = date_to ? new Date(String(date_to)) : undefined;
+    const now = new Date();
+    const dateFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const dateTo = now;
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allowedStatuses = [
@@ -547,17 +541,10 @@ export async function getDashboardVolume(req: Request, res: Response) {
       statusList = Array.from(new Set(statusList));
     }
 
-    const filters: Prisma.Sql[] = [];
-    if (dateFrom && !isNaN(dateFrom.getTime())) {
-      filters.push(
-        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${dateFrom}`
-      );
-    }
-    if (dateTo && !isNaN(dateTo.getTime())) {
-      filters.push(
-        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${dateTo}`
-      );
-    }
+    const filters: Prisma.Sql[] = [
+      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${dateFrom}`,
+      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${dateTo}`,
+    ];
     if (statusList) {
       filters.push(Prisma.sql`"status" IN (${Prisma.join(statusList)})`);
     } else {
@@ -573,11 +560,9 @@ export async function getDashboardVolume(req: Request, res: Response) {
       );
     }
 
-    const where = filters.length
-      ? Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`
-      : Prisma.empty;
+    const where = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
 
-    const gran = granularity === 'hour' ? 'hour' : 'day';
+    const gran = 'hour';
 
     const rows = await (prisma as any).$queryRaw(
       Prisma.sql`
