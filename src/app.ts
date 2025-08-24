@@ -5,6 +5,7 @@ import cors from 'cors';
 import cron from 'node-cron';
 import { errorHandler } from './middleware/errorHandler'
 import { scheduleSettlementChecker } from './cron/settlement'
+import { scheduleDashboardSummary } from './cron/dashboardSummary'
 
 import subMerchantRoutes from './route/admin/subMerchant.routes';
 import pgProviderRoutes from './route/admin/pgProvider.routes';
@@ -173,5 +174,6 @@ app.use(errorHandler);
 
 app.listen(config.api.port, () => {});
 scheduleSettlementChecker().catch(err => logger.error(err));
+scheduleDashboardSummary();
 
 export default app;
