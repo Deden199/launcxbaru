@@ -103,8 +103,16 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
   const childIds = user.partnerClient?.children.map(c => c.id) ?? [];
 
   // 2) Baca query.clientId (optional) untuk override single-child
-  const { clientId: qClientId, status, date_from, date_to, page = '1', limit = '20' } = req.query;
-    const fromDate = parseDateSafely(date_from);
+  const {
+    clientId: qClientId,
+    status,
+    date_from,
+    date_to,
+    ref,
+    page = '1',
+    limit = '20',
+  } = req.query;
+  const fromDate = parseDateSafely(date_from);
   const toDate   = parseDateSafely(date_to);
   let clientIds: string[];
   if (typeof qClientId === 'string' && qClientId !== 'all') {
@@ -120,6 +128,7 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     partnerClientId: { in: clientIds }
   };
   if (status) where.status = status as string;
+  if (ref)    where.refId = { contains: ref as string, mode: 'insensitive' };
   if (fromDate || toDate) {
     where.createdAt = {};
     if (fromDate) where.createdAt.gte = fromDate;

@@ -55,9 +55,8 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
     if (!clientId) return
     setLoading(true)
     setPageError('')
-    const params: any = { page, limit: perPage }
+    const params: any = { page, limit: perPage, ref: searchRef }
     if (statusFilter) params.status = statusFilter
-    if (searchRef) params.ref = searchRef
     if (startDate) params.fromDate = startDate.toISOString()
     if (endDate) params.toDate = endDate.toISOString()
 

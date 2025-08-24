@@ -17,6 +17,8 @@ Endpoints served under `/api/v1/client`.
 - `POST /withdrawals/validate-account` – validate bank account before withdrawal.
 - `POST /withdrawals` – request a withdrawal.
 - `GET /withdrawals` – list past withdrawals.
+  Optional query parameters:
+  - `ref` — filter withdrawals by partial reference ID (case-insensitive).
 - `POST /withdrawals/:id/retry` – retry a failed withdrawal.
 
 ## Dependencies
