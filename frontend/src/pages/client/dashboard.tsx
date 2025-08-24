@@ -136,8 +136,12 @@ export default function ClientDashboardPage() {
       setTotalPaid(data.totalPaid || 0)
       setChildren(data.children)
       setTotalTrans(data.totalCount)
-    } catch {
-      router.push('/client/login')
+    } catch (err: any) {
+      if (err?.response?.status === 401) {
+        router.push('/client/login')
+      } else {
+        console.error('Failed to fetch summary', err)
+      }
     } finally {
       setLoadingSummary(false)
     }
@@ -153,8 +157,12 @@ export default function ClientDashboardPage() {
       )
       setTxs(data.transactions)
       setTotalPages(Math.max(1, Math.ceil(data.total / perPage)))
-    } catch {
-      router.push('/client/login')
+    } catch (err: any) {
+      if (err?.response?.status === 401) {
+        router.push('/client/login')
+      } else {
+        console.error('Failed to fetch transactions', err)
+      }
     } finally {
       setLoadingTx(false)
     }
