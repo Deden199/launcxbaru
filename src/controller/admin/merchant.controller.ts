@@ -512,17 +512,12 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 
 export async function getDashboardVolume(req: Request, res: Response) {
   try {
-    const {
-      date_from,
-      date_to,
-      partnerClientId,
-      status,
-      search,
-      granularity = 'day',
-    } = req.query as any;
+    const { partnerClientId, status, search } = req.query as any;
 
-    const dateFrom = date_from ? new Date(String(date_from)) : undefined;
-    const dateTo = date_to ? new Date(String(date_to)) : undefined;
+    const now = new Date();
+    const seriesEnd = new Date(now);
+    seriesEnd.setMinutes(0, 0, 0);
+    const seriesStart = new Date(seriesEnd.getTime() - 23 * 60 * 60 * 1000);
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allowedStatuses = [
@@ -547,17 +542,10 @@ export async function getDashboardVolume(req: Request, res: Response) {
       statusList = Array.from(new Set(statusList));
     }
 
-    const filters: Prisma.Sql[] = [];
-    if (dateFrom && !isNaN(dateFrom.getTime())) {
-      filters.push(
-        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${dateFrom}`
-      );
-    }
-    if (dateTo && !isNaN(dateTo.getTime())) {
-      filters.push(
-        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${dateTo}`
-      );
-    }
+    const filters: Prisma.Sql[] = [
+      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${seriesStart}`,
+      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${now}`,
+    ];
     if (statusList) {
       filters.push(Prisma.sql`"status" IN (${Prisma.join(statusList)})`);
     } else {
@@ -573,32 +561,34 @@ export async function getDashboardVolume(req: Request, res: Response) {
       );
     }
 
-    const where = filters.length
-      ? Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`
-      : Prisma.empty;
-
-    const gran = granularity === 'hour' ? 'hour' : 'day';
+    const where = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
 
     const rows = await (prisma as any).$queryRaw(
       Prisma.sql`
+      WITH agg AS (
+        SELECT
+          DATE_TRUNC('hour', COALESCE("paymentReceivedTime","createdAt")) AS bucket,
+          SUM("amount") AS "totalAmount",
+          COUNT(*)::int AS count
+        FROM "Order"
+        ${where}
+        GROUP BY 1
+      )
       SELECT
-        DATE_TRUNC(${Prisma.raw(`'${gran}'`)}, COALESCE("paymentReceivedTime","createdAt")) AS bucket,
-        SUM("amount") AS "totalAmount",
-        COUNT(*)::int AS count
-      FROM "Order"
-      ${where}
-      GROUP BY bucket
-      ORDER BY bucket
+        gs.bucket,
+        COALESCE(a."totalAmount", 0) AS "totalAmount",
+        COALESCE(a.count, 0)::int AS count
+      FROM generate_series(${seriesStart}, ${seriesEnd}, ${Prisma.raw("interval '1 hour'")}) AS gs(bucket)
+      LEFT JOIN agg a ON a.bucket = gs.bucket
+      ORDER BY gs.bucket
     `
-    ) as { bucket: Date | null; totalAmount: number | null; count: bigint }[];
+    ) as { bucket: Date; totalAmount: number | null; count: number | null }[];
 
-    const buckets = rows
-      .map(r => ({
-        bucket: r.bucket ? r.bucket.toISOString() : null,
-        totalAmount: Number(r.totalAmount ?? 0),
-        count: Number(r.count),
-      }))
-      .filter(b => b.bucket !== null);
+    const buckets = rows.map(r => ({
+      bucket: r.bucket.toISOString(),
+      totalAmount: Number(r.totalAmount ?? 0),
+      count: Number(r.count ?? 0),
+    }));
 
     return res.json({ buckets });
   } catch (err: any) {
