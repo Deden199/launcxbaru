@@ -231,6 +231,60 @@ async function retry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   throw lastError
 }
 
+// Query all pending Gidi withdrawals and refresh their status via GIDI API
+export async function queryPendingGidiWithdrawals(req: Request, res: Response) {
+  try {
+    const pendings = await prisma.withdrawRequest.findMany({
+      where: { sourceProvider: 'gidi', status: DisbursementStatus.PENDING },
+      select: {
+        refId: true,
+        partnerClientId: true,
+        amount: true,
+        subMerchant: { select: { credentials: true } },
+      },
+    })
+
+    const results: { refId: string; status: DisbursementStatus }[] = []
+
+    for (const w of pendings) {
+      try {
+        const cfg = w.subMerchant.credentials as unknown as GidiDisbursementConfig
+        const client = new GidiClient(cfg)
+        const resp = await client.queryTransfer(`${w.refId}-r`, w.refId)
+        const st = String(resp.statusTransfer || '').toLowerCase()
+        const newStatus =
+          st === 'success'
+            ? DisbursementStatus.COMPLETED
+            : st === 'failed'
+              ? DisbursementStatus.FAILED
+              : DisbursementStatus.PENDING
+
+        if (newStatus !== DisbursementStatus.PENDING) {
+          await prisma.withdrawRequest.update({
+            where: { refId: w.refId },
+            data: { status: newStatus },
+          })
+          if (newStatus === DisbursementStatus.FAILED) {
+            await prisma.partnerClient.update({
+              where: { id: w.partnerClientId },
+              data: { balance: { increment: w.amount } },
+            })
+          }
+        }
+
+        results.push({ refId: w.refId, status: newStatus })
+      } catch (err) {
+        logger.error('[queryPendingGidiWithdrawals] error', { refId: w.refId, err })
+      }
+    }
+
+    return res.json({ processed: results.length, results })
+  } catch (err: any) {
+    logger.error('[queryPendingGidiWithdrawals] fatal', err)
+    return res.status(500).json({ error: err.message })
+  }
+}
+
 export const withdrawalCallback = async (req: Request, res: Response) => {
   try {
     // 1) Ambil & parse raw body
