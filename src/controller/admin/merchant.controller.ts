@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { DisbursementStatus } from '@prisma/client';
+import { DisbursementStatus, Prisma } from '@prisma/client';
 import { AuthRequest } from '../../middleware/auth';
 import { authenticator } from 'otplib';
 import { v4 as uuid } from 'uuid';
@@ -518,14 +518,12 @@ export async function getDashboardVolume(req: Request, res: Response) {
       partnerClientId,
       status,
       search,
+      granularity = 'day',
     } = req.query as any;
+
     const dateFrom = date_from ? new Date(String(date_from)) : undefined;
     const dateTo = date_to ? new Date(String(date_to)) : undefined;
     const searchStr = typeof search === 'string' ? search.trim() : '';
-
-    const paymentTimeFilter: any = {};
-    if (dateFrom && !isNaN(dateFrom.getTime())) paymentTimeFilter.gte = dateFrom;
-    if (dateTo && !isNaN(dateTo.getTime())) paymentTimeFilter.lte = dateTo;
 
     const allowedStatuses = [
       'SUCCESS',
@@ -535,6 +533,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
       'PENDING',
       'EXPIRED',
     ] as const;
+
     let statusList: string[] | undefined;
     if (status !== undefined) {
       const arr = Array.isArray(status) ? status : [status];
@@ -548,75 +547,54 @@ export async function getDashboardVolume(req: Request, res: Response) {
       statusList = Array.from(new Set(statusList));
     }
 
-    const whereOrders: any = {
-      ...(dateFrom || dateTo ? { paymentReceivedTime: paymentTimeFilter } : {}),
-    };
+    const filters: Prisma.Sql[] = [];
+    if (dateFrom && !isNaN(dateFrom.getTime())) {
+      filters.push(Prisma.sql`"paymentReceivedTime" >= ${dateFrom}`);
+    }
+    if (dateTo && !isNaN(dateTo.getTime())) {
+      filters.push(Prisma.sql`"paymentReceivedTime" <= ${dateTo}`);
+    }
     if (statusList) {
-      whereOrders.status = { in: statusList };
+      filters.push(Prisma.sql`"status" IN (${Prisma.join(statusList)})`);
     } else {
-      whereOrders.status = { in: allowedStatuses as any };
+      filters.push(Prisma.sql`"status" IN (${Prisma.join(allowedStatuses as any)})`);
     }
     if (partnerClientId && partnerClientId !== 'all') {
-      whereOrders.partnerClientId = partnerClientId;
+      filters.push(Prisma.sql`"partnerClientId" = ${partnerClientId}`);
     }
     if (searchStr) {
-      whereOrders.OR = [
-        { id: { contains: searchStr, mode: 'insensitive' } },
-        { rrn: { contains: searchStr, mode: 'insensitive' } },
-        { playerId: { contains: searchStr, mode: 'insensitive' } },
-      ];
+      const like = `%${searchStr}%`;
+      filters.push(
+        Prisma.sql`("id" ILIKE ${like} OR "rrn" ILIKE ${like} OR "playerId" ILIKE ${like})`
+      );
     }
 
-    const orders = await prisma.order.findMany({
-      where: whereOrders,
-      orderBy: { paymentReceivedTime: 'asc' },
-      select: {
-        id: true,
-        createdAt: true,
-        playerId: true,
-        qrPayload: true,
-        rrn: true,
-        amount: true,
-        feeLauncx: true,
-        fee3rdParty: true,
-        pendingAmount: true,
-        settlementAmount: true,
-        status: true,
-        settlementStatus: true,
-        channel: true,
-        paymentReceivedTime: true,
-        settlementTime: true,
-        trxExpirationTime: true,
-      },
-    });
+    const where = filters.length
+      ? Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`
+      : Prisma.empty;
 
-    const transactions = orders.map(o => {
-      const pend = o.pendingAmount ?? 0;
-      const sett = o.settlementAmount ?? 0;
-      const netSettle = o.status === 'PAID' ? pend : sett;
+    const gran = granularity === 'hour' ? 'hour' : 'day';
 
-      return {
-        id: o.id,
-        date: o.paymentReceivedTime
-          ? o.paymentReceivedTime.toISOString()
-          : o.createdAt.toISOString(),
-        reference: o.qrPayload ?? '',
-        rrn: o.rrn ?? '',
-        playerId: o.playerId,
-        amount: o.amount,
-        feeLauncx: o.feeLauncx ?? 0,
-        feePg: o.fee3rdParty ?? 0,
-        netSettle,
-        status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
-        settlementStatus: o.settlementStatus ?? '',
-        channel: o.channel ?? '',
-        paymentReceivedTime: o.paymentReceivedTime ? o.paymentReceivedTime.toISOString() : '',
-        settlementTime: o.settlementTime ? o.settlementTime.toISOString() : '',
-        trxExpirationTime: o.trxExpirationTime ? o.trxExpirationTime.toISOString() : '',
-      };
-    });
+    const rows = await (prisma as any).$queryRaw(
+      Prisma.sql`
+      SELECT
+        DATE_TRUNC(${Prisma.raw(`'${gran}'`)}, "paymentReceivedTime") AS bucket,
+        SUM("amount") AS "totalAmount",
+        COUNT(*)::int AS count
+      FROM "Order"
+      ${where}
+      GROUP BY bucket
+      ORDER BY bucket
+    `
+    ) as { bucket: Date; totalAmount: number | null; count: bigint }[];
 
-    return res.json({ transactions });
+    const buckets = rows.map(r => ({
+      bucket: r.bucket.toISOString(),
+      totalAmount: Number(r.totalAmount ?? 0),
+      count: Number(r.count),
+    }));
+
+    return res.json({ buckets });
   } catch (err: any) {
     console.error('[getDashboardVolume]', err);
     return res.status(500).json({ error: 'Failed to fetch dashboard volume' });

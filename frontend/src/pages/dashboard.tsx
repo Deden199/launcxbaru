@@ -141,61 +141,6 @@ function getGranularity(
   if (range === 'custom' && startDate && endDate && isSameJakDay(startDate, endDate)) return 'hour'
   return 'day'
 }
-function bucketizeTransactions(
-  txs: Tx[],
-  start: Date,
-  end: Date,
-  granularity: Granularity
-) {
-  const buckets: { key: string; label: string; amount: number; count: number }[] = []
-
-  if (granularity === 'hour') {
-    const base = new Date(start.toLocaleString('en-US', { timeZone: TZ }))
-    base.setMinutes(0, 0, 0)
-    for (let h = 0; h < 24; h++) {
-      const d = new Date(base)
-      d.setHours(h)
-      const key = `${fmtISODateJak(d)} ${String(h).padStart(2, '0')}`
-      const label = `${String(h).padStart(2, '0')}:00`
-      buckets.push({ key, label, amount: 0, count: 0 })
-    }
-  } else {
-    const cur = new Date(start.toLocaleString('en-US', { timeZone: TZ }))
-    cur.setHours(0, 0, 0, 0)
-    const e = new Date(end.toLocaleString('en-US', { timeZone: TZ }))
-    e.setHours(23, 59, 59, 999)
-    while (cur <= e) {
-      const key = fmtISODateJak(cur)
-      const [y, m, d] = key.split('-')
-      const label = `${d}/${m}`
-      buckets.push({ key, label, amount: 0, count: 0 })
-      cur.setDate(cur.getDate() + 1)
-    }
-  }
-
-  for (const t of txs) {
-    const dtJak = new Date(new Date(t.date).toLocaleString('en-US', { timeZone: TZ }))
-    if (granularity === 'hour') {
-      const kDay = fmtISODateJak(dtJak)
-      const kHour = String(dtJak.getHours()).padStart(2, '0')
-      const key = `${kDay} ${kHour}`
-      const b = buckets.find(bu => bu.key === key)
-      if (b) {
-        b.amount += t.amount || 0
-        b.count += 1
-      }
-    } else {
-      const key = fmtISODateJak(dtJak)
-      const b = buckets.find(bu => bu.key === key)
-      if (b) {
-        b.amount += t.amount || 0
-        b.count += 1
-      }
-    }
-  }
-
-  return buckets
-}
 
 export default function DashboardPage() {
   useRequireAuth()
@@ -261,7 +206,7 @@ export default function DashboardPage() {
   const [loadingTx, setLoadingTx] = useState(true)
   const [loadingVolume, setLoadingVolume] = useState(true)
   const [txs, setTxs] = useState<Tx[]>([])
-  const [volumeTxs, setVolumeTxs] = useState<Tx[]>([])
+  const [volumeSeries, setVolumeSeries] = useState<{ key: string; label: string; amount: number; count: number }[]>([])
   const [totalTrans, setTotalTrans] = useState(0)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
@@ -276,12 +221,6 @@ export default function DashboardPage() {
     const { start, end } = getPresetBounds(range as 'today' | 'yesterday' | 'week' | 'month')
     return { chartStart: start, chartEnd: end, granularity: getGranularity(range, null, null) }
   }, [range, startDate, endDate])
-
-  // Volume series (hour/day WIB)
-  const volumeSeries = useMemo(
-    () => bucketizeTransactions(volumeTxs, chartStart, chartEnd, granularity),
-    [volumeTxs, chartStart, chartEnd, granularity]
-  )
 
   const topProfit = useMemo(() => {
     return [...profitSubs]
@@ -570,37 +509,25 @@ export default function DashboardPage() {
       const params = buildParams()
       delete params.page
       delete params.limit
-      const { data } = await api.get<{ transactions: RawTx[] }>(
+      params.granularity = granularity
+      const { data } = await api.get<{ buckets: { bucket: string; totalAmount: number; count: number }[] }>(
         '/admin/merchants/dashboard/volume',
         { params }
       )
 
-      const VALID_STATUSES: Tx['status'][] = ['SUCCESS', 'PENDING', 'EXPIRED', 'DONE', 'PAID']
-
-      const mapped: Tx[] = data.transactions.map(o => {
-        const raw = o.status ?? ''
-        const statusTyped: Tx['status'] = VALID_STATUSES.includes(raw as Tx['status'])
-          ? (raw as Tx['status'])
-          : ''
-        return {
-          id: o.id,
-          date: o.paymentReceivedTime || o.date,
-          rrn: o.rrn ?? '-',
-          playerId: o.playerId,
-          amount: o.amount ?? 0,
-          feeLauncx: o.feeLauncx ?? 0,
-          feePg: o.feePg ?? 0,
-          netSettle: o.netSettle,
-          status: statusTyped,
-          settlementStatus: o.settlementStatus.replace(/_/g, ' '),
-          paymentReceivedTime: o.paymentReceivedTime ?? '',
-          settlementTime: o.settlementTime ?? '',
-          trxExpirationTime: o.trxExpirationTime ?? '',
-          channel: o.channel ?? '-',
+      const mapped = data.buckets.map(b => {
+        const dtJak = new Date(new Date(b.bucket).toLocaleString('en-US', { timeZone: TZ }))
+        if (granularity === 'hour') {
+          const dayKey = fmtISODateJak(dtJak)
+          const h = String(dtJak.getHours()).padStart(2, '0')
+          return { key: `${dayKey} ${h}`, label: `${h}:00`, amount: b.totalAmount, count: b.count }
         }
+        const key = fmtISODateJak(dtJak)
+        const [y, m, d] = key.split('-')
+        return { key, label: `${d}/${m}`, amount: b.totalAmount, count: b.count }
       })
 
-      setVolumeTxs(mapped)
+      setVolumeSeries(mapped)
     } catch (e) {
       console.error('fetchVolumeSeries error', e)
     } finally {
@@ -648,7 +575,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchVolumeSeries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, from, to, selectedMerchant, search, statusFilter])
+  }, [range, from, to, selectedMerchant, search, statusFilter, granularity])
 
   if (loadingSummary) {
     return (
