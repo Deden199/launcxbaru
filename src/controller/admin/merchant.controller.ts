@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { DisbursementStatus, Prisma } from '@prisma/client';
+import { DisbursementStatus } from '@prisma/client';
 import { AuthRequest } from '../../middleware/auth';
 import { authenticator } from 'otplib';
 import { v4 as uuid } from 'uuid';
@@ -541,49 +541,61 @@ export async function getDashboardVolume(req: Request, res: Response) {
       statusList = Array.from(new Set(statusList));
     }
 
-    const filters: Prisma.Sql[] = [
-      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${dateFrom}`,
-      Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${dateTo}`,
-    ];
-    if (statusList) {
-      filters.push(Prisma.sql`"status" IN (${Prisma.join(statusList)})`);
-    } else {
-      filters.push(Prisma.sql`"status" IN (${Prisma.join(allowedStatuses as any)})`);
-    }
+    const statuses = statusList ?? [...allowedStatuses];
+    const match: any = {
+      $expr: {
+        $and: [
+          { $gte: [{ $ifNull: ['$paymentReceivedTime', '$createdAt'] }, dateFrom] },
+          { $lte: [{ $ifNull: ['$paymentReceivedTime', '$createdAt'] }, dateTo] },
+        ],
+      },
+      status: { $in: statuses },
+    };
+
     if (partnerClientId && partnerClientId !== 'all') {
-      filters.push(Prisma.sql`"partnerClientId" = ${partnerClientId}`);
+      match.partnerClientId = partnerClientId;
     }
+
     if (searchStr) {
-      const like = `%${searchStr}%`;
-      filters.push(
-        Prisma.sql`("id" ILIKE ${like} OR "rrn" ILIKE ${like} OR "playerId" ILIKE ${like})`
-      );
+      const regex = { $regex: searchStr, $options: 'i' };
+      match.$or = [{ _id: regex }, { rrn: regex }, { playerId: regex }];
     }
 
-    const where = Prisma.sql`WHERE ${Prisma.join(filters, ' AND ')}`;
+    const pipeline: any[] = [
+      { $match: match },
+      {
+        $project: {
+          bucket: {
+            $dateToString: {
+              date: { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
+              format: '%Y-%m-%dT%H:00:00.000Z',
+              timezone: 'UTC',
+            },
+          },
+          amount: '$amount',
+        },
+      },
+      {
+        $group: {
+          _id: '$bucket',
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ];
 
-    const gran = 'hour';
+    const rows = (await prisma.order.aggregateRaw({ pipeline })) as {
+      _id: string;
+      totalAmount: number;
+      count: number;
+    }[];
 
-    const rows = await (prisma as any).$queryRaw(
-      Prisma.sql`
-      SELECT
-        DATE_TRUNC(${Prisma.raw(`'${gran}'`)}, COALESCE("paymentReceivedTime","createdAt")) AS bucket,
-        SUM("amount") AS "totalAmount",
-        COUNT(*)::int AS count
-      FROM "Order"
-      ${where}
-      GROUP BY bucket
-      ORDER BY bucket
-    `
-    ) as { bucket: Date | null; totalAmount: number | null; count: bigint }[];
-
-    const buckets = rows
-      .map(r => ({
-        bucket: r.bucket ? r.bucket.toISOString() : null,
-        totalAmount: Number(r.totalAmount ?? 0),
-        count: Number(r.count),
-      }))
-      .filter(b => b.bucket !== null);
+    const buckets = rows.map(r => ({
+      bucket: r._id,
+      totalAmount: Number(r.totalAmount ?? 0),
+      count: Number(r.count ?? 0),
+    }));
 
     return res.json({ buckets });
   } catch (err: any) {
