@@ -27,7 +27,7 @@ const navItems = [
   { label: 'Merchant Settings', href: '/admin/merchants',  Icon: BoomBox },
   { label: 'Admins',            href: '/admin/users',      Icon: User },
   { label: '2FA Setup',         href: '/admin/2fa',        Icon: ShieldCheck },
-  { label: 'WD Settings',       href: '/admin/settings',   Icon: Settings },
+  { label: 'Settings',       href: '/admin/settings',   Icon: Settings },
   { label: 'Settlement',        href: '/admin/settlement', Icon: Banknote },
   { label: 'Logs',              href: '/admin/logs',       Icon: FileText },
 ]

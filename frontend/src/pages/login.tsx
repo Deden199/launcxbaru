@@ -50,7 +50,7 @@ export default function LoginPage() {
             <span className="text-lg">🛠️</span>
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Admin Dashboard</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Launcx Admin Dashboard v2.0</h1>
             <p className="text-xs text-neutral-400">Sign in to manage Launcx</p>
           </div>
         </div>

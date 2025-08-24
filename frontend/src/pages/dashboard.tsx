@@ -618,8 +618,8 @@ export default function DashboardPage() {
       <div className="w-full rounded-2xl border border-neutral-800 bg-neutral-900/70 backdrop-blur p-4 sm:p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
           <div className="space-y-1">
-            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">Merchant Dashboard</h1>
-            <p className="text-sm text-neutral-400">Monitor transaksi, saldo, dan penarikan dalam satu tempat.</p>
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">Launcx Dashboard</h1>
+            <p className="text-sm text-neutral-400">Monitor transaksi, saldo.</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto">

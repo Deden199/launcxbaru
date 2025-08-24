@@ -91,7 +91,7 @@ export default function LoginForm() {
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/70 p-6 shadow-xl">
         <h1 className="mb-5 text-center text-xl font-semibold tracking-tight">
-          Client Dashboard v1.2 Login
+          Launcx Client Dashboard v2.0 Login
         </h1>
 
         {message && (
