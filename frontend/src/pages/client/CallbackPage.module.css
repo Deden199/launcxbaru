@@ -1,190 +1,129 @@
-/* CallbackPage.module.css */
-
-.wrapper {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 4rem 1rem;
-  background: #f3f4f6;
-  min-height: 100vh;
-  animation: fadeIn 0.5s ease;
+/* ===== Dark theme for react-datepicker ===== */
+:root .dark .react-datepicker,
+:root .dark .react-datepicker__header {
+  background-color: #0a0a0a;            /* neutral-950 */
+  color: #e5e5e5;                        /* neutral-200 */
+  border-color: #262626;                 /* neutral-800 */
 }
 
-.card {
-  width: 100%;
-  max-width: 480px;
-  background: #ffffff;
+:root .dark .react-datepicker {
+  border: 1px solid #262626;
   border-radius: 12px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
-  padding: 2.5rem;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-.card:hover {
-  transform: translateY(-4px) scale(1.005);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 2rem;
-  border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 1rem;
+:root .dark .react-datepicker__header {
+  border-bottom: 1px solid #262626;
 }
 
-.icon {
-  color: #4f46e5;
-  margin-right: 0.75rem;
-  font-size: 1.75rem;
-}
-
-.title {
-  font-size: 1.625rem;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.field {
-  margin-bottom: 1.5rem;
-}
-
-.label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #6b7280;
-  margin-bottom: 0.5rem;
-}
-
-.input {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.input:focus {
-  outline: none;
-  border-color: #4338ca;
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
-}
-
-.secretWrapper {
-  display: flex;
-  align-items: center;
-}
-
-.secretInput {
-  flex: 1;
-  margin-right: 0.5rem;
-}
-
-.copyButton {
-  background: #4f46e5;
-  border: none;
-  padding: 0.5rem;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
-}
-.copyButton:hover {
-  background: #4338ca;
-  transform: scale(1.1);
-}
-
-.button {
-  width: 100%;
-  background-image: linear-gradient(135deg, #4f46e5, #4338ca);
-  color: #ffffff;
-  font-size: 1rem;
+:root .dark .react-datepicker__current-month,
+:root .dark .react-datepicker-time__header,
+:root .dark .react-datepicker-year-header {
+  color: #e5e5e5;
   font-weight: 600;
-  padding: 0.75rem;
-  border: none;
+}
+
+:root .dark .react-datepicker__day-name,
+:root .dark .react-datepicker__day,
+:root .dark .react-datepicker__time-name {
+  color: #d4d4d4;                        /* neutral-300 */
+}
+
+:root .dark .react-datepicker__day--outside-month {
+  color: #737373;                        /* neutral-500 */
+  opacity: .7;
+}
+
+:root .dark .react-datepicker__day:hover {
+  background-color: #171717;             /* neutral-900 */
   border-radius: 8px;
-  cursor: pointer;
-  transition: filter 0.2s, transform 0.2s;
-  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.2);
-}
-.button:disabled {
-  background: #9ca3af;
-  background-image: none;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-.button:not(:disabled):hover {
-  filter: brightness(1.05);
-  transform: translateY(-2px);
 }
 
-.messageWrapper {
-  display: flex;
-  align-items: center;
-  margin-top: 1.25rem;
+/* Selected day */
+:root .dark .react-datepicker__day--selected,
+:root .dark .react-datepicker__day--keyboard-selected {
+  background-color: #4f46e5 !important;  /* indigo-600 */
+  color: #ffffff !important;
+  border-radius: 8px;
 }
 
-.message {
-  margin-left: 0.5rem;
-  font-size: 0.875rem;
+/* Range selection */
+:root .dark .react-datepicker__day--in-range {
+  background-color: rgba(79,70,229,0.15) !important; /* indigo-600/15 */
+  color: #e5e5e5 !important;
+  border-radius: 0;                       /* dirapihkan via start/end */
 }
 
-.success {
-  color: #059669;
+:root .dark .react-datepicker__day--in-selecting-range {
+  background-color: rgba(79,70,229,0.12) !important;
 }
 
-.error {
-  color: #dc2626;
-}
-.successIcon {
-  color: #059669;
-}
-.errorIcon {
-  color: #dc2626;
-}
-
-.sectionDivider {
-  margin: 2.5rem 0;
-  border-top: 1px solid #e5e7eb;
+/* Rounded caps for range ends */
+:root .dark .react-datepicker__day--range-start,
+:root .dark .react-datepicker__day--selecting-range-start,
+:root .dark .react-datepicker__day--range-end,
+:root .dark .react-datepicker__day--selecting-range-end {
+  background-color: #4f46e5 !important;
+  color: #fff !important;
+  border-radius: 8px;
 }
 
-.subtitle {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #6b7280;
-  margin-bottom: 1.25rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+/* Today dot */
+:root .dark .react-datepicker__day--today {
+  position: relative;
+}
+:root .dark .react-datepicker__day--today::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  background-color: #a3a3a3;             /* neutral-400 */
+  border-radius: 999px;
+  transform: translateX(-50%);
 }
 
-.qrImage {
-  display: block;
-  margin: 1.5rem auto;
-  max-width: 220px;
-  transition: transform 0.3s;
-}
-.qrImage:hover {
-  transform: scale(1.05);
+/* Month container spacing */
+:root .dark .react-datepicker__month {
+  margin: 8px;
 }
 
-.twoFaField {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-}
-.twoFaField .input {
-  flex: 1;
-  width: auto;
-}
-.twoFaField .button {
-  flex-shrink: 0;
-  width: auto;
+/* Triangle / arrow */
+:root .dark .react-datepicker__triangle {
+  display: none;                          /* kamu sudah pakai showPopperArrow={false} */
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+/* Time list (jika dipakai) */
+:root .dark .react-datepicker__time-container {
+  border-left: 1px solid #262626;
+}
+:root .dark .react-datepicker__time {
+  background-color: #0a0a0a;
+}
+:root .dark .react-datepicker__time-list-item {
+  color: #e5e5e5;
+}
+:root .dark .react-datepicker__time-list-item:hover {
+  background-color: #171717;
+}
+:root .dark .react-datepicker__time-list-item--selected {
+  background-color: #4f46e5 !important;
+  color: #fff !important;
+}
+
+/* Popper wrapper */
+:root .dark .dp-popper-dark {
+  z-index: 9999;
+}
+
+/* Input inline icon (kalau kamu pakai) */
+:root .dark .dp-input {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+  border: 1px solid #262626;
+}
+:root .dark .dp-input:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 4px rgba(79,70,229,.2);
 }
