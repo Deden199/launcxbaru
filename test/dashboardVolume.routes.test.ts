@@ -32,3 +32,17 @@ test('getDashboardVolume returns buckets', async () => {
   })
 })
 
+test('getDashboardVolume filters null buckets', async () => {
+  ;(prisma as any).$queryRaw = async () => [
+    { bucket: null, totalAmount: 50, count: 1 },
+  ]
+  const app = express()
+  app.get('/dashboard/volume', getDashboardVolume)
+
+  const res = await request(app)
+    .get('/dashboard/volume')
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body, { buckets: [] })
+})
+

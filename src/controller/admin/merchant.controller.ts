@@ -549,10 +549,14 @@ export async function getDashboardVolume(req: Request, res: Response) {
 
     const filters: Prisma.Sql[] = [];
     if (dateFrom && !isNaN(dateFrom.getTime())) {
-      filters.push(Prisma.sql`"paymentReceivedTime" >= ${dateFrom}`);
+      filters.push(
+        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") >= ${dateFrom}`
+      );
     }
     if (dateTo && !isNaN(dateTo.getTime())) {
-      filters.push(Prisma.sql`"paymentReceivedTime" <= ${dateTo}`);
+      filters.push(
+        Prisma.sql`COALESCE("paymentReceivedTime","createdAt") <= ${dateTo}`
+      );
     }
     if (statusList) {
       filters.push(Prisma.sql`"status" IN (${Prisma.join(statusList)})`);
@@ -578,7 +582,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
     const rows = await (prisma as any).$queryRaw(
       Prisma.sql`
       SELECT
-        DATE_TRUNC(${Prisma.raw(`'${gran}'`)}, "paymentReceivedTime") AS bucket,
+        DATE_TRUNC(${Prisma.raw(`'${gran}'`)}, COALESCE("paymentReceivedTime","createdAt")) AS bucket,
         SUM("amount") AS "totalAmount",
         COUNT(*)::int AS count
       FROM "Order"
@@ -586,13 +590,15 @@ export async function getDashboardVolume(req: Request, res: Response) {
       GROUP BY bucket
       ORDER BY bucket
     `
-    ) as { bucket: Date; totalAmount: number | null; count: bigint }[];
+    ) as { bucket: Date | null; totalAmount: number | null; count: bigint }[];
 
-    const buckets = rows.map(r => ({
-      bucket: r.bucket.toISOString(),
-      totalAmount: Number(r.totalAmount ?? 0),
-      count: Number(r.count),
-    }));
+    const buckets = rows
+      .map(r => ({
+        bucket: r.bucket ? r.bucket.toISOString() : null,
+        totalAmount: Number(r.totalAmount ?? 0),
+        count: Number(r.count),
+      }))
+      .filter(b => b.bucket !== null);
 
     return res.json({ buckets });
   } catch (err: any) {
