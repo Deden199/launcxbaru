@@ -8,11 +8,13 @@ process.env.JWT_SECRET = 'test'
 import { prisma } from '../src/core/prisma'
 const { getDashboardVolume } = require('../src/controller/admin/merchant.controller')
 
-test('getDashboardVolume returns buckets', async () => {
-  const paidBucket = new Date().toISOString()
-  ;(prisma as any).order.aggregateRaw = async () => [
-    { _id: paidBucket, totalAmount: 100, count: 2 },
-  ]
+test('getDashboardVolume returns points', async () => {
+  const ts = new Date().toISOString()
+  let receivedPipeline: any[] | undefined
+  ;(prisma as any).order.aggregateRaw = async (args: any) => {
+    receivedPipeline = args.pipeline
+    return [{ timestamp: ts, totalAmount: 100, count: 2 }]
+  }
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
 
@@ -21,20 +23,20 @@ test('getDashboardVolume returns buckets', async () => {
 
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, {
-    buckets: [
+    points: [
       {
-        bucket: paidBucket,
+        timestamp: ts,
         totalAmount: 100,
         count: 2,
       },
     ],
   })
+  assert(receivedPipeline?.some(s => s.$project?.timestamp?.$dateTrunc))
+  assert(receivedPipeline?.some(s => s.$group?.count))
 })
 
-test('getDashboardVolume filters null buckets', async () => {
-  ;(prisma as any).order.aggregateRaw = async () => [
-    { _id: null, totalAmount: 50, count: 1 },
-  ]
+test('getDashboardVolume handles empty result', async () => {
+  ;(prisma as any).order.aggregateRaw = async () => []
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
 
@@ -42,6 +44,6 @@ test('getDashboardVolume filters null buckets', async () => {
     .get('/dashboard/volume')
 
   assert.equal(res.status, 200)
-  assert.deepEqual(res.body, { buckets: [] })
+  assert.deepEqual(res.body, { points: [] })
 })
 

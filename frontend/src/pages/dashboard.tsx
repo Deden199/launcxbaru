@@ -504,22 +504,22 @@ export default function DashboardPage() {
     setLoadingVolume(true)
     try {
       const params = buildVolumeSeriesParams(buildParams(), granularity)
-      const { data } = await api.get<{ buckets: { bucket: string; totalAmount: number; count: number }[] }>(
+      const { data } = await api.get<{ points: { timestamp: string; totalAmount: number; count: number }[] }>(
         '/admin/merchants/dashboard/volume',
         { params }
       )
 
-      const volumeSeries = Array.isArray(data?.buckets)
-        ? data.buckets.map(b => {
-            const dtJak = new Date(new Date(b.bucket).toLocaleString('en-US', { timeZone: TZ }))
+      const volumeSeries = Array.isArray(data?.points)
+        ? data.points.map(p => {
+            const dtJak = new Date(new Date(p.timestamp).toLocaleString('en-US', { timeZone: TZ }))
             if (granularity === 'hour') {
               const dayKey = fmtISODateJak(dtJak)
               const h = String(dtJak.getHours()).padStart(2, '0')
-              return { key: `${dayKey} ${h}`, label: `${h}:00`, amount: b.totalAmount, count: b.count }
+              return { key: `${dayKey} ${h}`, label: `${h}:00`, amount: p.totalAmount, count: p.count }
             }
             const key = fmtISODateJak(dtJak)
             const [y, m, d] = key.split('-')
-            return { key, label: `${d}/${m}`, amount: b.totalAmount, count: b.count }
+            return { key, label: `${d}/${m}`, amount: p.totalAmount, count: p.count }
           })
         : []
 
