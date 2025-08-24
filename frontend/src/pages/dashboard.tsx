@@ -6,6 +6,7 @@ import { useRequireAuth } from '@/hooks/useAuth'
 import { Wallet, ListChecks, Clock, Layers } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { Tx, Withdrawal, SubBalance } from '@/types/dashboard'
+import { Granularity, buildVolumeSeriesParams } from '@/utils/dashboard'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import {
@@ -124,7 +125,6 @@ function getPresetBounds(range: 'today' | 'yesterday' | 'week' | 'month') {
 }
 
 // === Granularity & bucketing ===
-type Granularity = 'hour' | 'day'
 function isSameJakDay(a: Date, b: Date) {
   const aj = new Date(a.toLocaleString('en-US', { timeZone: TZ }))
   const bj = new Date(b.toLocaleString('en-US', { timeZone: TZ }))
@@ -506,10 +506,7 @@ export default function DashboardPage() {
   const fetchVolumeSeries = async () => {
     setLoadingVolume(true)
     try {
-      const params = buildParams()
-      delete params.page
-      delete params.limit
-      params.granularity = granularity
+      const params = buildVolumeSeriesParams(buildParams(), granularity)
       const { data } = await api.get<{ buckets: { bucket: string; totalAmount: number; count: number }[] }>(
         '/admin/merchants/dashboard/volume',
         { params }
@@ -601,7 +598,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchVolumeSeries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, from, to, selectedMerchant, search, statusFilter, granularity])
+  }, [range, from, to, selectedMerchant, search, granularity])
 
   if (loadingSummary) {
     return (
