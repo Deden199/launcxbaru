@@ -8,14 +8,14 @@ dotenv.config();
 const [,, amtArg, nameArg, phoneArg, emailArg, idArg] = process.argv;
 
 const amount = Number(amtArg || process.env.AMOUNT);
-const customer = {
+const customer_details = {
   name : nameArg || process.env.CUSTOMER_NAME || '',
   phone: phoneArg || process.env.CUSTOMER_PHONE,
   email: emailArg || process.env.CUSTOMER_EMAIL,
   id   : idArg   || process.env.CUSTOMER_ID,
 };
 
-if (!amount || !customer.name) {
+if (!amount || !customer_details.name) {
   console.error('Usage: ts-node scripts/ifp-script.ts <amount> <customerName> [phone] [email] [id]');
   process.exit(1);
 }
@@ -23,7 +23,14 @@ if (!amount || !customer.name) {
 (async () => {
   try {
     const client = new IfpClient();
-    const res = await client.createQrPayment({ amount, customer, payment_channel: 'qris' });
+    const external_id = `ext-${Date.now()}`;
+    const res = await client.createQrPayment({
+      external_id,
+      order_id: external_id,
+      amount,
+      payment_channel: 'qris',
+      customer_details,
+    });
     console.log('qr_string:', res.qr_string);
     console.log('qr_url   :', res.qr_url);
   } catch (err: any) {
