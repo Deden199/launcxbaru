@@ -8,6 +8,7 @@ import { postWithRetry } from '../utils/postWithRetry';
 
 import { brevoAxiosInstance } from '../core/brevo.axios';
 import { prisma } from '../core/prisma';
+import { Prisma } from '@prisma/client';
 import logger from '../logger';
 import { generateRandomId, getRandomNumber } from '../util/random';
 import { getCurrentDate } from '../util/util';
@@ -242,7 +243,7 @@ const qrResp = await oyClient.createQRISTransaction({
   await prisma.transaction_response.create({
     data: {
       referenceId: refId,
-      responseBody: JSON.stringify(qrResp),
+      responseBody: qrResp as unknown as Prisma.InputJsonValue,
       playerId: pid,
     },
   })
@@ -339,7 +340,7 @@ if (mName === 'ifp') {
   await prisma.transaction_response.create({
     data: {
       referenceId: refId,
-      responseBody: qrResp,
+      responseBody: qrResp as unknown as Prisma.InputJsonValue,
       playerId: pid,
     },
   });

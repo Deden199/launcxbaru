@@ -33,6 +33,7 @@ export interface QrPaymentRequest {
 export interface QrPaymentResponse {
   qr_string: string;
   qr_url: string;
+  [key: string]: any;
 }
 
 // Konfigurasi yang disimpan di database untuk IFP
