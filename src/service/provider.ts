@@ -6,12 +6,13 @@ import { prisma } from '../core/prisma';
 import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
 import { GidiConfig } from '../service/gidi.service';
+import { IfpClient, IfpConfig } from '../service/ifpClient';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
   id: string;
-  provider: 'hilogate' | 'oy' | 'gidi';
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp';
   fee: number;
   credentials: unknown;
   schedule: unknown;
@@ -69,13 +70,20 @@ export async function getActiveProviders(
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<GidiConfig>[]>;
 
+// overload untuk IFP
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'ifp',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<IfpConfig>[]>;
+
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy' | 'gidi',
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp',
   opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
-  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig>>
+  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig> | ResultSub<IfpConfig>>
 > {
   const isWeekend = opts.schedule
     ? opts.schedule === 'weekend'
@@ -139,6 +147,20 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<OyConfig>;
+    } else if (provider === 'ifp') {
+      const raw = s.credentials as any;
+      if (!raw?.baseUrl || !raw?.clientId || !raw?.clientSecret) {
+        throw new Error(`Invalid IFP credentials for sub_merchant ${s.id}`);
+      }
+      const cfg: IfpConfig = {
+        baseUrl: raw.baseUrl,
+        clientId: raw.clientId,
+        clientSecret: raw.clientSecret,
+      };
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<IfpConfig>;
     } else {
       // gidi
       const raw = s.credentials as any;
@@ -177,6 +199,7 @@ export async function getActiveProvidersForClient(
   const hilogateSubs = await getActiveProviders(merchantId, 'hilogate', opts);
   const oySubs = await getActiveProviders(merchantId, 'oy', opts);
   const gidiSubs = await getActiveProviders(merchantId, 'gidi', opts);
+  const ifpSubs = await getActiveProviders(merchantId, 'ifp', opts);
 
   return [
     /* ──── Hilogate ──── */
@@ -219,6 +242,32 @@ export async function getActiveProvidersForClient(
           ewallet_code: 'DANA',
         });
         return resp.checkout_url;
+      },
+    },
+
+    /* ──── IFP ──── */
+    {
+      name: 'ifp',
+      supportsQR: true,
+      async generateQR({ orderId, amount }) {
+        if (!ifpSubs.length) throw new Error('No active IFP credentials');
+        const cfg = ifpSubs[0].config as IfpConfig;
+        const client = new IfpClient(cfg);
+        const resp = await client.createQrPayment({
+          amount,
+          customer: { name: orderId },
+        });
+        return resp.qr_string;
+      },
+      async generateCheckoutUrl({ orderId, amount }) {
+        if (!ifpSubs.length) throw new Error('No active IFP credentials');
+        const cfg = ifpSubs[0].config as IfpConfig;
+        const client = new IfpClient(cfg);
+        const resp = await client.createQrPayment({
+          amount,
+          customer: { name: orderId },
+        });
+        return resp.qr_url;
       },
     },
 
