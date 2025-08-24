@@ -133,6 +133,12 @@ router.get(
  *     summary: List all withdrawals for this client
  *     security:
  *       - clientAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: ref
+ *         schema:
+ *           type: string
+ *         description: Filter by partial reference ID (case-insensitive)
  *     responses:
  *       200:
  *         description: List of withdrawals
