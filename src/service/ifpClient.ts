@@ -78,40 +78,33 @@ export class IfpClient {
     const token = await this.getToken();
     const ts = isoTimestamp();
 
-    let body: any;
-    let extId = req.external_id || Date.now().toString();
+    const extId = req.external_id || Date.now().toString();
 
     const paymentDetails = {
       amount: req.amount,
       ...(req.payment_details || {}),
     };
 
-    if (req.external_id) {
-      body = {
-        external_id: req.external_id,
-        order_id: req.order_id || req.external_id,
-        currency: req.currency || 'IDR',
-        payment_method: req.payment_method || 'wallet',
-        payment_channel: req.payment_channel,
-        payment_details: paymentDetails,
-        customer_details: req.customer_details || {},
-        wallet_details: req.wallet_details || {},
-        callback_url: req.callback_url,
-      };
-    } else {
-      body = {
-        partnerReferenceNo: req.customer?.id || extId,
-        currency: req.currency || 'IDR',
-        payment_method: req.payment_method || 'wallet',
-        payment_channel: req.payment_channel,
-        payment_details: paymentDetails,
-        additionalInfo: {
-          customerName: req.customer?.name,
-          customerPhone: req.customer?.phone,
-          customerEmail: req.customer?.email,
-        },
-      };
-    }
+    const body = {
+      external_id: extId,
+      order_id: req.order_id || extId,
+      currency: req.currency || 'IDR',
+      payment_method: req.payment_method || 'wallet',
+      payment_channel: req.payment_channel,
+      payment_details: paymentDetails,
+      customer_details:
+        req.customer_details ||
+        (req.customer
+          ? {
+              name: req.customer.name,
+              phone: req.customer.phone,
+              email: req.customer.email,
+              id: req.customer.id,
+            }
+          : {}),
+      wallet_details: req.wallet_details || {},
+      callback_url: req.callback_url,
+    };
 
     const payloadHex = crypto
       .createHash('sha256')
@@ -130,11 +123,12 @@ export class IfpClient {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
-        'X-PARTNER-ID': this.clientId,
-        'X-EXTERNAL-ID': extId,
-        'X-TIMESTAMP': ts,
-        'X-SIGNATURE': signature,
-        'CHANNEL-ID': 'api',
+        'x-partner-id': this.clientId,
+        'x-external-id': extId,
+        'x-timestamp': ts,
+        'x-req-signature': signature,
+        'x-version': 'v3',
+        'channel-id': 'api',
       },
     });
 
