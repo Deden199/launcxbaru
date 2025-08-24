@@ -891,12 +891,6 @@ export default function DashboardPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Profit per sub</h2>
-          {!loadingProfit && (
-            <div className="text-xs text-neutral-400">
-              Total profit:&nbsp;
-              <b>{totalProfit.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}</b>
-            </div>
-          )}
         </div>
         {loadingProfitSub ? (
           <div className="flex items-center gap-2 text-sm text-neutral-400">
@@ -908,6 +902,14 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {!loadingProfit && (
+              <div className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/70 shadow-sm">
+                <div className="text-sm text-neutral-400">Total profit</div>
+                <div className="mt-1 text-xl font-semibold">
+                  {totalProfit.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+                </div>
+              </div>
+            )}
             {profitSubs.length > 0 ? (
               profitSubs.map(p => (
                 <div key={p.subMerchantId} className="rounded-2xl border border-neutral-800 p-4 bg-neutral-900/70 shadow-sm">
