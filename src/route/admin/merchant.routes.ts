@@ -41,6 +41,7 @@ router.use('/:id/pg', subMerchantRouter)
 
 // Admin Dashboard: transaksi, summary, profit, withdrawals, export
 router.get('/dashboard/transactions', ctrl.getDashboardTransactions)
+router.get('/dashboard/volume',       ctrl.getDashboardVolume)
 router.get('/dashboard/summary',      ctrl.getDashboardSummary)
 router.get('/dashboard/profit',       ctrl.getPlatformProfit)
 router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
