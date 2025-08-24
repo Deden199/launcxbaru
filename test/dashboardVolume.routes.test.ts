@@ -9,9 +9,9 @@ import { prisma } from '../src/core/prisma'
 const { getDashboardVolume } = require('../src/controller/admin/merchant.controller')
 
 test('getDashboardVolume returns buckets', async () => {
-  const paidAt = new Date()
-  ;(prisma as any).$queryRaw = async () => [
-    { bucket: paidAt, totalAmount: 100, count: 2 },
+  const paidBucket = new Date().toISOString()
+  ;(prisma as any).order.aggregateRaw = async () => [
+    { _id: paidBucket, totalAmount: 100, count: 2 },
   ]
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
@@ -23,7 +23,7 @@ test('getDashboardVolume returns buckets', async () => {
   assert.deepEqual(res.body, {
     buckets: [
       {
-        bucket: paidAt.toISOString(),
+        bucket: paidBucket,
         totalAmount: 100,
         count: 2,
       },
@@ -32,8 +32,8 @@ test('getDashboardVolume returns buckets', async () => {
 })
 
 test('getDashboardVolume filters null buckets', async () => {
-  ;(prisma as any).$queryRaw = async () => [
-    { bucket: null, totalAmount: 50, count: 1 },
+  ;(prisma as any).order.aggregateRaw = async () => [
+    { _id: null, totalAmount: 50, count: 1 },
   ]
   const app = express()
   app.get('/dashboard/volume', getDashboardVolume)
