@@ -18,7 +18,6 @@ test('getDashboardVolume returns buckets', async () => {
 
   const res = await request(app)
     .get('/dashboard/volume')
-    .query({ granularity: 'hour' })
 
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, {
