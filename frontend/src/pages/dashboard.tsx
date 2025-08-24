@@ -515,17 +515,19 @@ export default function DashboardPage() {
         { params }
       )
 
-      const mapped = data.buckets.map(b => {
-        const dtJak = new Date(new Date(b.bucket).toLocaleString('en-US', { timeZone: TZ }))
-        if (granularity === 'hour') {
-          const dayKey = fmtISODateJak(dtJak)
-          const h = String(dtJak.getHours()).padStart(2, '0')
-          return { key: `${dayKey} ${h}`, label: `${h}:00`, amount: b.totalAmount, count: b.count }
-        }
-        const key = fmtISODateJak(dtJak)
-        const [y, m, d] = key.split('-')
-        return { key, label: `${d}/${m}`, amount: b.totalAmount, count: b.count }
-      })
+      const mapped = Array.isArray(data?.buckets)
+        ? data.buckets.map(b => {
+            const dtJak = new Date(new Date(b.bucket).toLocaleString('en-US', { timeZone: TZ }))
+            if (granularity === 'hour') {
+              const dayKey = fmtISODateJak(dtJak)
+              const h = String(dtJak.getHours()).padStart(2, '0')
+              return { key: `${dayKey} ${h}`, label: `${h}:00`, amount: b.totalAmount, count: b.count }
+            }
+            const key = fmtISODateJak(dtJak)
+            const [y, m, d] = key.split('-')
+            return { key, label: `${d}/${m}`, amount: b.totalAmount, count: b.count }
+          })
+        : []
 
       setVolumeSeries(mapped)
     } catch (e) {
