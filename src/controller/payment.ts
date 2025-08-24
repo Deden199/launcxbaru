@@ -39,6 +39,15 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     // 3) flow
     const flow = req.body.flow === 'redirect' ? 'redirect' : 'embed'
 
+    const paymentChannel = req.body.paymentChannel ?? req.body.payment_channel
+    const customerEmail = req.body.customerEmail ?? req.body.customer_email
+    const customerFullName = req.body.customerFullName ?? req.body.customer_full_name
+    const customerPhone = req.body.customerPhone ?? req.body.customer_phone
+    const walletId = req.body.walletId ?? req.body.wallet_id
+    const walletIdType = req.body.walletIdType ?? req.body.wallet_id_type
+    const transactionDescription = req.body.transactionDescription ?? req.body.transaction_description
+    const expiredTime = req.body.expiredTime ?? req.body.expired_time
+
     // 4) validate
     if (isNaN(price) || price <= 0) {
       return res
@@ -103,7 +112,15 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
       playerId,
       flow,
       subMerchantId: selectedSubMerchantId,     // ← ambil dari logic kamu
-      sourceProvider: defaultProvider
+      sourceProvider: defaultProvider,
+      paymentChannel,
+      customerEmail,
+      customerFullName,
+      customerPhone,
+      walletId,
+      walletIdType,
+      transactionDescription,
+      expiredTime,
     }
 
     // 6) Call service
