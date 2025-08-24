@@ -259,7 +259,9 @@ export default function DashboardPage() {
 
   // Transactions table state
   const [loadingTx, setLoadingTx] = useState(true)
+  const [loadingVolume, setLoadingVolume] = useState(true)
   const [txs, setTxs] = useState<Tx[]>([])
+  const [volumeTxs, setVolumeTxs] = useState<Tx[]>([])
   const [totalTrans, setTotalTrans] = useState(0)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
@@ -277,8 +279,8 @@ export default function DashboardPage() {
 
   // Volume series (hour/day WIB)
   const volumeSeries = useMemo(
-    () => bucketizeTransactions(txs, chartStart, chartEnd, granularity),
-    [txs, chartStart, chartEnd, granularity]
+    () => bucketizeTransactions(volumeTxs, chartStart, chartEnd, granularity),
+    [volumeTxs, chartStart, chartEnd, granularity]
   )
 
   const topProfit = useMemo(() => {
@@ -562,6 +564,50 @@ export default function DashboardPage() {
     }
   }
 
+  const fetchVolumeSeries = async () => {
+    setLoadingVolume(true)
+    try {
+      const params = buildParams()
+      delete params.page
+      delete params.limit
+      const { data } = await api.get<{ transactions: RawTx[] }>(
+        '/admin/merchants/dashboard/volume',
+        { params }
+      )
+
+      const VALID_STATUSES: Tx['status'][] = ['SUCCESS', 'PENDING', 'EXPIRED', 'DONE', 'PAID']
+
+      const mapped: Tx[] = data.transactions.map(o => {
+        const raw = o.status ?? ''
+        const statusTyped: Tx['status'] = VALID_STATUSES.includes(raw as Tx['status'])
+          ? (raw as Tx['status'])
+          : ''
+        return {
+          id: o.id,
+          date: o.date,
+          rrn: o.rrn ?? '-',
+          playerId: o.playerId,
+          amount: o.amount ?? 0,
+          feeLauncx: o.feeLauncx ?? 0,
+          feePg: o.feePg ?? 0,
+          netSettle: o.netSettle,
+          status: statusTyped,
+          settlementStatus: o.settlementStatus.replace(/_/g, ' '),
+          paymentReceivedTime: o.paymentReceivedTime ?? '',
+          settlementTime: o.settlementTime ?? '',
+          trxExpirationTime: o.trxExpirationTime ?? '',
+          channel: o.channel ?? '-',
+        }
+      })
+
+      setVolumeTxs(mapped)
+    } catch (e) {
+      console.error('fetchVolumeSeries error', e)
+    } finally {
+      setLoadingVolume(false)
+    }
+  }
+
   const applyDateRange = () => {
     if (startDate && endDate) {
       setFrom(fmtISODateJak(startDate))
@@ -598,6 +644,11 @@ export default function DashboardPage() {
     fetchTransactions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, from, to, selectedMerchant, search, statusFilter, page, perPage])
+
+  useEffect(() => {
+    fetchVolumeSeries()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, from, to, selectedMerchant, search, statusFilter])
 
   if (loadingSummary) {
     return (
@@ -737,7 +788,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="h-64 relative text-indigo-400">
-            {loadingTx ? (
+            {loadingVolume ? (
               <div className="absolute inset-0 grid place-items-center text-sm text-neutral-400">Loading chart…</div>
             ) : volumeSeries.length === 0 || volumeSeries.every(d => d.amount === 0 && d.count === 0) ? (
               <div className="absolute inset-0 grid place-items-center text-sm text-neutral-400">No data for selected filters</div>
@@ -784,7 +835,7 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {!loadingTx && volumeSeries.length > 0 && (
+          {!loadingVolume && volumeSeries.length > 0 && (
             <div className="mt-3 text-xs text-neutral-400">
               Total amount:{' '}
               <b>
