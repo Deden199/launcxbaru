@@ -4,7 +4,7 @@ import { AuthRequest } from '../../middleware/auth'
 
 export async function listLogs(req: AuthRequest, res: Response) {
   const adminId = req.query.adminId as string | undefined
-    const { page = '1', limit = '50' } = req.query
+  const { page = '1', limit = '50' } = req.query
   const pageNum = Math.max(1, parseInt(page as string, 10))
   const pageSize = Math.min(100, parseInt(limit as string, 10))
   const where: any = {}
@@ -16,6 +16,7 @@ export async function listLogs(req: AuthRequest, res: Response) {
       orderBy: { createdAt: 'desc' },
       skip: (pageNum - 1) * pageSize,
       take: pageSize,
+      include: { admin: { select: { name: true } } },
     }),
     prisma.adminLog.count({ where }),
   ])

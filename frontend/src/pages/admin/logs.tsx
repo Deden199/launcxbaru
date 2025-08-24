@@ -10,6 +10,7 @@ interface AdminLog {
   action: string
   target?: string
   adminId: string
+  admin: { name: string }
   createdAt: string
 }
 
@@ -87,7 +88,7 @@ export default function AdminLogsPage() {
                   <tr className="border-y border-neutral-800 bg-neutral-900/80 backdrop-blur">
                     <th className="px-4 py-2 text-left font-medium text-neutral-300">Aksi</th>
                     <th className="px-4 py-2 text-left font-medium text-neutral-300">Target</th>
-                    <th className="px-4 py-2 text-left font-medium text-neutral-300">Admin ID</th>
+                    <th className="px-4 py-2 text-left font-medium text-neutral-300">Admin</th>
                     <th className="px-4 py-2 text-left font-medium text-neutral-300">Waktu</th>
                   </tr>
                 </thead>
@@ -101,7 +102,10 @@ export default function AdminLogsPage() {
                           <span className="inline-grid h-7 w-7 place-items-center rounded-lg border border-neutral-800 bg-neutral-900">
                             <User size={14} className="opacity-80" />
                           </span>
-                          <span className="font-mono text-[13px]">{log.adminId}</span>
+                          <span className="flex flex-col">
+                            <span>{log.admin.name}</span>
+                            <span className="font-mono text-[13px] text-neutral-400">{log.adminId}</span>
+                          </span>
                         </span>
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">
