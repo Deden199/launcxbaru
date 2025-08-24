@@ -630,7 +630,7 @@ export default function DashboardPage() {
       return `Payment Volume (${day.toLocaleDateString('id-ID', { timeZone: TZ })} • per jam)`
     }
     if (range === 'custom' && startDate && endDate) {
-      return `Payment Volume (${startDate.toLocaleDateString('id-ID')} – ${endDate.toLocaleDateString('id-ID')})`
+      return `Payment Volume (${startDate.toLocaleDateString('id-ID', { timeZone: TZ })} – ${endDate.toLocaleDateString('id-ID', { timeZone: TZ })})`
     }
     const map: Record<typeof range, string> = {
       today: 'Payment Volume (Hari ini)',
