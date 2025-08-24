@@ -211,15 +211,12 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
 
-  // Chart bounds & granularity (WIB)
-  const { chartStart, chartEnd, granularity } = useMemo(() => {
+  // Chart granularity (WIB)
+  const granularity = useMemo(() => {
     if (range === 'custom' && startDate && endDate) {
-      const s = startOfDayJak(startDate)
-      const e = endOfDayJak(endDate)
-      return { chartStart: s, chartEnd: e, granularity: getGranularity(range, startDate, endDate) }
+      return getGranularity(range, startDate, endDate)
     }
-    const { start, end } = getPresetBounds(range as 'today' | 'yesterday' | 'week' | 'month')
-    return { chartStart: start, chartEnd: end, granularity: getGranularity(range, null, null) }
+    return getGranularity(range, null, null)
   }, [range, startDate, endDate])
 
   const topProfit = useMemo(() => {
@@ -512,8 +509,7 @@ export default function DashboardPage() {
         { params }
       )
 
-      // Map API buckets by timestamp key for quick lookup
-      const mapped = Array.isArray(data?.buckets)
+      const volumeSeries = Array.isArray(data?.buckets)
         ? data.buckets.map(b => {
             const dtJak = new Date(new Date(b.bucket).toLocaleString('en-US', { timeZone: TZ }))
             if (granularity === 'hour') {
@@ -527,30 +523,7 @@ export default function DashboardPage() {
           })
         : []
 
-      const bucketMap = new Map(mapped.map(m => [m.key, { amount: m.amount, count: m.count }]))
-
-      // Build full timestamp series from chartStart to chartEnd
-      const series: { key: string; label: string; amount: number; count: number }[] = []
-      const cursor = new Date(chartStart)
-      while (cursor <= chartEnd) {
-        const dtJak = new Date(cursor.toLocaleString('en-US', { timeZone: TZ }))
-        if (granularity === 'hour') {
-          const dayKey = fmtISODateJak(dtJak)
-          const h = String(dtJak.getHours()).padStart(2, '0')
-          const key = `${dayKey} ${h}`
-          const existing = bucketMap.get(key) || { amount: 0, count: 0 }
-          series.push({ key, label: `${h}:00`, amount: existing.amount, count: existing.count })
-          cursor.setHours(cursor.getHours() + 1)
-        } else {
-          const key = fmtISODateJak(dtJak)
-          const [y, m, d] = key.split('-')
-          const existing = bucketMap.get(key) || { amount: 0, count: 0 }
-          series.push({ key, label: `${d}/${m}`, amount: existing.amount, count: existing.count })
-          cursor.setDate(cursor.getDate() + 1)
-        }
-      }
-
-      setVolumeSeries(series)
+      setVolumeSeries(volumeSeries)
     } catch (e) {
       console.error('fetchVolumeSeries error', e)
     } finally {
