@@ -1,23 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import apiClient from '@/lib/apiClient'
 import { X } from 'lucide-react'
-import styles from './ClientAuth.module.css'
 
-// LoginForm v2.0 – persist message across remounts via sessionStorage
 export default function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [otp, setOtp] = useState('')
-  const [message, setMessage] = useState('')      
-  const [isError, setIsError] = useState(false)   
+  const [message, setMessage] = useState('')
+  const [isError, setIsError] = useState(false)
   const [otpRequired, setOtpRequired] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
-  // On mount, restore any prior message
+  // restore persisted state
   useEffect(() => {
     const storedMsg = sessionStorage.getItem('loginMessage')
     const storedErr = sessionStorage.getItem('loginIsError')
@@ -26,43 +24,45 @@ export default function LoginForm() {
       setMessage(storedMsg)
       setIsError(storedErr === 'true')
     }
-    if (storedOtpReq === 'true') {
-      setOtpRequired(true)
-    }
+    if (storedOtpReq === 'true') setOtpRequired(true)
   }, [])
 
-  // Helper to set message + persist
-  function showMessage(msg: string, error = false) {
+  const showMessage = (msg: string, error = false) => {
     setMessage(msg)
     setIsError(error)
     sessionStorage.setItem('loginMessage', msg)
     sessionStorage.setItem('loginIsError', error ? 'true' : 'false')
   }
-  function clearMessage() {
+  const clearMessage = () => {
     setMessage('')
     setIsError(false)
     sessionStorage.removeItem('loginMessage')
     sessionStorage.removeItem('loginIsError')
+  }
+  const clearOtpFlag = () => {
+    setOtpRequired(false)
+    sessionStorage.removeItem('loginOtpRequired')
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
     setLoading(true)
-
     try {
-      const payload: any = { email, password }
-      if (otpRequired) payload.otp = otp
+      const payload: any = {
+        email: email.trim().toLowerCase(),
+        password,
+      }
+      if (otpRequired) payload.otp = otp.trim()
 
       const { data } = await apiClient.post('/client/login', payload)
 
-      // on success: clear both state and storage, then redirect
       clearMessage()
+      clearOtpFlag()
       localStorage.setItem('clientToken', data.token)
       router.push('/client/dashboard')
-
     } catch (err: any) {
-      const res = err.response
+      const res = err?.response
       const msg = res?.data?.error || ''
 
       if (res?.status === 400 && msg === 'OTP wajib diisi') {
@@ -86,63 +86,94 @@ export default function LoginForm() {
     }
   }
 
-  const dismiss = () => clearMessage()
-
   return (
-    <div className={styles.container}>
-      <div className={styles.card}>
-        <h1 className={styles.title}>Client Dashboard v1.2 Login</h1>
+    // paksa dark mode di halaman login
+    <div className="dark min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/70 p-6 shadow-xl">
+        <h1 className="mb-5 text-center text-xl font-semibold tracking-tight">
+          Client Dashboard v1.2 Login
+        </h1>
 
         {message && (
-          <div className={isError ? styles.error : styles.info}>
-            <span>{message}</span>
-            <button type="button" onClick={dismiss} className={styles.closeButton}>
+          <div
+            role="alert"
+            aria-live="polite"
+            className={[
+              'mb-4 flex items-start justify-between gap-3 rounded-xl border px-3 py-2 text-sm',
+              isError
+                ? 'border-rose-900/40 bg-rose-950/40 text-rose-300'
+                : 'border-blue-900/40 bg-blue-950/40 text-blue-200',
+            ].join(' ')}
+          >
+            <span className="pt-0.5">{message}</span>
+            <button
+              type="button"
+              onClick={clearMessage}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-transparent hover:bg-white/5"
+              aria-label="Dismiss message"
+            >
               <X size={16} />
             </button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className={styles.form} autoComplete="off">
+        <form onSubmit={handleSubmit} className="space-y-3" autoComplete="off">
           {/* dummy hidden fields to absorb Chrome prompts */}
-          <input type="text" name="fakeuser" style={{ display: 'none' }} />
-          <input type="password" name="fakepass" style={{ display: 'none' }} />
+          <input type="text" name="fakeuser" className="hidden" />
+          <input type="password" name="fakepass" className="hidden" />
 
-          <input
-            name="username"
-            className={styles.input}
-            type="email"
-            placeholder="Email"
-            value={email}
-            autoComplete="username"
-            onChange={e => setEmail(e.target.value)}
-            required
-          />
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Email</span>
+            <input
+              name="username"
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full h-11 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none ring-0 placeholder:text-neutral-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+            />
+          </label>
 
-          <input
-            name="current-password"
-            className={styles.input}
-            type="password"
-            placeholder="Password"
-            value={password}
-            autoComplete="current-password"
-            onChange={e => setPassword(e.target.value)}
-            required
-          />
+          <label className="block">
+            <span className="mb-1 block text-xs text-neutral-400">Password</span>
+            <input
+              name="current-password"
+              type="password"
+              placeholder="••••••••"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full h-11 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none ring-0 placeholder:text-neutral-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+            />
+          </label>
 
           {otpRequired && (
-            <input
-              name="totp"
-              className={styles.input}
-              type="text"
-              placeholder="Authenticator Code"
-              value={otp}
-              autoComplete="one-time-code"
-              onChange={e => setOtp(e.target.value)}
-              required
-            />
+            <label className="block">
+              <span className="mb-1 block text-xs text-neutral-400">
+                Authenticator Code
+              </span>
+              <input
+                name="totp"
+                type="text"
+                inputMode="numeric"
+                placeholder="6-digit code"
+                autoComplete="one-time-code"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                required
+                className="w-full h-11 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none ring-0 placeholder:text-neutral-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+              />
+            </label>
           )}
 
-          <button type="submit" className={styles.button} disabled={loading}>
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+          >
             {loading
               ? otpRequired
                 ? 'Verifying...'

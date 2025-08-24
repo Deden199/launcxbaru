@@ -1,0 +1,129 @@
+/* ===== Dark theme for react-datepicker ===== */
+:root .dark .react-datepicker,
+:root .dark .react-datepicker__header {
+  background-color: #0a0a0a;            /* neutral-950 */
+  color: #e5e5e5;                        /* neutral-200 */
+  border-color: #262626;                 /* neutral-800 */
+}
+
+:root .dark .react-datepicker {
+  border: 1px solid #262626;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
+
+:root .dark .react-datepicker__header {
+  border-bottom: 1px solid #262626;
+}
+
+:root .dark .react-datepicker__current-month,
+:root .dark .react-datepicker-time__header,
+:root .dark .react-datepicker-year-header {
+  color: #e5e5e5;
+  font-weight: 600;
+}
+
+:root .dark .react-datepicker__day-name,
+:root .dark .react-datepicker__day,
+:root .dark .react-datepicker__time-name {
+  color: #d4d4d4;                        /* neutral-300 */
+}
+
+:root .dark .react-datepicker__day--outside-month {
+  color: #737373;                        /* neutral-500 */
+  opacity: .7;
+}
+
+:root .dark .react-datepicker__day:hover {
+  background-color: #171717;             /* neutral-900 */
+  border-radius: 8px;
+}
+
+/* Selected day */
+:root .dark .react-datepicker__day--selected,
+:root .dark .react-datepicker__day--keyboard-selected {
+  background-color: #4f46e5 !important;  /* indigo-600 */
+  color: #ffffff !important;
+  border-radius: 8px;
+}
+
+/* Range selection */
+:root .dark .react-datepicker__day--in-range {
+  background-color: rgba(79,70,229,0.15) !important; /* indigo-600/15 */
+  color: #e5e5e5 !important;
+  border-radius: 0;                       /* dirapihkan via start/end */
+}
+
+:root .dark .react-datepicker__day--in-selecting-range {
+  background-color: rgba(79,70,229,0.12) !important;
+}
+
+/* Rounded caps for range ends */
+:root .dark .react-datepicker__day--range-start,
+:root .dark .react-datepicker__day--selecting-range-start,
+:root .dark .react-datepicker__day--range-end,
+:root .dark .react-datepicker__day--selecting-range-end {
+  background-color: #4f46e5 !important;
+  color: #fff !important;
+  border-radius: 8px;
+}
+
+/* Today dot */
+:root .dark .react-datepicker__day--today {
+  position: relative;
+}
+:root .dark .react-datepicker__day--today::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  background-color: #a3a3a3;             /* neutral-400 */
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
+/* Month container spacing */
+:root .dark .react-datepicker__month {
+  margin: 8px;
+}
+
+/* Triangle / arrow */
+:root .dark .react-datepicker__triangle {
+  display: none;                          /* kamu sudah pakai showPopperArrow={false} */
+}
+
+/* Time list (jika dipakai) */
+:root .dark .react-datepicker__time-container {
+  border-left: 1px solid #262626;
+}
+:root .dark .react-datepicker__time {
+  background-color: #0a0a0a;
+}
+:root .dark .react-datepicker__time-list-item {
+  color: #e5e5e5;
+}
+:root .dark .react-datepicker__time-list-item:hover {
+  background-color: #171717;
+}
+:root .dark .react-datepicker__time-list-item--selected {
+  background-color: #4f46e5 !important;
+  color: #fff !important;
+}
+
+/* Popper wrapper */
+:root .dark .dp-popper-dark {
+  z-index: 9999;
+}
+
+/* Input inline icon (kalau kamu pakai) */
+:root .dark .dp-input {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+  border: 1px solid #262626;
+}
+:root .dark .dp-input:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 4px rgba(79,70,229,.2);
+}

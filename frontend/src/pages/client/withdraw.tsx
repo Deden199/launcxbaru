@@ -1,35 +1,23 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import apiClient from '@/lib/apiClient'
-import axios from 'axios'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+import * as XLSX from 'xlsx'
+import { Plus, Clock, FileText, X, CheckCircle, ArrowUpDown } from 'lucide-react'
 import { oyCodeMap } from '../../utils/oyCodeMap'
 import { gidiChannelMap } from '../../utils/gidiChannelMap'
-import DatePicker from 'react-datepicker'
-import Select from 'react-select'
-
-import 'react-datepicker/dist/react-datepicker.css'
-import {
-  Plus,
-  Wallet,
-  Clock,
-  FileText,
-  X,
-  CheckCircle,
-  ArrowUpDown,
-} from 'lucide-react'
-import * as XLSX from 'xlsx'
-import styles from './WithdrawPage.module.css'
 
 type ClientOption = { id: string; name: string }
+type Provider = 'hilogate' | 'oy' | 'gidi' | string
 
 interface Withdrawal {
   id: string
   refId: string
-
   bankName: string
   accountNumber: string
-  accountName: string      // ← baru
+  accountName: string
   wallet: string
   netAmount: number
   withdrawFeePercent: number
@@ -37,14 +25,12 @@ interface Withdrawal {
   amount: number
   status: string
   createdAt: string
-    completedAt?: string
-
+  completedAt?: string
 }
 interface SubMerchant {
   id: string
   name: string
-
-  provider: string
+  provider: Provider
   balance: number
 }
 
@@ -54,30 +40,26 @@ function deriveAlias(fullName: string) {
   return `${parts[0]} ${parts[parts.length - 1][0]}.`
 }
 
-
-
-
 export default function WithdrawPage() {
-  /* ──────────────── Dashboard data ──────────────── */
+  // ── Dashboard
   const [balance, setBalance] = useState(0)
   const [pending, setPending] = useState(0)
-  const [pageError, setPageError] = useState('')
-const [dateRange, setDateRange] = useState<[Date|null, Date|null]>([null, null])
-const [startDate, endDate] = dateRange
+  const [pageError, setPageError] = useState<string>('')
 
-  /* ──────────────── Withdrawals list ──────────────── */
+  // ── Parent–Child & Subwallets
+  const [children, setChildren] = useState<ClientOption[]>([])
+  const [selectedChild, setSelectedChild] = useState<'all' | string>('all')
+  const [subs, setSubs] = useState<SubMerchant[]>([])
+  const [selectedSub, setSelectedSub] = useState<string>('') // default isi setelah fetch
+
+  // ── Banks
+  const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
+
+  // ── Withdrawals
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [loading, setLoading] = useState(true)
 
-  /* ──────────────── Parent–Child ──────────────── */
-  const [children, setChildren]           = useState<ClientOption[]>([])
-  const [selectedChild, setSelectedChild] = useState<'all' | string>('all')
-// data sub-merchant untuk source withdraw
-const [subs, setSubs] = useState<SubMerchant[]>([])
-// selectedSub akan sama dengan selectedChild di awal
-const [selectedSub, setSelectedSub] = useState<string>(selectedChild)
-
-  /* ──────────────── Modal & Form state ──────────────── */
+  // ── Modal/Form
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({
     bankCode: '',
@@ -88,88 +70,120 @@ const [selectedSub, setSelectedSub] = useState<string>(selectedChild)
     branchName: '',
     amount: '',
     otp: '',
-
   })
   const [isValid, setIsValid] = useState(false)
   const [busy, setBusy] = useState({ validating: false, submitting: false })
   const [error, setError] = useState('')
 
-  /* ──────────────── Filters & pagination ──────────────── */
+  // ── Filters & pagination
   const [searchRef, setSearchRef] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
-  const [banks, setBanks] = useState<{ code: string; name: string }[]>([])
-const bankOptions = banks.map(b => ({
-  value: b.code,
-  label: b.name
-}));
-  /* ──────────────── Initial fetch ──────────────── */
+  const [startDate, endDate] = dateRange
+
+  // ── Fetch stabil: cache + inflight dedupe + unmount guard + abort
+  const cacheRef = useRef<Map<string, Withdrawal[]>>(new Map())
+  const inflightRef = useRef<Map<string, Promise<Withdrawal[]>>>(new Map())
+  const mountedRef = useRef(true)
   useEffect(() => {
-    apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
-      .then(res => setBanks(res.data.banks))
-      .catch(console.error)
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
   }, [])
 
-useEffect(() => {
-  apiClient
-    .get<SubMerchant[]>('/client/withdrawals/submerchants', {
-      params: { clientId: selectedChild }
-    })    .then(res => {
-      setSubs(res.data)
-      // <-- tambahkan ini:
-      if (res.data.length > 0) {
-        setSelectedSub(res.data[0].id)
-      }
-    })
-    .catch(console.error)
-}, [selectedChild])
+  // Banks (once)
+  useEffect(() => {
+    let cancelled = false
+    apiClient.get<{ banks: { code: string; name: string }[] }>('/banks')
+      .then(res => { if (!cancelled) setBanks(res.data.banks) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Subwallets by child
+  useEffect(() => {
+    let cancelled = false
+    apiClient.get<SubMerchant[]>('/client/withdrawals/submerchants', { params: { clientId: selectedChild } })
+      .then(res => {
+        if (cancelled) return
+        setSubs(res.data || [])
+        if (!selectedSub || !res.data.find(s => s.id === selectedSub)) {
+          if (res.data[0]) setSelectedSub(res.data[0].id)
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChild])
 
   async function fetchAllWithdrawals(cid: string | 'all') {
-    let pageNum = 1
-    const limit = 100
-    const first = await apiClient.get<{ data: Withdrawal[]; total: number }>(
-      '/client/withdrawals',
-      { params: { clientId: cid, page: pageNum, limit } }
-    )
-    let all = first.data.data
-    const total = first.data.total
-    while (all.length < total) {
-      pageNum += 1
-      const res = await apiClient.get<{ data: Withdrawal[]; total: number }>(
-        '/client/withdrawals',
-        { params: { clientId: cid, page: pageNum, limit } }
-      )
-      all = all.concat(res.data.data)
-    }
-    return all
-  }
-  useEffect(() => {
-    setLoading(true)
-    setPageError('')
+    const key = String(cid)
+    const cached = cacheRef.current.get(key)
+    if (cached) return cached
 
+    const inflight = inflightRef.current.get(key)
+    if (inflight) return inflight
+
+    const req = (async () => {
+      const controller = new AbortController()
+      const limit = 200
+      let pageNum = 1
+
+      // page 1
+      const first = await apiClient.get<{ data: Withdrawal[]; total: number }>(
+        '/client/withdrawals',
+        { params: { clientId: cid, page: pageNum, limit }, signal: controller.signal }
+      )
+      let all = first.data.data
+      const total = first.data.total
+
+      while (all.length < total) {
+        pageNum += 1
+        const res = await apiClient.get<{ data: Withdrawal[]; total: number }>(
+          '/client/withdrawals',
+          { params: { clientId: cid, page: pageNum, limit }, signal: controller.signal }
+        )
+        all = all.concat(res.data.data)
+      }
+      cacheRef.current.set(key, all)
+      inflightRef.current.delete(key)
+      return all
+    })()
+
+    inflightRef.current.set(key, req)
+    return req
+  }
+
+  // Dashboard + withdrawals on child change
+  useEffect(() => {
+    let cancelled = false
     const load = async () => {
+      setLoading(true); setPageError('')
       try {
-        const dash = await apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>('/client/dashboard', {
-          params: { clientId: selectedChild }
-        })
+        const dash = await apiClient.get<{ balance: number; totalPending: number; children: ClientOption[] }>(
+          '/client/dashboard', { params: { clientId: selectedChild } }
+        )
         const all = await fetchAllWithdrawals(selectedChild)
+        if (cancelled || !mountedRef.current) return
         setBalance(dash.data.balance)
         setPending(dash.data.totalPending ?? 0)
-        if (children.length === 0) setChildren(dash.data.children)
+        if (children.length === 0) setChildren(dash.data.children || [])
         setWithdrawals(all)
-      } catch {
-        setPageError('Failed to load data')
+      } catch (e: any) {
+        if (cancelled || !mountedRef.current) return
+        setPageError(e?.message || 'Failed to load data')
       } finally {
+        if (cancelled || !mountedRef.current) return
         setLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChild])
 
-  /* ──────────────── Helpers ──────────────── */
+  // ── Handlers
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setForm(f => ({ ...f, [name]: value }))
@@ -180,165 +194,107 @@ useEffect(() => {
       else setError('')
     } else setError('')
     if (name === 'bankCode' || name === 'accountNumber') {
-      setForm(f => ({
-        ...f,
-        accountName:      '',
-        accountNameAlias: '',
-        bankName:         '',
-        branchName:       '',
-      }))
+      setForm(f => ({ ...f, accountName: '', accountNameAlias: '', bankName: '', branchName: '' }))
       setIsValid(false)
     }
   }
 
   const validateAccount = async () => {
-  setBusy(b => ({ ...b, validating: true }))
-  setError('')
-  try {
-    // 1) Override validateStatus supaya axios gak langsung throw
-    const res = await apiClient.post(
-      '/client/withdrawals/validate-account',
-      {
-        bank_code:      form.bankCode,
-        account_number: form.accountNumber,
-      },
-      {
-        validateStatus: () => true // semua status dianggap “OK” di level axios
+    setBusy(b => ({ ...b, validating: true })); setError('')
+    try {
+      const res = await apiClient.post(
+        '/client/withdrawals/validate-account',
+        { bank_code: form.bankCode, account_number: form.accountNumber },
+        { validateStatus: () => true }
+      )
+      if (res.status === 200 && res.data.status === 'valid') {
+        const holder = res.data.account_holder as string
+        const bankObj = banks.find(b => b.code === form.bankCode)
+        setForm(f => ({
+          ...f,
+          accountName: holder,
+          accountNameAlias: deriveAlias(holder),
+          bankName: bankObj?.name || '',
+          branchName: '',
+        }))
+        setIsValid(true)
+      } else {
+        setIsValid(false)
+        setError(res.data.error || 'Rekening bank tidak ditemukan')
       }
-    )
-
-    // 2) Tangani berdasarkan HTTP status
-    if (res.status === 200 && res.data.status === 'valid') {
-      // berhasil validasi
-      const holder  = res.data.account_holder as string
-      const bankObj = banks.find(b => b.code === form.bankCode)
-
-      setForm(f => ({
-        ...f,
-        accountName:      holder,
-        accountNameAlias: deriveAlias(holder),
-        bankName:         bankObj?.name || '',
-        branchName:       '',
-      }))
-      setIsValid(true)
-
-    } else {
-      // baik 400 maupun 500 atau status lain, baca pesan backend atau fallback
-      const msg = res.data.error || 'Rekening bank tidak ditemukan'
+    } catch {
       setIsValid(false)
-      setError(msg)
+      setError('Gagal koneksi ke server')
+    } finally {
+      setBusy(b => ({ ...b, validating: false }))
     }
-
-  } catch {
-    // benar‑benar gagal koneksi / exception lain
-    setIsValid(false)
-    setError('Gagal koneksi ke server')
-  } finally {
-    setBusy(b => ({ ...b, validating: false }))
   }
-}
 
-const submit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!isValid || error) return;
-  setBusy(b => ({ ...b, submitting: true }));
-  setError('');
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!isValid || error) return
+    setBusy(b => ({ ...b, submitting: true })); setError('')
+    try {
+      const provider = subs.find(s => s.id === selectedSub)?.provider || 'hilogate'
+      const bankObj = banks.find(b => b.code === form.bankCode)
+      const payloadBankCode =
+        provider === 'oy'
+          ? oyCodeMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
+          : provider === 'gidi'
+          ? gidiChannelMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
+          : form.bankCode
 
-  try {
-    // 1) Tentukan provider & kode bank payload
-    const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy' | 'gidi'
-    const bankObj = banks.find(b => b.code === form.bankCode);
+      const body: any = {
+        subMerchantId: selectedSub,
+        sourceProvider: provider,
+        account_number: form.accountNumber,
+        bank_code: payloadBankCode,
+        account_name_alias: form.accountNameAlias,
+        amount: +form.amount,
+        otp: form.otp,
+      }
+      if (provider === 'oy' || provider === 'gidi') {
+        body.bank_name = form.bankName
+        body.account_name = form.accountName
+      }
 
-    const payloadBankCode = provider === 'oy'
-      ? oyCodeMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
-      : provider === 'gidi'
-        ? gidiChannelMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
-        : form.bankCode;
-
-    // 2) Siapkan body
-    const body: any = {
-      subMerchantId:      selectedSub,
-      sourceProvider:     provider,
-      account_number:     form.accountNumber,
-      bank_code:          payloadBankCode,
-      account_name_alias: form.accountNameAlias,
-      amount:             +form.amount,
-      otp:                form.otp,
-    };
-    if (provider === 'oy' || provider === 'gidi') {
-      body.bank_name     = form.bankName;
-      body.account_name  = form.accountName;
+      const res = await apiClient.post('/client/withdrawals', body, { validateStatus: () => true })
+      if (res.status === 201) {
+        cacheRef.current.delete(String(selectedChild)) // invalidate cache
+        const [dash, all] = await Promise.all([
+          apiClient.get('/client/dashboard', { params: { clientId: selectedChild } }),
+          fetchAllWithdrawals(selectedChild),
+        ])
+        if (!mountedRef.current) return
+        setBalance(dash.data.balance)
+        setPending(dash.data.totalPending ?? 0)
+        setWithdrawals(all)
+        setForm(f => ({ ...f, amount: '', accountName: '', accountNameAlias: '', bankName: '', branchName: '', otp: '' }))
+        setIsValid(false)
+        setOpen(false)
+      } else if (res.status === 400) {
+        setError(res.data.error || 'Data tidak valid')
+      } else if (res.status === 403) {
+        setError('Forbidden: Tidak dapat withdraw menggunakan akun parent')
+      } else {
+        setError('Submit gagal: periksa lagi informasi rekening bank')
+      }
+    } catch {
+      setError('Gagal koneksi ke server')
+    } finally {
+      setBusy(b => ({ ...b, submitting: false }))
     }
-
-    // 3) Kirim tanpa auto‑throw untuk status ≥400
-    const res = await apiClient.post(
-      '/client/withdrawals',
-      body,
-      { validateStatus: () => true }
-    );
-
-    // 4) Tangani berdasarkan HTTP status
-    if (res.status === 201) {
-      // sukses: refresh data & tutup modal
-      const dash = await apiClient.get('/client/dashboard')
-      const all = await fetchAllWithdrawals(selectedChild)
-      setBalance(dash.data.balance)
-      setPending(dash.data.totalPending ?? 0)
-      setWithdrawals(all)
-      setForm(f => ({
-        ...f,
-        amount: '',
-        accountName: '',
-        accountNameAlias: '',
-        bankName: '',
-        branchName: '',
-        otp: '',
-      }));
-      setIsValid(false);
-      setOpen(false);
-
-    } else if (res.status === 400) {
-      // validasi gagal: tampilkan pesan backend
-      setError(res.data.error || 'Data tidak valid');
-
-    }  else if (res.status === 403) {
-  // <-- tambahkan ini
-  setError('Forbidden: Tidak dapat withdraw menggunakan akun parent');
-}
-    else {
-      // server error (>=500) atau status lain
-      setError('Submit gagal: periksa lagi informasi rekening bank');
-    }
-
-  } catch {
-    // benar‑benar network / exception lain
-    setError('Gagal koneksi ke server');
-  } finally {
-    setBusy(b => ({ ...b, submitting: false }));
   }
-}
-
 
   const exportToExcel = () => {
     const rows = [
-      ['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet', 'Amount', 'Fee', 'Net Amount', 'Status'],
+      ['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Amount','Fee','Net Amount','Status'],
       ...withdrawals.map(w => [
-        new Date(w.createdAt)
-          .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' }),
-                w.completedAt ? new Date(w.completedAt)
-          .toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' }) : '-',
-
-        w.refId,
-        w.bankName,
-        w.accountNumber,
-        w.accountName,      // ← baru
-        w.wallet,
-
-        w.amount,
-        w.amount - w.netAmount,
-        w.netAmount,
-        w.status,
-      ]),
+        new Date(w.createdAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }),
+        w.completedAt ? new Date(w.completedAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }) : '-',
+        w.refId, w.bankName, w.accountNumber, w.accountName, w.wallet,
+        w.amount, w.amount - w.netAmount, w.netAmount, w.status
+      ])
     ]
     const ws = XLSX.utils.aoa_to_sheet(rows)
     const wb = XLSX.utils.book_new()
@@ -346,351 +302,387 @@ const submit = async (e: React.FormEvent) => {
     XLSX.writeFile(wb, 'withdrawals.xlsx')
   }
 
-  /* ──────────────── Filtering & paging ──────────────── */
-  const filtered = withdrawals.filter(w => {
-    const d = new Date(w.createdAt)
-    if (searchRef && !w.refId.includes(searchRef)) return false
-    if (statusFilter && w.status !== statusFilter) return false
-if (startDate && d < startDate) return false
-if (endDate   && d > new Date(endDate.setHours(23,59,59))) return false
+  // ── Filter + paginate (client side)
+  const filtered = useMemo(() => {
+    return withdrawals.filter(w => {
+      if (searchRef && !w.refId.toLowerCase().includes(searchRef.toLowerCase())) return false
+      if (statusFilter && w.status !== statusFilter) return false
+      const d = new Date(w.createdAt)
+      if (startDate && d < startDate) return false
+      if (endDate) {
+        const eod = new Date(endDate.getTime()); eod.setHours(23,59,59,999)
+        if (d > eod) return false
+      }
+      return true
+    })
+  }, [withdrawals, searchRef, statusFilter, startDate, endDate])
 
-    return true
-  })
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
-  const pageData = filtered.slice((page - 1) * perPage, page * perPage)
+  const pageData = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage]
+  )
 
   return (
-    <div className={styles.page}>
-      {pageError && <p className={styles.pageError}>{pageError}</p>}
-      {children.length > 0 && (
-        <div className={styles.childSelector}>
-          <label>Pilih Child:&nbsp;</label>
-          <select value={selectedChild} onChange={e => setSelectedChild(e.target.value as any)}>
-            <option value="all">Semua Child</option>
-            {children.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+    <div className="dark min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="mx-auto max-w-7xl p-4 sm:p-6">
+        {pageError && (
+          <p className="mb-4 rounded-xl border border-rose-900/40 bg-rose-950/40 p-3 text-rose-300">
+            {pageError}
+          </p>
+        )}
 
-      {/* === STAT CARDS ===================================================== */}
-      <div className={styles.statsGrid}>
-        {/* Active balance
-        <div className={`${styles.statCard} ${styles.activeCard}`}>
-          <Wallet size={28} />
-          <div>
-            <p className={styles.statTitle}>Active Balance</p>
-            <p className={styles.statValue}>
-              Rp {balance.toLocaleString()}
-            </p>
-          </div>
-        </div> */}
-      {subs.length > 0 && (
-        <div className={`${styles.statCard} ${styles.activeCard} ${styles.subWalletContainer}`}>
-          {subs.map(s => (
-            <div
-              key={s.id}
-             className={s.id === selectedSub ? `${styles.subWalletCard} ${styles.selected}` : styles.subWalletCard}
-              onClick={() => setSelectedSub(s.id)}
+        {/* Child selector */}
+        {children.length > 0 && (
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <label className="text-sm text-neutral-400">Pilih Child:</label>
+            <select
+              className="h-10 rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
+              value={selectedChild}
+              onChange={e => { setSelectedChild(e.target.value as any); setPage(1) }}
             >
-              <h4>
-                {s.name || (s.provider
-                  ? s.provider.charAt(0).toUpperCase() + s.provider.slice(1)
-                  : `Sub-wallet ${s.id.substring(0,6)}`)}
-              </h4>
-              <p>Rp {s.balance.toLocaleString()}</p>
-            </div>
-          ))}
-        </div>
-      )}
+              <option value="all">Semua Child</option>
+              {children.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
 
-        {/* Pending balance */}
-        <div className={`${styles.statCard} ${styles.pendingCard}`}>
-          <Clock size={28} />
-          <div>
-            <p className={styles.statTitle}>Pending Balance</p>
-            <p className={styles.statValue}>
-              Rp {pending.toLocaleString()}
-            </p>
+        {/* Stats */}
+        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* Sub-wallets */}
+          <div className="md:col-span-2 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-3">
+            <div className="mb-2 text-sm text-neutral-400">Sub-wallets</div>
+            <div className="flex flex-wrap gap-3">
+              {subs.length ? subs.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelectedSub(s.id)}
+                  className={`rounded-xl border px-3 py-2 text-left transition
+                    ${s.id === selectedSub
+                      ? 'border-sky-500 bg-sky-500/10'
+                      : 'border-neutral-800 hover:bg-neutral-800/60'}`}
+                >
+                  <div className="text-sm font-medium">
+                    {s.name || (s.provider ? s.provider[0].toUpperCase()+s.provider.slice(1) : `Sub ${s.id.slice(0,6)}`)}
+                  </div>
+                  <div className="text-xs text-neutral-400">Rp {s.balance.toLocaleString()}</div>
+                </button>
+              )) : <div className="text-sm text-neutral-500">Tidak ada sub-wallet.</div>}
+            </div>
+          </div>
+
+          {/* Pending */}
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4 flex items-center gap-3">
+            <Clock className="opacity-70" />
+            <div>
+              <div className="text-sm text-neutral-400">Pending Balance</div>
+              <div className="text-lg font-semibold">Rp {pending.toLocaleString()}</div>
+            </div>
           </div>
         </div>
 
-        {/* New withdrawal button */}
-        <button className={styles.newBtn} onClick={() => setOpen(true)}>
-          <Plus size={18} /> New Withdrawal
-        </button>
-      </div>
-
-      {/* === HISTORY ======================================================= */}
-      <section className={styles.historyCard}>
-        <div className={styles.historyHeader}>
-          <h3>Withdrawal History</h3>
-          <button onClick={exportToExcel} className={styles.exportBtn}>
-            <FileText size={16} /> Excel
+        {/* Actions */}
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Withdrawal</h2>
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm hover:bg-neutral-800/60"
+          >
+            <Plus size={18} /> New Withdrawal
           </button>
         </div>
 
-    <div className={styles.withdrawFilters}>
-  <input
-    placeholder="Search Ref"
-    value={searchRef}
-    onChange={e => { setSearchRef(e.target.value); setPage(1) }}
-  />
-  <select
-    value={statusFilter}
-    onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-  >
-    <option value="">All Status</option>
-    <option>PENDING</option>
-    <option>COMPLETED</option>
-    <option>FAILED</option>
-  </select>
+        {/* History Card */}
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-4 sm:p-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-base font-semibold">Withdrawal History</h3>
+            <button
+              onClick={exportToExcel}
+              className="inline-flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-sm hover:bg-neutral-800/60"
+            >
+              <FileText size={16} /> Export Excel
+            </button>
+          </div>
 
-  {/* Date range picker */}
+          {/* Filters */}
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <input
+              placeholder="Search Ref…"
+              value={searchRef}
+              onChange={e => { setSearchRef(e.target.value); setPage(1) }}
+              className="h-10 rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
+            />
+            <select
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+              className="h-10 rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
+            >
+              <option value="">All Status</option>
+              <option>PENDING</option>
+              <option>COMPLETED</option>
+              <option>FAILED</option>
+            </select>
+<div className="relative md:col-span-2">
   <DatePicker
     selectsRange
     startDate={startDate}
     endDate={endDate}
-    onChange={(update: [Date|null,Date|null]) => {
-      setDateRange(update)
-      // kalau langsung ingin apply:
-      if (update[0] && update[1]) {
-        setDateFrom(update[0].toISOString().slice(0,10))
-        setDateTo(update[1].toISOString().slice(0,10))
-        setPage(1)
-      }
+    onChange={(upd: [Date | null, Date | null]) => {
+      setDateRange(upd)
+      if (upd[0] && upd[1]) setPage(1)
     }}
     isClearable
-    placeholderText="Select Date Range..."
+    placeholderText="Select Date Range…"
     maxDate={new Date()}
     dateFormat="dd-MM-yyyy"
+    // input
+    className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm text-neutral-100 placeholder:text-neutral-400 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
+    // calendar panel
+    calendarClassName="!bg-neutral-900 !text-neutral-100 !border !border-neutral-800 !rounded-xl !shadow-2xl !overflow-hidden"
+    weekDayClassName={() => '!text-neutral-400 !font-semibold'}
+    dayClassName={() =>
+      'rounded-md !text-neutral-100 hover:!bg-neutral-800 focus:!bg-neutral-800'
+    }
+    // keep popper above everything, avoid clipping—no custom modifiers
+    withPortal
+    portalId="datepicker-portal"
+    popperPlacement="bottom-start"
+    showPopperArrow={false}
+    // custom header
+    renderCustomHeader={({ date, decreaseMonth, increaseMonth, prevMonthButtonDisabled, nextMonthButtonDisabled }) => (
+      <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900 px-2.5 py-2">
+        <button
+          type="button"
+          onClick={decreaseMonth}
+          disabled={prevMonthButtonDisabled}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-800 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          aria-label="Previous month"
+        >
+          ‹
+        </button>
+        <div className="text-sm font-semibold">
+          {date.toLocaleString('en-US', { month: 'long', year: 'numeric' })}
+        </div>
+        <button
+          type="button"
+          onClick={increaseMonth}
+          disabled={nextMonthButtonDisabled}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-800 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          aria-label="Next month"
+        >
+          ›
+        </button>
+      </div>
+    )}
   />
+
+  {(startDate || endDate) && (
+    <button
+      type="button"
+      onClick={() => setDateRange([null, null])}
+      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800/60"
+    >
+      Clear
+    </button>
+  )}
 </div>
 
-        {/* table */}
-        <div className={styles.tableWrap}>
-          {loading ? (
-            <p>Loading…</p>
-          ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet','Amount', 'Fee', 'Net Amount', 'Status'].map(
-                    h => (
-                      <th key={h}>
-                        {h}
-                        <ArrowUpDown size={14} className={styles.sortIcon} />
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto rounded-xl border border-neutral-800">
+            {loading ? (
+              <div className="p-4 text-sm text-neutral-400">Loading…</div>
+            ) : (
+              <table className="min-w-[1100px] w-full text-sm">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-neutral-800 bg-neutral-900/80 backdrop-blur">
+                    {['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Amount','Fee','Net Amount','Status'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-medium text-neutral-300">
+                        <span className="inline-flex items-center gap-1">{h}<ArrowUpDown size={14} className="opacity-50" /></span>
                       </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                  {pageData.length ? (
-                  pageData.map(w => (
-                    <tr key={w.id}>
-                      <td>{new Date(w.createdAt)
-                        .toLocaleString('id-ID', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        })}
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageData.length ? pageData.map(w => (
+                    <tr key={w.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-900/60">
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {new Date(w.createdAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' })}
                       </td>
-                                            <td>{w.completedAt ? new Date(w.completedAt)
-                        .toLocaleString('id-ID', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        }) : '-'}</td>
-
-                      <td>{w.refId}</td>
-                      <td>{w.bankName}</td>
-                            <td>{w.accountNumber}</td>     {/* ← tambahkan ini */}
-
-      <td>{w.accountName}</td>
-      <td>{w.wallet}</td>
-                            <td>Rp {w.amount.toLocaleString()}</td>
-                                            <td>Rp {(w.amount - w.netAmount).toLocaleString()}</td>
-                      <td>Rp {w.netAmount.toLocaleString()}</td>
-                      <td>
-                        <span className={styles[`s${w.status}`]}>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {w.completedAt ? new Date(w.completedAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }) : '-'}
+                      </td>
+                      <td className="px-3 py-2">{w.refId}</td>
+                      <td className="px-3 py-2">{w.bankName}</td>
+                      <td className="px-3 py-2">{w.accountNumber}</td>
+                      <td className="px-3 py-2">{w.accountName}</td>
+                      <td className="px-3 py-2">{w.wallet}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">Rp {w.amount.toLocaleString()}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">Rp {(w.amount - w.netAmount).toLocaleString()}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold">Rp {w.netAmount.toLocaleString()}</td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium
+                          ${w.status === 'COMPLETED'
+                            ? 'border-emerald-900/40 bg-emerald-950/40 text-emerald-300'
+                            : w.status === 'PENDING'
+                            ? 'border-amber-900/40 bg-amber-950/40 text-amber-300'
+                            : w.status === 'FAILED'
+                            ? 'border-rose-900/40 bg-rose-950/40 text-rose-300'
+                            : 'border-neutral-800 bg-neutral-900/60 text-neutral-300'}`}>
                           {w.status}
                         </span>
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={11} className={styles.noData}>
-                      No data
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* pagination */}
-        <div className={styles.pagination}>
-          <div>
-            Rows
-            <select
-              value={perPage}
-              onChange={e => {
-                setPerPage(+e.target.value)
-                setPage(1)
-              }}
-            >
-              {[5, 10, 20].map(n => (
-                <option key={n}>{n}</option>
-              ))}
-            </select>
+                  )) : (
+                    <tr>
+                      <td colSpan={11} className="px-3 py-10 text-center text-neutral-400">No data</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
-          <div>
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-            >
-              ‹
-            </button>
-            <span>
-              {page}/{totalPages}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-            >
-              ›
-            </button>
-          </div>
-        </div>
-      </section>
 
-      {/* === MODAL ========================================================= */}
+          {/* Pagination */}
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <div className="inline-flex items-center gap-2 text-sm">
+              <span>Rows</span>
+              <select
+                value={perPage}
+                onChange={e => { setPerPage(+e.target.value); setPage(1) }}
+                className="h-9 rounded-lg border border-neutral-800 bg-neutral-900 px-2 text-sm outline-none"
+              >
+                {[5,10,20].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="inline-flex h-9 items-center rounded-lg border border-neutral-800 px-2.5 disabled:opacity-50 hover:bg-neutral-800/60"
+              >‹</button>
+              <span className="min-w-[70px] text-center">{page}/{totalPages}</span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="inline-flex h-9 items-center rounded-lg border border-neutral-800 px-2.5 disabled:opacity-50 hover:bg-neutral-800/60"
+              >›</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Modal */}
       {open && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => setOpen(false)}
-        >
-          <div
-            className={styles.modal}
-            onClick={e => e.stopPropagation()}
-          >
-            <button
-              className={styles.closeBtn}
-              onClick={() => setOpen(false)}
-            >
-              <X size={18} />
-            </button>
-            <h3 className={styles.modalTitle}>New Withdrawal</h3>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-neutral-800 bg-neutral-900 p-5" onClick={e => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">New Withdrawal</h3>
+              <button className="rounded-lg border border-neutral-800 p-1 hover:bg-neutral-800/60" onClick={() => setOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
 
-            <form className={styles.form} onSubmit={submit}>
-<label>Sub-wallet</label>
-<div className={styles.selectWrapper}>
-  <select
-    name="subMerchantId"
-    className={styles.subMerchantSelect}
-    value={selectedSub}
-    onChange={e => setSelectedSub(e.target.value)}
-    required
-  >
-    {subs.map(s => (
-      <option key={s.id} value={s.id}>{s.name || s.provider}</option>
+            <form className="grid gap-3" onSubmit={submit}>
+              {/* Sub-wallet */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">Sub-wallet</label>
+                <select
+                  name="subMerchantId"
+                  className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
+                  value={selectedSub}
+                  onChange={e => setSelectedSub(e.target.value)}
+                  required
+                >
+                  {subs.map(s => <option key={s.id} value={s.id}>{s.name || s.provider}</option>)}
+                </select>
+              </div>
 
-    ))}
-  </select>
-  <span className={styles.selectArrow} />
-</div>
+              {/* Bank */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">Bank</label>
+                <select
+                  name="bankCode"
+                  value={form.bankCode}
+                  onChange={handleChange}
+                  className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
+                >
+                  <option value="">Pilih bank…</option>
+                  {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                </select>
+              </div>
 
-              {/* bank */}
-<div className={styles.field}>
-  <label>Bank</label>
-  <Select
-    options={bankOptions}
-    value={bankOptions.find(o => o.value === form.bankCode) || null}
-    onChange={opt => {
-      const code = opt?.value || ''
-      handleChange({ // pakai handleChange agar reset state form otomatis
-        target: { name: 'bankCode', value: code }
-      } as any)
-    }}
-    placeholder="Cari atau pilih bank…"
-    isSearchable
-    styles={{
-      container: base => ({ ...base, width: '100%' }),
-      control:   base => ({ ...base, minHeight: '2.5rem' }),
-    }}
-  />
-</div>
-
-
-              {/* account number */}
-              <div className={styles.field}>
-                <label>Account Number</label>
+              {/* Account Number */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">Account Number</label>
                 <input
                   name="accountNumber"
                   value={form.accountNumber}
                   onChange={handleChange}
+                  className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
                   required
                 />
               </div>
 
-              {/* account name */}
-              <div className={styles.field}>
-                <label>Account Name</label>
-                <div className={styles.readonlyWrapper}>
+              {/* Account Name (readonly) */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">Account Name</label>
+                <div className="relative">
                   <input
                     readOnly
                     value={form.accountName}
                     placeholder="Isi otomatis setelah validasi"
+                    className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
                   />
-                  {isValid && (
-                    <CheckCircle className={styles.validIcon} size={18} />
-                  )}
+                  {isValid && <CheckCircle size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400" />}
                 </div>
               </div>
 
-              {/* amount */}
-              <div className={styles.field}>
-                <label>Amount</label>
+              {/* Amount */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">Amount</label>
                 <input
                   type="number"
                   name="amount"
                   value={form.amount}
                   onChange={handleChange}
+                  className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
                   required
                 />
               </div>
-              {/* otp */}
-              <div className={styles.field}>
-                <label>OTP</label>
+
+              {/* OTP */}
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">OTP</label>
                 <input
                   name="otp"
                   value={form.otp}
                   onChange={handleChange}
+                  className="h-10 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-sm outline-none"
                   required
                 />
               </div>
-              {/* actions */}
-              <div className={styles.modalActions}>
+
+              <div className="mt-2 flex items-center justify-between gap-2">
                 <button
                   type="button"
-                  className={styles.btnWarn}
                   onClick={validateAccount}
                   disabled={busy.validating}
+                  className="inline-flex items-center justify-center rounded-lg border border-amber-900/40 bg-amber-950/40 px-3 py-2 text-sm hover:bg-amber-900/30 disabled:opacity-50"
                 >
                   {busy.validating ? 'Validating…' : 'Validate'}
                 </button>
                 <button
                   type="submit"
-                  className={styles.btnPrimary}
                   disabled={!isValid || !!error || busy.submitting}
+                  className="inline-flex items-center justify-center rounded-lg border border-indigo-900/40 bg-indigo-950/40 px-3 py-2 text-sm hover:bg-indigo-900/30 disabled:opacity-50"
                 >
                   {busy.submitting ? 'Submitting…' : 'Submit'}
                 </button>
               </div>
 
-              {error && <p className={styles.error}>{error}</p>}
+              {!!error && <p className="mt-2 rounded-lg border border-rose-900/40 bg-rose-950/40 p-2 text-sm text-rose-300">{error}</p>}
             </form>
           </div>
         </div>
