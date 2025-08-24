@@ -8,6 +8,7 @@ import axios from 'axios'
 import {HilogateClient ,HilogateConfig} from '../../service/hilogateClient'
 import ExcelJS from 'exceljs'
 import {OyClient,OyConfig}          from '../../service/oyClient'    // sesuaikan path
+import { GidiClient } from '../../service/gidiClient'
 import { config } from '../../config';
 import { isJakartaWeekend, formatDateJakarta, parseDateSafely } from '../../util/time'
 import { parseRawCredential, normalizeCredentials } from '../../util/credentials';
@@ -1129,31 +1130,47 @@ export const adminValidateAccount = async (req: Request, res: Response) => {
     })
     if (!sub) return res.status(404).json({ error: 'Sub-merchant not found' })
 
-    if (sub.provider !== 'hilogate') {
-      return res.status(400).json({ error: 'Validation only supported for Hilogate' })
+    if (sub.provider === 'hilogate') {
+      const cfg = sub.credentials as { merchantId: string; secretKey: string; env?: string }
+      const client = new HilogateClient({
+        merchantId: cfg.merchantId,
+        secretKey: cfg.secretKey,
+        env: cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live'
+          ? cfg.env
+          : 'sandbox'
+      })
+
+      const result = await client.validateAccount(account_number, bank_code)
+      if (result.status !== 'valid') {
+        return res.status(400).json({ error: 'Invalid account' })
+      }
+      const banks = await client.getBankCodes()
+      const bankName = banks.find(b => b.code === bank_code)?.name || ''
+
+      return res.json({
+        account_holder: result.account_holder,
+        bank_name: bankName,
+        status: result.status
+      })
+    } else if (sub.provider === 'gidi') {
+      const cfg = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
+      const client = new GidiClient({
+        baseUrl: cfg.baseUrl,
+        merchantId: cfg.merchantId,
+        credentialKey: cfg.credentialKey,
+      })
+      const result = await client.inquiryAccount(bank_code, account_number, Date.now().toString())
+      if (!result || !result.beneficiaryAccountName) {
+        return res.status(400).json({ error: 'Invalid account' })
+      }
+      return res.json({
+        account_holder: result.beneficiaryAccountName,
+        bank_name: req.body.bank_name || '',
+        status: 'valid',
+      })
+    } else {
+      return res.status(400).json({ error: 'Validation only supported for Hilogate or Gidi' })
     }
-
-    const cfg = sub.credentials as { merchantId: string; secretKey: string; env?: string }
-    const client = new HilogateClient({
-      merchantId: cfg.merchantId,
-      secretKey: cfg.secretKey,
-      env: cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live'
-        ? cfg.env
-        : 'sandbox'
-    })
-
-    const result = await client.validateAccount(account_number, bank_code)
-    if (result.status !== 'valid') {
-      return res.status(400).json({ error: 'Invalid account' })
-    }
-    const banks = await client.getBankCodes()
-    const bankName = banks.find(b => b.code === bank_code)?.name || ''
-
-    return res.json({
-      account_holder: result.account_holder,
-      bank_name: bankName,
-      status: result.status
-    })
 
   } catch (err: any) {
     console.error('[adminValidateAccount]', err)
@@ -1200,7 +1217,7 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
     })
     if (!sub) return res.status(404).json({ error: 'Sub-merchant not found' })
 
-    const provider = sub.provider as 'hilogate' | 'oy'
+    const provider = sub.provider as 'hilogate' | 'oy' | 'gidi'
     let client: any
     if (provider === 'hilogate') {
       const cfg = sub.credentials as { merchantId: string; secretKey: string; env?: string }
@@ -1209,12 +1226,19 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
         secretKey: cfg.secretKey,
         env: cfg.env === 'production' || cfg.env === 'sandbox' || cfg.env === 'live' ? cfg.env : 'sandbox'
       })
-    } else {
+    } else if (provider === 'oy') {
       const cfg = sub.credentials as { merchantId: string; secretKey: string }
       client = new OyClient({
         baseUrl: 'https://partner.oyindonesia.com',
         username: cfg.merchantId,
         apiKey: cfg.secretKey
+      })
+    } else {
+      const cfg = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
+      client = new GidiClient({
+        baseUrl: cfg.baseUrl,
+        merchantId: cfg.merchantId,
+        credentialKey: cfg.credentialKey,
       })
     }
 
@@ -1228,6 +1252,10 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
       acctName = valid.account_holder
       const banks = await (client as HilogateClient).getBankCodes()
       bankName = banks.find(b => b.code === bank_code)?.name || ''
+    } else if (provider === 'gidi') {
+      const valid = await (client as GidiClient).inquiryAccount(bank_code, account_number, Date.now().toString())
+      acctName = valid.beneficiaryAccountName
+      bankName = req.body.bank_name || ''
     }
 
     // atomic balance check and record creation
@@ -1285,6 +1313,15 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
         branch_name: '',
         description: `Admin withdraw Rp ${amount}`
       })
+    } else if (provider === 'gidi') {
+      resp = await (client as GidiClient).createTransfer({
+        requestId: `${refId}-r`,
+        transactionId: refId,
+        channelId: bank_code,
+        accountNo: account_number,
+        amount,
+        transferNote: `Admin withdraw Rp ${amount}`,
+      })
     } else {
       resp = await (client as OyClient).disburse({
         recipient_bank: bank_code,
@@ -1303,16 +1340,22 @@ export const adminWithdraw = async (req: AuthRequest, res: Response) => {
           : ['COMPLETED', 'SUCCESS'].includes(resp.status)
             ? DisbursementStatus.COMPLETED
             : DisbursementStatus.FAILED)
-      : (resp.status.code === '101'
-          ? DisbursementStatus.PENDING
-          : resp.status.code === '000'
+      : provider === 'gidi'
+        ? (resp.statusTransfer === 'Success'
             ? DisbursementStatus.COMPLETED
-            : DisbursementStatus.FAILED)
+            : resp.statusTransfer === 'Failed'
+              ? DisbursementStatus.FAILED
+              : DisbursementStatus.PENDING)
+        : (resp.status.code === '101'
+            ? DisbursementStatus.PENDING
+            : resp.status.code === '000'
+              ? DisbursementStatus.COMPLETED
+              : DisbursementStatus.FAILED)
 
     await prisma.adminWithdraw.update({
       where: { refId },
       data: {
-        pgRefId: resp.trx_id || resp.trxId || null,
+        pgRefId: resp.trx_id || resp.trxId || resp.transactionId || null,
         status: newStatus
       }
     })
