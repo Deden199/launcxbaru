@@ -512,9 +512,31 @@ export async function getDashboardTransactions(req: Request, res: Response) {
 
 export async function getDashboardVolume(req: Request, res: Response) {
   try {
-    const { partnerClientId, status, search } = req.query as any;
+    const {
+      partnerClientId,
+      status,
+      search,
+      date_from,
+      date_to,
+      granularity,
+    } = req.query as any;
 
-    const { start: dateFrom, end: dateTo } = wibLast24HoursRange();
+    const { start: defaultStart, end: defaultEnd } = wibLast24HoursRange();
+    const dateFromParsed = date_from ? new Date(String(date_from)) : undefined;
+    const dateToParsed   = date_to   ? new Date(String(date_to))   : undefined;
+    const dateFrom =
+      dateFromParsed && !isNaN(dateFromParsed.getTime())
+        ? dateFromParsed
+        : defaultStart;
+    const dateTo =
+      dateToParsed && !isNaN(dateToParsed.getTime()) ? dateToParsed : defaultEnd;
+
+    const gran = granularity === 'day' ? 'day' : 'hour';
+    const dateFormat =
+      gran === 'day'
+        ? '%Y-%m-%dT00:00:00.000Z'
+        : '%Y-%m-%dT%H:00:00.000Z';
+
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allowedStatuses = [
@@ -543,8 +565,18 @@ export async function getDashboardVolume(req: Request, res: Response) {
     const match: any = {
       $expr: {
         $and: [
-          { $gte: [{ $ifNull: ['$paymentReceivedTime', '$createdAt'] }, dateFrom] },
-          { $lte: [{ $ifNull: ['$paymentReceivedTime', '$createdAt'] }, dateTo] },
+          {
+            $gte: [
+              { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
+              dateFrom,
+            ],
+          },
+          {
+            $lte: [
+              { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
+              dateTo,
+            ],
+          },
         ],
       },
       status: { $in: statuses },
@@ -566,7 +598,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
           bucket: {
             $dateToString: {
               date: { $ifNull: ['$paymentReceivedTime', '$createdAt'] },
-              format: '%Y-%m-%dT%H:00:00.000Z',
+              format: dateFormat,
               timezone: 'UTC',
             },
           },
@@ -583,17 +615,19 @@ export async function getDashboardVolume(req: Request, res: Response) {
       { $sort: { _id: 1 } },
     ];
 
-    const rows = (await prisma.order.aggregateRaw({ pipeline })) as {
-      _id: string;
+    const rows = (await prisma.order.aggregateRaw({ pipeline })) as unknown as {
+      _id: string | null;
       totalAmount: number;
       count: number;
     }[];
 
-    const buckets = rows.map(r => ({
-      bucket: r._id,
-      totalAmount: Number(r.totalAmount ?? 0),
-      count: Number(r.count ?? 0),
-    }));
+    const buckets = rows
+      .filter(r => r._id != null)
+      .map(r => ({
+        bucket: r._id as string,
+        totalAmount: Number(r.totalAmount ?? 0),
+        count: Number(r.count ?? 0),
+      }));
 
     return res.json({ buckets });
   } catch (err: any) {
