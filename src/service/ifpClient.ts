@@ -20,12 +20,19 @@ export interface QrPaymentResponse {
   qr_url: string;
 }
 
+// Konfigurasi yang disimpan di database untuk IFP
+export interface IfpConfig {
+  baseUrl: string;
+  clientId: string;
+  clientSecret: string;
+}
+
 export class IfpClient {
   private baseUrl: string;
   private clientId: string;
   private clientSecret: string;
 
-  constructor(opts: { baseUrl?: string; clientId?: string; clientSecret?: string } = {}) {
+  constructor(opts: Partial<IfpConfig> = {}) {
     this.baseUrl = opts.baseUrl || process.env.IFP_BASE_URL || process.env.SENMO_DNS || '';
     this.clientId = opts.clientId || process.env.IFP_CLIENT_ID || '';
     this.clientSecret = opts.clientSecret || process.env.IFP_CLIENT_SECRET || '';
