@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import apiClient from '@/lib/apiClient'
 import axios from 'axios'
 import { oyCodeMap } from '../../utils/oyCodeMap'
+import { gidiChannelMap } from '../../utils/gidiChannelMap'
 import DatePicker from 'react-datepicker'
 import Select from 'react-select'
 
@@ -245,12 +246,14 @@ const submit = async (e: React.FormEvent) => {
 
   try {
     // 1) Tentukan provider & kode bank payload
-    const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy'
-     const bankObj = banks.find(b => b.code === form.bankCode);
+    const provider = subs.find(s => s.id === selectedSub)!.provider; // 'hilogate' | 'oy' | 'gidi'
+    const bankObj = banks.find(b => b.code === form.bankCode);
 
     const payloadBankCode = provider === 'oy'
       ? oyCodeMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
-      : form.bankCode;
+      : provider === 'gidi'
+        ? gidiChannelMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
+        : form.bankCode;
 
     // 2) Siapkan body
     const body: any = {
@@ -262,7 +265,7 @@ const submit = async (e: React.FormEvent) => {
       amount:             +form.amount,
       otp:                form.otp,
     };
-    if (provider === 'oy') {
+    if (provider === 'oy' || provider === 'gidi') {
       body.bank_name     = form.bankName;
       body.account_name  = form.accountName;
     }

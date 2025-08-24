@@ -3,6 +3,7 @@ import { prisma } from '../core/prisma'
 import { retryDisbursement } from '../service/hilogate.service'
 import { ClientAuthRequest } from '../middleware/clientAuth'
 import { HilogateClient,HilogateConfig } from '../service/hilogateClient'
+import { GidiClient, GidiDisbursementConfig } from '../service/gidiClient'
 import crypto from 'crypto'
 import { config } from '../config'
 import logger from '../logger'
@@ -417,7 +418,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     otp 
    } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -476,19 +477,28 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
         secretKey:  raw.secretKey,
         env:        raw.env ?? 'sandbox'
       } as HilogateConfig
-    } else {
+    } else if (sourceProvider === 'oy') {
       const raw = sub.credentials as { merchantId: string; secretKey: string }
       providerCfg = {
         baseUrl: 'https://partner.oyindonesia.com',
         username: raw.merchantId,
         apiKey:   raw.secretKey
       } as OyConfig
+    } else {
+      const raw = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
+      providerCfg = {
+        baseUrl: raw.baseUrl,
+        merchantId: raw.merchantId,
+        credentialKey: raw.credentialKey
+      } as GidiDisbursementConfig
     }
 
     // 2) Instantiate PG client sesuai provider
     const pgClient = sourceProvider === 'hilogate'
       ? new HilogateClient(providerCfg)
-      : new OyClient(providerCfg)
+      : sourceProvider === 'oy'
+        ? new OyClient(providerCfg)
+        : new GidiClient(providerCfg)
 
     // 3-4) Validasi akun & dapatkan bankName / holder
     let acctHolder: string
@@ -505,11 +515,16 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       const b = banks.find(b => b.code === bank_code)
       if (!b) return res.status(400).json({ error: 'Bank code tidak dikenal' })
       bankName = b.name
+    } else if (sourceProvider === 'gidi') {
+      const inq = await (pgClient as GidiClient).inquiryAccount(bank_code, account_number, Date.now().toString())
+      acctHolder = inq.beneficiaryAccountName
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name
     } else {
       // OY: skip lookup, gunakan alias atau kode sebagai label
-  acctHolder = req.body.account_name || '';
-  alias      = account_name_alias || acctHolder;
-  bankName = req.body.bank_name;
+      acctHolder = req.body.account_name || ''
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name
     }
 
     // 5) Atomic transaction: hitung balance, fee, buat record, hold saldo
@@ -595,14 +610,23 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           branch_name:        '',
           description:        `Withdraw Rp ${wr.netAmount}` // ← catatan juga netAmt
         })
+      } else if (sourceProvider === 'gidi') {
+        resp = await (pgClient as GidiClient).createTransfer({
+          requestId: `${wr.refId}-r`,
+          transactionId: wr.refId,
+          channelId: bank_code,
+          accountNo: account_number,
+          amount: wr.netAmount,
+          transferNote: `Withdraw Rp ${wr.netAmount}`,
+        })
       } else {
         const disburseReq = {
           recipient_bank:     bank_code,
           recipient_account:  account_number,
-    amount:             wr.netAmount,                // ← netAmt
-    note:               `Withdraw Rp ${wr.netAmount}`, // ← catatan juga netAmt
+          amount:             wr.netAmount,                // ← netAmt
+          note:               `Withdraw Rp ${wr.netAmount}`, // ← catatan juga netAmt
           partner_trx_id:     wr.refId,
-    email:             'client@launcx.com',  // ← hardcode di sini'
+          email:             'client@launcx.com',  // ← hardcode di sini'
 
         }
         resp = await (pgClient as OyClient).disburse(disburseReq)
@@ -615,17 +639,23 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
             : ['COMPLETED','SUCCESS'].includes(resp.status)
               ? DisbursementStatus.COMPLETED
               : DisbursementStatus.FAILED)
-        : (resp.status.code === '101'
-            ? DisbursementStatus.PENDING
-            : resp.status.code === '000'
+        : sourceProvider === 'gidi'
+          ? (resp.statusTransfer === 'Success'
               ? DisbursementStatus.COMPLETED
-              : DisbursementStatus.FAILED)
+              : resp.statusTransfer === 'Failed'
+                ? DisbursementStatus.FAILED
+                : DisbursementStatus.PENDING)
+          : (resp.status.code === '101'
+              ? DisbursementStatus.PENDING
+              : resp.status.code === '000'
+                ? DisbursementStatus.COMPLETED
+                : DisbursementStatus.FAILED)
 
       // Update withdrawal record
       await prisma.withdrawRequest.update({
         where: { refId: wr.refId },
         data: {
-          paymentGatewayId:  resp.trx_id || resp.trxId,
+          paymentGatewayId:  resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
           status:            newStatus
         }
