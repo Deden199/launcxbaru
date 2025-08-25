@@ -53,13 +53,8 @@ export default function ClientDashboardPage() {
   const [loadingSummary, setLoadingSummary] = useState(true)
   const [loadingTx, setLoadingTx] = useState(true)
 
-  // Date filter helpers
-  function toJakartaDate(d: Date): string {
-    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Jakarta' }).format(d)
-  }
+  // Date filter
   const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'custom'>('today')
-  const [from, setFrom] = useState(() => toJakartaDate(new Date()))
-  const [to, setTo] = useState(() => toJakartaDate(new Date()))
   const [statusFilter, setStatusFilter] = useState<string>('PAID') // default PAID
 
   // Search
@@ -225,8 +220,12 @@ export default function ClientDashboardPage() {
   }
 
   // Trigger fetches when filters change
-  useEffect(() => { fetchSummary() }, [range, selectedChild, from, to, statusFilter])
-  useEffect(() => { fetchTransactions() }, [range, selectedChild, from, to, search, page, perPage, statusFilter])
+  useEffect(() => {
+    if (range !== 'custom' || (startDate && endDate)) fetchSummary()
+  }, [range, selectedChild, startDate, endDate, statusFilter])
+  useEffect(() => {
+    if (range !== 'custom' || (startDate && endDate)) fetchTransactions()
+  }, [range, selectedChild, startDate, endDate, search, page, perPage, statusFilter])
 
   const filtered = txs.filter(t =>
     (statusFilter === '' || normalizeStatus(t.status) === statusFilter) &&
