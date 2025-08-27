@@ -36,6 +36,8 @@ test('runManualSettlement settles PAID orders', async () => {
     }
   }
 
+  ;(prisma as any).$queryRaw = async () => [{ locked: true }]
+
   ;(prisma as any).$transaction = async (fn: any) =>
     fn({
       order: { updateMany: async () => ({ count: 1 }) },

@@ -8,6 +8,7 @@ import { config } from '../config'
 import crypto from 'crypto'
 import logger from '../logger'
 import { sendTelegramMessage } from '../core/telegram.axios'
+import { tryAdvisoryLock, releaseAdvisoryLock } from '../util/dbLock'
 
 // ————————— CONFIG —————————
 const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
@@ -16,6 +17,7 @@ const DB_CONCURRENCY   = Number(process.env.DB_CONCURRENCY ?? os.cpus().length) 
 const WORKER_CONCURRENCY = Number(process.env.SETTLEMENT_WORKERS ?? 1)
 const DB_TX_TIMEOUT_MS = Number(process.env.SETTLEMENT_DB_TX_TIMEOUT_MS ?? 15_000)
 const PARTNER_TX_CHUNK_SIZE = 50
+const SETTLEMENT_LOCK_KEY = 1_234_567_890
 
 type Cursor = { createdAt: Date; id: string } | null
 
@@ -279,6 +281,10 @@ let settlementTask: ScheduledTask | null = null;
 let settlementCronExpr = '0 16 * * *';
 
 async function runSettlementJob() {
+  if (!(await tryAdvisoryLock(SETTLEMENT_LOCK_KEY))) {
+    logger.info('[SettlementCron] Another settlement job is running, skipping');
+    return;
+  }
   try {
     cutoffTime = new Date();
     logger.info('[SettlementCron] 🔄 Set cut‑off at ' + cutoffTime.toISOString());
@@ -372,6 +378,8 @@ async function runSettlementJob() {
     } catch (telegramErr) {
       logger.error('[SettlementCron] Failed to send Telegram alert:', telegramErr);
     }
+  } finally {
+    await releaseAdvisoryLock(SETTLEMENT_LOCK_KEY)
   }
 }
 
@@ -417,25 +425,33 @@ export async function runManualSettlement(
     batchAmount: number
   }) => void
 ) {
-  cutoffTime = new Date()
-
-  let settledOrders = 0
-  let netAmount = 0
-  let cursor: Cursor = null
-
-  while (true) {
-    const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor)
-    if (!settledCount) break
-    settledOrders += settledCount
-    netAmount += na
-    cursor = lastCursor
-    onProgress?.({
-      settledOrders,
-      netAmount,
-      batchSettled: settledCount,
-      batchAmount: na,
-    })
+  if (!(await tryAdvisoryLock(SETTLEMENT_LOCK_KEY))) {
+    logger.info('[SettlementCron] Manual settlement already running, skipping')
+    return { settledOrders: 0, netAmount: 0 }
   }
+  try {
+    cutoffTime = new Date()
 
-  return { settledOrders, netAmount }
+    let settledOrders = 0
+    let netAmount = 0
+    let cursor: Cursor = null
+
+    while (true) {
+      const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor)
+      if (!settledCount) break
+      settledOrders += settledCount
+      netAmount += na
+      cursor = lastCursor
+      onProgress?.({
+        settledOrders,
+        netAmount,
+        batchSettled: settledCount,
+        batchAmount: na,
+      })
+    }
+
+    return { settledOrders, netAmount }
+  } finally {
+    await releaseAdvisoryLock(SETTLEMENT_LOCK_KEY)
+  }
 }
