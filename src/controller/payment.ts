@@ -361,6 +361,7 @@ await prisma.order.update({
           url:       partner.callbackUrl,
           payload:   clientPayload,
           signature: clientSig,
+          partnerClientId: merchantId,
         },
       })
       logger.info('[Callback] Enqueued transaction callback')
@@ -530,6 +531,7 @@ if (cb) {
             url:       client.callbackUrl,
             payload,
             signature: sig,
+            partnerClientId: order.userId,
           },
         })
         logger.info('[OY Callback] enqueued to client')
@@ -703,6 +705,7 @@ export const gidiTransactionCallback = async (req: Request, res: Response) => {
           url: partner.callbackUrl,
           payload,
           signature: sig,
+          partnerClientId: order.userId,
         },
       });
       logger.info('[Gidi Callback] Enqueued transaction callback');
