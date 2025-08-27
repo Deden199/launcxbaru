@@ -14,6 +14,8 @@ const BATCH_SIZE = 1500                          // jumlah order PAID diproses p
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = Number(process.env.DB_CONCURRENCY ?? os.cpus().length) // parallel DB transactions
 const WORKER_CONCURRENCY = Number(process.env.SETTLEMENT_WORKERS ?? 1)
+const DB_TX_TIMEOUT_MS = Number(process.env.SETTLEMENT_DB_TX_TIMEOUT_MS ?? 15_000)
+const PARTNER_TX_CHUNK_SIZE = 50
 
 type Cursor = { createdAt: Date; id: string } | null
 
@@ -53,6 +55,14 @@ function generateSignature(path: string, secretKey: string): string {
     .createHash('md5')
     .update(path + secretKey, 'utf8')
     .digest('hex');
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size))
+  }
+  return chunks
 }
 
 type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number };
@@ -199,43 +209,50 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
   const dbLimit = pLimit(DB_CONCURRENCY);
   const txPromises = Array.from(groups.entries()).map(([pcId, items]) =>
     dbLimit(async () => {
-      try {
-        return await retryTx(() =>
-          prisma.$transaction(async tx => {
-            let settledCount = 0;
-            let netAmount = 0;
-            for (const { order, settlement } of items) {
-              const upd = await tx.order.updateMany({
-                where: { id: order.id, status: 'PAID' },
-                data: {
-                  status: 'SETTLED',
-                  settlementAmount: settlement.netAmt,
-                  pendingAmount: null,
-                  ...(settlement.fee && { fee3rdParty: settlement.fee }),
-                  rrn: settlement.rrn,
-                  settlementStatus: settlement.st,
-                  settlementTime: settlement.tmt,
-                  updatedAt: new Date()
+      let settledCount = 0;
+      let netAmount = 0;
+      const chunks = chunk(items, PARTNER_TX_CHUNK_SIZE);
+      for (const chunkItems of chunks) {
+        try {
+          const res = await retryTx(() =>
+            prisma.$transaction(async tx => {
+              let sc = 0;
+              let na = 0;
+              for (const { order, settlement } of chunkItems) {
+                const upd = await tx.order.updateMany({
+                  where: { id: order.id, status: 'PAID' },
+                  data: {
+                    status: 'SETTLED',
+                    settlementAmount: settlement.netAmt,
+                    pendingAmount: null,
+                    ...(settlement.fee && { fee3rdParty: settlement.fee }),
+                    rrn: settlement.rrn,
+                    settlementStatus: settlement.st,
+                    settlementTime: settlement.tmt,
+                    updatedAt: new Date()
+                  }
+                });
+                if (upd.count > 0) {
+                  sc++;
+                  na += settlement.netAmt;
                 }
-              });
-              if (upd.count > 0) {
-                settledCount++;
-                netAmount += settlement.netAmt;
               }
-            }
-            if (netAmount > 0) {
-              await tx.partnerClient.update({
-                where: { id: pcId },
-                data: { balance: { increment: netAmount } }
-              });
-            }
-            return { settledCount, netAmount };
-          })
-        );
-      } catch (err) {
-        logger.error(`[SettlementCron] partnerClient ${pcId} failed:`, err);
-        return { settledCount: 0, netAmount: 0 };
+              if (na > 0) {
+                await tx.partnerClient.update({
+                  where: { id: pcId },
+                  data: { balance: { increment: na } }
+                });
+              }
+              return { settledCount: sc, netAmount: na };
+            }, { timeout: DB_TX_TIMEOUT_MS })
+          );
+          settledCount += res.settledCount;
+          netAmount += res.netAmount;
+        } catch (err) {
+          logger.error(`[SettlementCron] partnerClient ${pcId} failed:`, err);
+        }
       }
+      return { settledCount, netAmount };
     })
   );
 
