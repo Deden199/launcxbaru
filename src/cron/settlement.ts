@@ -34,8 +34,10 @@ async function retryTx(fn: () => Promise<any>, attempts = 5, baseDelayMs = 100) 
     } catch (err: any) {
       lastErr = err;
       const msg = (err.message ?? '').toLowerCase();
-      const retryable = ['write conflict', 'transaction already closed', 'transaction timeout'];
-      const reason = retryable.find(r => msg.includes(r));
+      const code = String(err.code || '').toUpperCase();
+      const retryableMsgs = ['write conflict', 'transaction already closed', 'transaction timeout', 'deadlock detected'];
+      const retryableCodes = ['40P01', '40001', '55P03'];
+      const reason = retryableMsgs.find(r => msg.includes(r)) || (retryableCodes.includes(code) ? code : undefined);
       if (i < attempts - 1 && reason) {
         const delay = baseDelayMs * 2 ** i;
         logger.warn(
