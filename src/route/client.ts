@@ -3,6 +3,7 @@ import express, { Router } from 'express'
 import { clientLogin, clientRegister } from '../controller/clientAuth.controller'
 import { requireClientAuth }        from '../middleware/clientAuth'
 import { getClientDashboard }       from '../controller/clientDashboard.controller'
+import { getClientApiLogs } from '../controller/clientApiLog.controller'
 import {
   validateAccount,
   requestWithdraw,
@@ -21,6 +22,9 @@ r.use(requireClientAuth)
 
 // Dashboard
 r.get('/dashboard', getClientDashboard)
+
+// Callback API logs
+r.get('/api-logs', getClientApiLogs)
 
 // Withdrawal endpoints
 r.post(
