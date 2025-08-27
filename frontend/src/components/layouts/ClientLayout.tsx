@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Menu, Home, CreditCard, Bell, Settings as IconSettings, LogOut } from 'lucide-react'
+import { Menu, Home, CreditCard, Bell, Settings as IconSettings, LogOut, FileText } from 'lucide-react'
 import { motion } from 'framer-motion'
 
 interface ClientLayoutProps {
@@ -13,6 +13,7 @@ interface ClientLayoutProps {
 const navItems = [
   { label: 'Dashboard', href: '/client/dashboard', Icon: Home },
   { label: 'Withdraw', href: '/client/withdraw', Icon: CreditCard },
+  { label: 'API Logs', href: '/client/api-log', Icon: FileText },
   { label: 'Settings', href: '/client/callback-settings', Icon: IconSettings },
 ]
 
