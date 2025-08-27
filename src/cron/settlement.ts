@@ -34,10 +34,12 @@ async function retryTx(fn: () => Promise<any>, attempts = 5, baseDelayMs = 100) 
     } catch (err: any) {
       lastErr = err;
       const msg = (err.message ?? '').toLowerCase();
-      if (i < attempts - 1 && msg.includes('write conflict')) {
+      const retryable = ['write conflict', 'transaction already closed', 'transaction timeout'];
+      const reason = retryable.find(r => msg.includes(r));
+      if (i < attempts - 1 && reason) {
         const delay = baseDelayMs * 2 ** i;
         logger.warn(
-          `[SettlementCron] retryTx attempt ${i + 1} failed (write conflict), retrying in ${delay}ms…`,
+          `[SettlementCron] retryTx attempt ${i + 1} failed (${reason}), retrying in ${delay}ms…`,
           err.message
         );
         await new Promise(r => setTimeout(r, delay));
