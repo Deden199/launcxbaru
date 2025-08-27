@@ -40,11 +40,13 @@ export async function processCallbackJobs() {
         await prisma.callbackJobDeadLetter.create({
           data: {
             jobId: job.id,
+            partnerClientId: job.partnerClientId,
             url: job.url,
             payload: job.payload,
             signature: job.signature,
             statusCode,
             errorMessage: err.message,
+            responseBody: err.response?.data,
             attempts,
           },
         })

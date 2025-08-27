@@ -197,6 +197,8 @@ model PartnerClient {
   weekendFeeFlat     Float @default(0)
     /// Force credential schedule: "weekday" or "weekend"
   forceSchedule      String?
+  callbackJobs       CallbackJob[]
+  callbackJobDeadLetters CallbackJobDeadLetter[]
 }
 
 model Order {
@@ -338,10 +340,14 @@ model CallbackJob {
   attempts  Int      @default(0)
   delivered Boolean  @default(false)
   lastError Json?
+  responseBody Json?
+  partnerClientId String
+  partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([delivered])
+  @@index([partnerClientId])
 }
 
 enum AdminRole {
@@ -364,13 +370,17 @@ model AdminLog {
 model CallbackJobDeadLetter {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
   jobId        String   @db.ObjectId
+  partnerClientId String
+  partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
   url          String
   payload      Json
   signature    String
   statusCode   Int?
   errorMessage String?
+  responseBody Json?
   attempts     Int
   createdAt    DateTime @default(now())
+  @@index([partnerClientId])
 }
 
 model HilogateCallbackWatcher {
