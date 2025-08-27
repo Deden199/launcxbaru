@@ -100,7 +100,7 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
       : {})
   };
 
-  const pendingOrders = await prisma.order.findMany({
+  const fetchedOrders = await prisma.order.findMany({
     where,
     orderBy: [
       { createdAt: 'asc' },
@@ -117,17 +117,41 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
     }
   });
 
-  if (!pendingOrders.length) {
+  if (!fetchedOrders.length) {
     return { hasMore: false, settledCount: 0, netAmount: 0, lastCursor: cursor };
   }
 
-  const last = pendingOrders[pendingOrders.length - 1];
+  const last = fetchedOrders[fetchedOrders.length - 1];
   const lastCursor: Cursor = { createdAt: last.createdAt, id: last.id };
+
+  // Claim orders by marking them as PROCESSING so other workers skip them
+  const claimLimit = pLimit(DB_CONCURRENCY);
+  type PendingOrder = (typeof fetchedOrders)[number];
+  const claimedOrders: PendingOrder[] = [];
+  await Promise.all(
+    fetchedOrders.map(o =>
+      claimLimit(async () => {
+        const upd = await prisma.order.updateMany({
+          where: { id: o.id, status: 'PAID' },
+          data: { status: 'PROCESSING', updatedAt: new Date() }
+        });
+        if (upd.count > 0) {
+          claimedOrders.push(o);
+        }
+      })
+    )
+  );
+
+  const pendingOrders = claimedOrders;
+
+  if (!pendingOrders.length) {
+    return { hasMore: fetchedOrders.length === BATCH_SIZE, settledCount: 0, netAmount: 0, lastCursor };
+  }
 
   logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`);
 
+  const unsettledIds = new Set(pendingOrders.map(o => o.id));
   const httpLimit = pLimit(HTTP_CONCURRENCY);
-  type PendingOrder = (typeof pendingOrders)[number];
   const groups = new Map<string, { order: PendingOrder; settlement: SettlementResult }[]>();
 
   await Promise.all(
@@ -226,7 +250,7 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
               let na = 0;
               for (const { order, settlement } of chunkItems) {
                 const upd = await tx.order.updateMany({
-                  where: { id: order.id, status: 'PAID' },
+                  where: { id: order.id, status: 'PROCESSING' },
                   data: {
                     status: 'SETTLED',
                     settlementAmount: settlement.netAmt,
@@ -241,6 +265,7 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
                 if (upd.count > 0) {
                   sc++;
                   na += settlement.netAmt;
+                  unsettledIds.delete(order.id);
                 }
               }
               if (na > 0) {
@@ -272,7 +297,18 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
     }
   }
 
-  const hasMore = pendingOrders.length === BATCH_SIZE;
+  if (unsettledIds.size > 0) {
+    try {
+      await prisma.order.updateMany({
+        where: { id: { in: Array.from(unsettledIds) }, status: 'PROCESSING' },
+        data: { status: 'PAID', updatedAt: new Date() }
+      });
+    } catch (err) {
+      logger.error('[SettlementCron] failed to revert orders', err);
+    }
+  }
+
+  const hasMore = fetchedOrders.length === BATCH_SIZE;
   return { hasMore, settledCount, netAmount, lastCursor };
 }
 
