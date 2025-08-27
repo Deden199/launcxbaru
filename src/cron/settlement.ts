@@ -13,9 +13,9 @@ import { sendTelegramMessage } from '../core/telegram.axios'
 const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = Number(process.env.DB_CONCURRENCY ?? os.cpus().length) // parallel DB transactions
+const WORKER_CONCURRENCY = Number(process.env.SETTLEMENT_WORKERS ?? 1)
 
-let lastCreatedAt: Date | null = null;
-let lastId: string | null = null;
+type Cursor = { createdAt: Date; id: string } | null
 
 // HTTPS agent dengan keep-alive
 const httpsAgent = new https.Agent({
@@ -61,28 +61,28 @@ type BatchResult = {
   hasMore: boolean;
   settledCount: number;
   netAmount: number;
+  lastCursor: Cursor;
 };
 
 // core worker: proses satu batch; return object with stats
-async function processBatchOnce(): Promise<BatchResult> {
+async function processBatch(cursor: Cursor): Promise<BatchResult> {
   // cursor-based pagination
-const where: any = {
-  status: 'PAID',
-  partnerClientId: { not: null },
+  const where: any = {
+    status: 'PAID',
+    partnerClientId: { not: null },
 
-  // hanya sampai cut‑off
-  ...(cutoffTime && { createdAt: { lte: cutoffTime } }),
+    // hanya sampai cut‑off
+    ...(cutoffTime && { createdAt: { lte: cutoffTime } }),
 
-  ...(lastCreatedAt && lastId
-    ? {
-        OR: [
-          { createdAt: { gt: lastCreatedAt } },
-          { createdAt: lastCreatedAt, id: { gt: lastId } }
-        ]
-      }
-    : {})
-};
-
+    ...(cursor
+      ? {
+          OR: [
+            { createdAt: { gt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { gt: cursor.id } }
+          ]
+        }
+      : {})
+  };
 
   const pendingOrders = await prisma.order.findMany({
     where,
@@ -102,13 +102,11 @@ const where: any = {
   });
 
   if (!pendingOrders.length) {
-    return { hasMore: false, settledCount: 0, netAmount: 0 };
+    return { hasMore: false, settledCount: 0, netAmount: 0, lastCursor: cursor };
   }
 
-  // update cursor
   const last = pendingOrders[pendingOrders.length - 1];
-  lastCreatedAt = last.createdAt;
-  lastId = last.id;
+  const lastCursor: Cursor = { createdAt: last.createdAt, id: last.id };
 
   logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`);
 
@@ -251,13 +249,8 @@ const where: any = {
     }
   }
 
-  return { hasMore: true, settledCount, netAmount };
-}
-
-// safe runner: process up to a single batch
-async function processBatchLoop(): Promise<{ settledCount: number; netAmount: number }> {
-  const { settledCount, netAmount } = await processBatchOnce();
-  return { settledCount, netAmount };
+  const hasMore = pendingOrders.length === BATCH_SIZE;
+  return { hasMore, settledCount, netAmount, lastCursor };
 }
 
 let cutoffTime: Date | null = null;
@@ -277,37 +270,68 @@ async function runSettlementJob() {
       logger.error('[SettlementCron] Failed to send Telegram notification:', err);
     }
 
-    // Hitung total batch yang dibutuhkan
-    const total = await prisma.order.count({
-      where: {
-        status: 'PAID',
-        partnerClientId: { not: null },
-        createdAt: { lte: cutoffTime }
-      }
-    });
-    const iterations = Math.ceil(total / BATCH_SIZE);
-
-    // Reset cursor ONCE sebelum loop
-    lastCreatedAt = null;
-    lastId = null;
-
     let settledOrders = 0;
     let netAmount = 0;
     let ranIterations = 0;
 
-    for (let i = 0; i < iterations; i++) {
-      // Proses satu batch berikutnya
-      const { settledCount, netAmount: na } = await processBatchOnce();
-      if (!settledCount) break; // berhenti kalau tidak ada yang tersettle
-      settledOrders += settledCount;
-      netAmount += na;
-      ranIterations++;
-      logger.info(`[SettlementCron] Iter ${i + 1}/${iterations}: settled ${settledCount}`);
-      await new Promise(r => setTimeout(r, 500)); // jeda ringan
+    if (WORKER_CONCURRENCY <= 1) {
+      // sequential mode
+      let cursor: Cursor = null;
+      while (true) {
+        const { settledCount, netAmount: na, lastCursor, hasMore } = await processBatch(cursor);
+        if (!settledCount) break;
+        settledOrders += settledCount;
+        netAmount += na;
+        ranIterations++;
+        cursor = lastCursor;
+        logger.info(`[SettlementCron] Iter ${ranIterations}: settled ${settledCount}`);
+        if (!hasMore) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    } else {
+      // concurrent mode
+      const cursors: Cursor[] = [];
+      let cursor: Cursor = null;
+      while (true) {
+        const rows = await prisma.order.findMany({
+          where: {
+            status: 'PAID',
+            partnerClientId: { not: null },
+            ...(cutoffTime && { createdAt: { lte: cutoffTime } }),
+            ...(cursor
+              ? {
+                  OR: [
+                    { createdAt: { gt: cursor.createdAt } },
+                    { createdAt: cursor.createdAt, id: { gt: cursor.id } }
+                  ]
+                }
+              : {})
+          },
+          orderBy: [
+            { createdAt: 'asc' },
+            { id: 'asc' }
+          ],
+          take: BATCH_SIZE,
+          select: { id: true, createdAt: true }
+        });
+        if (!rows.length) break;
+        cursors.push(cursor);
+        const last = rows[rows.length - 1];
+        cursor = { createdAt: last.createdAt, id: last.id };
+      }
+
+      const limit = pLimit(WORKER_CONCURRENCY);
+      const results = await Promise.all(
+        cursors.map(c => limit(() => processBatch(c)))
+      );
+      ranIterations = results.length;
+      for (const r of results) {
+        settledOrders += r.settledCount;
+        netAmount += r.netAmount;
+      }
     }
 
     try {
-      // Kirim ringkasan hasil
       await sendTelegramMessage(
         config.api.telegram.adminChannel,
         `[SettlementCron] Summary: iterations ${ranIterations}, settled ${settledOrders} orders, net amount ${netAmount}`
@@ -361,8 +385,6 @@ export function resetSettlementState() {
   settlementTask?.stop();
   settlementTask?.destroy();
   settlementTask = null;
-  lastCreatedAt = null;
-  lastId = null;
   cutoffTime = null;
 }
 
@@ -375,17 +397,17 @@ export async function runManualSettlement(
   }) => void
 ) {
   cutoffTime = new Date()
-  lastCreatedAt = null
-  lastId = null
 
   let settledOrders = 0
   let netAmount = 0
+  let cursor: Cursor = null
 
   while (true) {
-    const { settledCount, netAmount: na } = await processBatchOnce()
+    const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor)
     if (!settledCount) break
     settledOrders += settledCount
     netAmount += na
+    cursor = lastCursor
     onProgress?.({
       settledOrders,
       netAmount,
