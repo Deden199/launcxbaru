@@ -12,7 +12,7 @@ import { sendTelegramMessage } from '../core/telegram.axios'
 // ————————— CONFIG —————————
 const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
-const DB_CONCURRENCY   = 1                      // turunkan ke 1 untuk hindari write conflict
+const DB_CONCURRENCY   = Number(process.env.DB_CONCURRENCY ?? os.cpus().length) // parallel DB transactions
 
 let lastCreatedAt: Date | null = null;
 let lastId: string | null = null;
@@ -113,109 +113,130 @@ const where: any = {
   logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`);
 
   const httpLimit = pLimit(HTTP_CONCURRENCY);
-  const dbLimit = pLimit(DB_CONCURRENCY);
+  type PendingOrder = (typeof pendingOrders)[number];
+  const groups = new Map<string, { order: PendingOrder; settlement: SettlementResult }[]>();
 
-  const txPromises = pendingOrders.map(o =>
-    httpLimit(async () => {
-      try {
-        const creds =
-          o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
-        if (!creds) {
-          return 0;
-        }
-
-        let settlementResult: SettlementResult | null = null;
-        const { merchantId, secretKey } = creds;
-
-        if (o.channel === 'hilogate') {
-          const path = `/api/v1/transactions/${o.id}`;
-          const url = `${config.api.hilogate.baseUrl}${path}`;
-          const sig = generateSignature(path, secretKey);
-          const resp = await axios.get(url, {
-            headers: { 'X-Merchant-ID': merchantId, 'X-Signature': sig },
-            httpsAgent,
-            timeout: 15_000
-          });
-          const tx = resp.data.data;
-          const st = (tx.settlement_status || '').toUpperCase();
-          if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) {
-            return 0;
-          }
-          settlementResult = {
-            netAmt: o.pendingAmount ?? tx.net_amount,
-            rrn: tx.rrn || 'N/A',
-            st,
-            tmt: tx.updated_at ? new Date(tx.updated_at) : undefined
-          };
-        } else if (o.channel === 'oy') {
-          const statusResp = await axios.post(
-            'https://partner.oyindonesia.com/api/payment-routing/check-status',
-            { partner_trx_id: o.id, send_callback: false },
-            { headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
-          );
-          const s = statusResp.data;
-          const st = (s.settlement_status || '').toUpperCase();
-          if (s.status?.code !== '000' || st === 'WAITING') {
-            return 0;
+  await Promise.all(
+    pendingOrders.map(o =>
+      httpLimit(async () => {
+        try {
+          const creds =
+            o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
+          if (!creds) {
+            return;
           }
 
-          const detailResp = await axios.get(
-            'https://partner.oyindonesia.com/api/v1/transaction',
-            {
-              params: { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' },
-              headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey },
+          let settlementResult: SettlementResult | null = null;
+          const { merchantId, secretKey } = creds;
+
+          if (o.channel === 'hilogate') {
+            const path = `/api/v1/transactions/${o.id}`;
+            const url = `${config.api.hilogate.baseUrl}${path}`;
+            const sig = generateSignature(path, secretKey);
+            const resp = await axios.get(url, {
+              headers: { 'X-Merchant-ID': merchantId, 'X-Signature': sig },
               httpsAgent,
               timeout: 15_000
+            });
+            const tx = resp.data.data;
+            const st = (tx.settlement_status || '').toUpperCase();
+            if (!['ACTIVE', 'SETTLED', 'COMPLETED'].includes(st)) {
+              return;
             }
-          );
-          const d = detailResp.data.data;
-          if (!d || detailResp.data.status?.code !== '000') {
-            return 0;
+            settlementResult = {
+              netAmt: o.pendingAmount ?? tx.net_amount,
+              rrn: tx.rrn || 'N/A',
+              st,
+              tmt: tx.updated_at ? new Date(tx.updated_at) : undefined
+            };
+          } else if (o.channel === 'oy') {
+            const statusResp = await axios.post(
+              'https://partner.oyindonesia.com/api/payment-routing/check-status',
+              { partner_trx_id: o.id, send_callback: false },
+              { headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey }, httpsAgent, timeout: 15_000 }
+            );
+            const s = statusResp.data;
+            const st = (s.settlement_status || '').toUpperCase();
+            if (s.status?.code !== '000' || st === 'WAITING') {
+              return;
+            }
+
+            const detailResp = await axios.get(
+              'https://partner.oyindonesia.com/api/v1/transaction',
+              {
+                params: { partner_tx_id: o.id, product_type: 'PAYMENT_ROUTING' },
+                headers: { 'x-oy-username': merchantId, 'x-api-key': secretKey },
+                httpsAgent,
+                timeout: 15_000
+              }
+            );
+            const d = detailResp.data.data;
+            if (!d || detailResp.data.status?.code !== '000') {
+              return;
+            }
+            settlementResult = {
+              netAmt: d.settlement_amount,
+              fee: d.admin_fee.total_fee,
+              rrn: s.trx_id,
+              st,
+              tmt: d.settlement_time ? new Date(d.settlement_time) : undefined
+            };
           }
-          settlementResult = {
-            netAmt: d.settlement_amount,
-            fee: d.admin_fee.total_fee,
-            rrn: s.trx_id,
-            st,
-            tmt: d.settlement_time ? new Date(d.settlement_time) : undefined
-          };
-        }
 
-        if (!settlementResult) {
-          return 0;
-        }
+          if (!settlementResult) {
+            return;
+          }
 
-        // idempotent update dengan updateMany + count check
-        return dbLimit(() =>
-          retryTx(() =>
-            prisma.$transaction(async tx => {
+          const key = o.partnerClientId!;
+          const arr = groups.get(key) ?? [];
+          arr.push({ order: o, settlement: settlementResult });
+          groups.set(key, arr);
+        } catch (err) {
+          logger.error(`[SettlementCron] order ${o.id} failed:`, err);
+        }
+      })
+    )
+  );
+
+  const dbLimit = pLimit(DB_CONCURRENCY);
+  const txPromises = Array.from(groups.entries()).map(([pcId, items]) =>
+    dbLimit(async () => {
+      try {
+        return await retryTx(() =>
+          prisma.$transaction(async tx => {
+            let settledCount = 0;
+            let netAmount = 0;
+            for (const { order, settlement } of items) {
               const upd = await tx.order.updateMany({
-                where: { id: o.id, status: 'PAID' },
+                where: { id: order.id, status: 'PAID' },
                 data: {
                   status: 'SETTLED',
-                  settlementAmount: settlementResult.netAmt,
+                  settlementAmount: settlement.netAmt,
                   pendingAmount: null,
-                  ...(settlementResult.fee && { fee3rdParty: settlementResult.fee }),
-                  rrn: settlementResult.rrn,
-                  settlementStatus: settlementResult.st,
-                  settlementTime: settlementResult.tmt,
+                  ...(settlement.fee && { fee3rdParty: settlement.fee }),
+                  rrn: settlement.rrn,
+                  settlementStatus: settlement.st,
+                  settlementTime: settlement.tmt,
                   updatedAt: new Date()
                 }
               });
               if (upd.count > 0) {
-                await tx.partnerClient.update({
-                  where: { id: o.partnerClientId! },
-                  data: { balance: { increment: settlementResult.netAmt } }
-                });
-                return settlementResult.netAmt;
+                settledCount++;
+                netAmount += settlement.netAmt;
               }
-              return 0;
-            })
-          )
+            }
+            if (netAmount > 0) {
+              await tx.partnerClient.update({
+                where: { id: pcId },
+                data: { balance: { increment: netAmount } }
+              });
+            }
+            return { settledCount, netAmount };
+          })
         );
       } catch (err) {
-        logger.error(`[SettlementCron] order ${o.id} failed:`, err);
-        return 0;
+        logger.error(`[SettlementCron] partnerClient ${pcId} failed:`, err);
+        return { settledCount: 0, netAmount: 0 };
       }
     })
   );
@@ -225,11 +246,8 @@ const where: any = {
   let netAmount = 0;
   for (const r of settled) {
     if (r.status === 'fulfilled') {
-      const val = r.value as number;
-      if (val > 0) {
-        settledCount++;
-        netAmount += val;
-      }
+      settledCount += r.value.settledCount;
+      netAmount += r.value.netAmount;
     }
   }
 
