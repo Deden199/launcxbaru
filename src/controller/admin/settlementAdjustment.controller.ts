@@ -11,10 +11,16 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     return res.status(400).json({ error: 'settlementStatus required' })
   }
 
+  const hasIds = Array.isArray(transactionIds) && transactionIds.length > 0
+  const hasDateRange = Boolean(dateFrom || dateTo)
+  if (hasIds && hasDateRange) {
+    return res.status(400).json({ error: 'provide either transactionIds or date range, not both' })
+  }
+
   const where: any = {}
-  if (Array.isArray(transactionIds) && transactionIds.length > 0) {
+  if (hasIds) {
     where.id = { in: transactionIds }
-  } else if (dateFrom || dateTo) {
+  } else if (hasDateRange) {
     const createdAt: any = {}
     if (dateFrom) createdAt.gte = new Date(dateFrom)
     if (dateTo) createdAt.lte = new Date(dateTo)
