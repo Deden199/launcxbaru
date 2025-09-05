@@ -16,6 +16,7 @@ import { AuthRequest }                  from '../middleware/auth'
 import { prisma }               from '../core/prisma'
 import Decimal from 'decimal.js'
 import moment                    from 'moment-timezone'
+import { computeSettlement }     from '../service/feeSettlement'
 import { postWithRetry }                from '../utils/postWithRetry'
 
 import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
@@ -284,37 +285,28 @@ const trxExpirationTime = full.expires_at?.value
     const weekend = isJakartaWeekend(paymentReceivedTime)
     const pctFee  = weekend ? partnerConfig.weekendFeePercent ?? 0 : partnerConfig.feePercent ?? 0
     const flatFee = weekend ? partnerConfig.weekendFeeFlat ?? 0 : partnerConfig.feeFlat ?? 0
-  // 8) Hitung fee Launcx dengan presisi 3 digit (opsi 1)
-const pct       = new Decimal(pctFee)                // misal 1,05 → 1.05
-const grossDec  = new Decimal(grossAmount)           // misal 1000
-const rawFee    = grossDec.times(pct).dividedBy(100) // 10.5
-// round 3 digit; pakai ROUND_HALF_UP (bisa diganti ROUND_FLOOR / ROUND_CEIL)
-const feeRounded    = rawFee.toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
-const feeLauncxCalc = feeRounded.plus(new Decimal(flatFee))          // + feeFlat
+    const { fee: feeLauncxCalc, settlement: pendingCalc } = computeSettlement(grossAmount, {
+      percent: pctFee,
+      flat: flatFee,
+    })
 
-// 9) Simpan status, fee, dan amounts
-await prisma.order.update({
-  where: { id: orderId },
-  data: {
-    status: newStatus,   // ← pakai newStatus yang sudah kamu hitung
-    settlementStatus: newSetSt,
-    qrPayload:        qr_string ?? null,
-    rrn:              rrn ?? null,
- updatedAt:        wibTimestamp(),
-    fee3rdParty:      pgFee,
-    feeLauncx:        isSuccess ? feeLauncxCalc.toNumber() : null,
-    pendingAmount:    isSuccess
-      ? grossDec
-          .minus(feeLauncxCalc)
-          .toNumber()
-      : null,
-
-    settlementAmount: null,
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: newStatus,   // ← pakai newStatus yang sudah kamu hitung
+        settlementStatus: newSetSt,
+        qrPayload:        qr_string ?? null,
+        rrn:              rrn ?? null,
+        updatedAt:        wibTimestamp(),
+        fee3rdParty:      pgFee,
+        feeLauncx:        isSuccess ? feeLauncxCalc : null,
+        pendingAmount:    isSuccess ? pendingCalc : null,
+        settlementAmount: null,
         paymentReceivedTime,
         settlementTime,
         trxExpirationTime,
-  }
-})
+      }
+    })
 
     // 10) Ambil kembali order termasuk feeLauncx & pendingAmount
     const order = await prisma.order.findUnique({
@@ -475,14 +467,11 @@ if (cb) {
     const pctFee  = weekend ? pc.weekendFeePercent ?? 0 : pc.feePercent ?? 0
     const flatFee = weekend ? pc.weekendFeeFlat ?? 0 : pc.feeFlat ?? 0
 
-    const grossDec    = new Decimal(receivedAmt)
-    const rawFee      = grossDec.times(pctFee).dividedBy(100)
-    const feeLauncx   = rawFee
-      .toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
-      .plus(new Decimal(flatFee))
-    const pendingAmt  = isSuccess
-      ? grossDec.minus(feeLauncx).toNumber()
-      : null
+    const { fee: feeLauncx, settlement: pendingAmt } = computeSettlement(receivedAmt, {
+      percent: pctFee,
+      flat: flatFee,
+    })
+    const pendingAmount = isSuccess ? pendingAmt : null
 
     // 7) Update order
     await prisma.order.update({
@@ -491,8 +480,8 @@ if (cb) {
         status:           newStatus,
         settlementStatus: newSetSt,
         fee3rdParty:      0,
-        feeLauncx:        isSuccess ? feeLauncx.toNumber() : null,
-        pendingAmount:    pendingAmt,
+        feeLauncx:        isSuccess ? feeLauncx : null,
+        pendingAmount,
         settlementAmount: isSuccess ? null : receivedAmt,
  updatedAt:        wibTimestamp(),
         paymentReceivedTime,
@@ -656,12 +645,11 @@ export const gidiTransactionCallback = async (req: Request, res: Response) => {
     const pctFee = weekend ? partner.weekendFeePercent ?? 0 : partner.feePercent ?? 0;
     const flatFee = weekend ? partner.weekendFeeFlat ?? 0 : partner.feeFlat ?? 0;
 
-    const grossDec = new Decimal(grossAmount);
-    const rawFee = grossDec.times(pctFee).dividedBy(100);
-    const feeLauncx = rawFee
-      .toDecimalPlaces(3, Decimal.ROUND_HALF_UP)
-      .plus(new Decimal(flatFee));
-    const pendingAmt = isSuccess ? grossDec.minus(feeLauncx).toNumber() : null;
+    const { fee: feeLauncx, settlement } = computeSettlement(grossAmount, {
+      percent: pctFee,
+      flat: flatFee,
+    });
+    const pendingAmt = isSuccess ? settlement : null;
 
     // 11. Update order
     await prisma.order.update({
@@ -670,7 +658,7 @@ export const gidiTransactionCallback = async (req: Request, res: Response) => {
         status: newStatus,
         settlementStatus: newSetSt,
         fee3rdParty: 0,
-        feeLauncx: isSuccess ? feeLauncx.toNumber() : null,
+        feeLauncx: isSuccess ? feeLauncx : null,
         pendingAmount: pendingAmt,
         settlementAmount: isSuccess ? null : grossAmount,
         updatedAt: wibTimestamp(),
