@@ -62,7 +62,7 @@ function getDaysInMonthJKT(year:number, mon1to12:number){
 function cmpDate(y:number,m:number,d:number){ return y*10000 + m*100 + d }
 
 // ---------- Range Picker (single popover, no lib) ----------
-function useOnClickOutside<T extends HTMLElement>(ref: React.RefObject<T>, cb: ()=>void){
+function useOnClickOutside<T extends HTMLElement>(ref: React.MutableRefObject<T | null>, cb: ()=>void){
   useEffect(()=>{
     function onDown(e:MouseEvent){
       if(!ref.current) return
