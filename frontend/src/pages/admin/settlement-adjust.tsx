@@ -6,6 +6,8 @@ import { useRequireAuth } from '@/hooks/useAuth'
 import TransactionsTable from '@/components/dashboard/TransactionsTable'
 import { Tx } from '@/types/dashboard'
 import { AlertCircle, CheckCircle } from 'lucide-react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 
 export default function SettlementAdjustPage() {
   useRequireAuth()
@@ -89,7 +91,11 @@ export default function SettlementAdjustPage() {
       const payload: any = { settlementStatus: newStatus }
       if (startDate) payload.dateFrom = startDate.toISOString()
       if (endDate) payload.dateTo = endDate.toISOString()
-      if (settlementTime) payload.settlementTime = new Date(settlementTime).toISOString()
+      if (settlementTime) {
+        const d = new Date(settlementTime)
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000)
+        payload.settlementTime = wib.toISOString().replace('Z', '+07:00')
+      }
       if (fee) payload.feeLauncx = Number(fee)
       const { data } = await api.post('/admin/settlement/adjust', payload)
       setMessage(`Updated ${data.data.updated} transactions`)
@@ -152,10 +158,15 @@ export default function SettlementAdjustPage() {
               <option value="WAITING">WAITING</option>
               <option value="UNSUCCESSFUL">UNSUCCESSFUL</option>
             </select>
-            <input
-              type="datetime-local"
-              value={settlementTime}
-              onChange={e => setSettlementTime(e.target.value)}
+            <DatePicker
+              selected={settlementTime ? new Date(settlementTime) : null}
+              onChange={(date: Date | null) => setSettlementTime(date ? date.toISOString() : '')}
+              showTimeSelect
+              dateFormat="dd-MM-yyyy HH:mm"
+              withPortal
+              popperProps={{ strategy: 'fixed' }}
+              popperClassName="datepicker-popper"
+              calendarClassName="dp-dark"
               className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
             />
             <input
@@ -175,6 +186,26 @@ export default function SettlementAdjustPage() {
           </button>
         </section>
       </div>
+      <style jsx global>{`
+        .datepicker-popper.react-datepicker-popper { z-index: 2147483647 !important; }
+        .dp-dark.react-datepicker {
+          background-color: #0a0a0a; border: 1px solid #262626; color: #e5e5e5;
+        }
+        .dp-dark .react-datepicker__header {
+          background-color: #111111; border-bottom: 1px solid #262626;
+        }
+        .dp-dark .react-datepicker__current-month,
+        .dp-dark .react-datepicker-time__header,
+        .dp-dark .react-datepicker-year-header,
+        .dp-dark .react-datepicker__day-name { color: #d4d4d4; }
+        .dp-dark .react-datepicker__day { color: #e5e5e5; }
+        .dp-dark .react-datepicker__day--outside-month { color: #737373; }
+        .dp-dark .react-datepicker__day--keyboard-selected,
+        .dp-dark .react-datepicker__day--selected,
+        .dp-dark .react-datepicker__day--in-range {
+          background-color: #4f46e5; color: #fff;
+        }
+      `}</style>
     </div>
   )
 }
