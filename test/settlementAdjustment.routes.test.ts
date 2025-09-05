@@ -67,3 +67,22 @@ test('returns ids of updated settlements', async () => {
   assert.equal(res.body.data.updated, 1)
 })
 
+test('adjusting PAID order to SETTLED updates status', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => [
+    { id: 'o2', amount: 200, fee3rdParty: 0, feeLauncx: 0 },
+  ]
+  prisma.transaction_request.findMany = async () => []
+  let updatedData: any
+  prisma.order.update = async ({ data }: any) => {
+    updatedData = data
+    return {}
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o2'], settlementStatus: 'SETTLED' })
+  assert.equal(res.status, 200)
+  assert.equal(updatedData.status, 'SETTLED')
+  assert.equal(updatedData.pendingAmount, null)
+})
+
