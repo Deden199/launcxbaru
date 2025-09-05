@@ -7,7 +7,7 @@ process.env.JWT_SECRET = 'test'
 
 const prismaPath = require.resolve('../src/core/prisma')
 const prismaMock: any = {
-  order: { findMany: async () => [], update: async () => {} },
+  order: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
   transaction_request: { findMany: async () => [], update: async () => {} },
 }
 prismaMock.$transaction = async (fn: any) => fn(prismaMock)
@@ -61,10 +61,10 @@ test('returns ids of updated settlements', async () => {
     { id: 'o1', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
   ]
   prisma.transaction_request.findMany = async () => []
-  let orderUpdate: any
-  prisma.order.update = async ({ data }: any) => {
-    orderUpdate = data
-    return {}
+  const calls: any[] = []
+  prisma.order.updateMany = async (args: any) => {
+    calls.push(args)
+    return { count: 1 }
   }
   const res = await request(app)
     .post('/settlement/adjust')
@@ -72,8 +72,11 @@ test('returns ids of updated settlements', async () => {
   assert.equal(res.status, 200)
   assert.deepEqual(res.body.data.ids, ['o1'])
   assert.equal(res.body.data.updated, 1)
-  assert.equal(orderUpdate.feeLauncx, 5)
-  assert.equal(orderUpdate.settlementAmount, 95)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].data.feeLauncx, 5)
+  assert.equal(calls[0].data.settlementAmount, 95)
+  assert.equal(calls[1].data.status, 'SETTLED')
+  assert.equal(calls[1].data.pendingAmount, null)
 })
 
 test('adjusting PAID order to SETTLED updates both status and settlementStatus', async () => {
@@ -82,18 +85,19 @@ test('adjusting PAID order to SETTLED updates both status and settlementStatus',
     { id: 'o2', amount: 200, fee3rdParty: 0, feeLauncx: 0 },
   ]
   prisma.transaction_request.findMany = async () => []
-  let updatedData: any
-  prisma.order.update = async ({ data }: any) => {
-    updatedData = data
-    return {}
+  const calls: any[] = []
+  prisma.order.updateMany = async (args: any) => {
+    calls.push(args)
+    return { count: 1 }
   }
   const res = await request(app)
     .post('/settlement/adjust')
     .send({ transactionIds: ['o2'], settlementStatus: 'SETTLED' })
   assert.equal(res.status, 200)
-  assert.equal(updatedData.settlementStatus, 'SETTLED')
-  assert.equal(updatedData.status, 'SETTLED')
-  assert.equal(updatedData.pendingAmount, null)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].data.settlementStatus, 'SETTLED')
+  assert.equal(calls[1].data.status, 'SETTLED')
+  assert.equal(calls[1].data.pendingAmount, null)
 })
 
 test('non-final settlementStatus does not change order status', async () => {
@@ -102,18 +106,19 @@ test('non-final settlementStatus does not change order status', async () => {
     { id: 'o5', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
   ]
   prisma.transaction_request.findMany = async () => []
-  let updatedData: any
-  prisma.order.update = async ({ data }: any) => {
-    updatedData = data
-    return {}
+  const calls: any[] = []
+  prisma.order.updateMany = async (args: any) => {
+    calls.push(args)
+    return { count: 1 }
   }
   const res = await request(app)
     .post('/settlement/adjust')
     .send({ transactionIds: ['o5'], settlementStatus: 'PENDING' })
   assert.equal(res.status, 200)
-  assert.equal(updatedData.settlementStatus, 'PENDING')
-  assert.ok(!('status' in updatedData))
-  assert.ok(!('pendingAmount' in updatedData))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].data.settlementStatus, 'PENDING')
+  assert.ok(!('status' in calls[0].data))
+  assert.ok(!('pendingAmount' in calls[0].data))
 })
 
 test('unpaid orders are ignored by adjustment routine', async () => {
@@ -125,9 +130,9 @@ test('unpaid orders are ignored by adjustment routine', async () => {
   }
   prisma.transaction_request.findMany = async () => []
   let updateCalled = false
-  prisma.order.update = async () => {
+  prisma.order.updateMany = async () => {
     updateCalled = true
-    return {}
+    return { count: 0 }
   }
   const res = await request(app)
     .post('/settlement/adjust')
@@ -167,12 +172,32 @@ test('returns 500 when enums are invalid', async () => {
     { id: 'o4', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
   ]
   prisma.transaction_request.findMany = async () => []
-  prisma.order.update = async () => {
+  prisma.order.updateMany = async () => {
     throw new Error('invalid enum')
   }
   const res = await request(app)
     .post('/settlement/adjust')
     .send({ transactionIds: ['o4'], settlementStatus: 'WRONG' })
   assert.equal(res.status, 500)
+})
+
+test('skips update when order no longer PAID', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => [
+    { id: 'o6', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
+  ]
+  prisma.transaction_request.findMany = async () => []
+  let calls = 0
+  prisma.order.updateMany = async (args: any) => {
+    calls++
+    return { count: 0 }
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o6'], settlementStatus: 'SETTLED' })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.data.updated, 0)
+  assert.deepEqual(res.body.data.ids, [])
+  assert.equal(calls, 1)
 })
 
