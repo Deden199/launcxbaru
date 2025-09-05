@@ -72,43 +72,43 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
 
     const isFinalSettlement = ['SETTLED', 'DONE', 'SUCCESS', 'COMPLETED'].includes(settlementStatus)
 
-    await prisma.$transaction(async tx => {
-      await Promise.all([
-        ...orders.map(o => {
+    await prisma.$transaction(
+      async tx => {
+        for (const o of orders) {
           const netAmount = o.amount - (o.fee3rdParty ?? 0)
           const newFee = getFee(o.id, o.feeLauncx ?? undefined)
           const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
           updates.push({ id: o.id, model: 'order', settlementAmount })
-          return tx.order
-            .update({
-              where: { id: o.id },
-              data: {
-                settlementStatus,
-                ...(settlementTime && { settlementTime: new Date(settlementTime) }),
-                feeLauncx: newFee,
-                settlementAmount,
-                ...(isFinalSettlement && { status: 'SETTLED', pendingAmount: null }),
-              },
-            })
-            .then(logProgress)
-        }),
-        ...oldTrx.map(t => {
+          await tx.order.update({
+            where: { id: o.id },
+            data: {
+              settlementStatus,
+              ...(settlementTime && { settlementTime: new Date(settlementTime) }),
+              feeLauncx: newFee,
+              settlementAmount,
+              ...(isFinalSettlement && { status: 'SETTLED', pendingAmount: null }),
+            },
+          })
+          logProgress()
+        }
+
+        for (const t of oldTrx) {
           const netAmount = t.settlementAmount ?? t.amount
           const newFee = getFee(t.id)
           const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
           updates.push({ id: t.id, model: 'trx', settlementAmount })
-          return tx.transaction_request
-            .update({
-              where: { id: t.id },
-              data: {
-                ...(settlementTime && { settlementAt: new Date(settlementTime) }),
-                settlementAmount,
-              },
-            })
-            .then(logProgress)
-        }),
-      ])
-    })
+          await tx.transaction_request.update({
+            where: { id: t.id },
+            data: {
+              ...(settlementTime && { settlementAt: new Date(settlementTime) }),
+              settlementAmount,
+            },
+          })
+          logProgress()
+        }
+      },
+      { timeout: 30000 }
+    )
 
     console.log(`Settlement adjustment completed for ${processed} records`)
 
