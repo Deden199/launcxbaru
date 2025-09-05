@@ -109,3 +109,41 @@ test('unpaid orders are ignored by adjustment routine', async () => {
   assert.equal(whereArg.status, 'PAID')
 })
 
+test('updates old transaction requests', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => []
+  let trxWhere: any
+  prisma.transaction_request.findMany = async ({ where }: any) => {
+    trxWhere = where
+    return [{ id: 't1', amount: 100, settlementAmount: null }]
+  }
+  let trxUpdate: any
+  prisma.transaction_request.update = async ({ data }: any) => {
+    trxUpdate = data
+    return {}
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['t1'], settlementStatus: 'SETTLED', feeLauncx: { t1: 10 }, settlementTime: '2024-01-01' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body.data.ids, ['t1'])
+  assert.equal(res.body.data.updated, 1)
+  assert.equal(trxWhere.status, 'SUCCESS')
+  assert.equal(trxUpdate.settlementAmount, 90)
+})
+
+test('returns 500 when enums are invalid', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => [
+    { id: 'o4', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
+  ]
+  prisma.transaction_request.findMany = async () => []
+  prisma.order.update = async () => {
+    throw new Error('invalid enum')
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o4'], settlementStatus: 'WRONG' })
+  assert.equal(res.status, 500)
+})
+
