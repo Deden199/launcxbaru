@@ -53,10 +53,16 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     })
 
     const feeInput = feeLauncx
-    const getFee = (id: string, existing?: number | null) => {
+    const getFeePct = (id: string, existingFee?: number | null, baseAmount?: number) => {
       if (typeof feeInput === 'number') return feeInput
-      if (feeInput && typeof feeInput === 'object') return feeInput[id] ?? existing ?? 0
-      return existing ?? 0
+      if (feeInput && typeof feeInput === 'object') {
+        const val = feeInput[id]
+        if (typeof val === 'number') return val
+      }
+      if (existingFee != null && baseAmount) {
+        return (existingFee / baseAmount) * 100
+      }
+      return 0
     }
 
     const updates: { id: string; model: 'order' | 'trx'; settlementAmount: number }[] = []
@@ -76,16 +82,16 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
       async tx => {
         for (const o of orders) {
           const netAmount = o.amount - (o.fee3rdParty ?? 0)
-          const newFee = getFee(o.id, o.feeLauncx ?? undefined)
-          const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
-          updates.push({ id: o.id, model: 'order', settlementAmount })
+          const feePct = getFeePct(o.id, o.feeLauncx ?? undefined, netAmount)
+          const { fee, settlement } = computeSettlement(netAmount, { percent: feePct })
+          updates.push({ id: o.id, model: 'order', settlementAmount: settlement })
           await tx.order.update({
             where: { id: o.id },
             data: {
               settlementStatus,
               ...(settlementTime && { settlementTime: new Date(settlementTime) }),
-              feeLauncx: newFee,
-              settlementAmount,
+              feeLauncx: fee,
+              settlementAmount: settlement,
               ...(isFinalSettlement && { status: 'SETTLED', pendingAmount: null }),
             },
           })
@@ -94,14 +100,14 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
 
         for (const t of oldTrx) {
           const netAmount = t.settlementAmount ?? t.amount
-          const newFee = getFee(t.id)
-          const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
-          updates.push({ id: t.id, model: 'trx', settlementAmount })
+          const feePct = getFeePct(t.id)
+          const { settlement } = computeSettlement(netAmount, { percent: feePct })
+          updates.push({ id: t.id, model: 'trx', settlementAmount: settlement })
           await tx.transaction_request.update({
             where: { id: t.id },
             data: {
               ...(settlementTime && { settlementAt: new Date(settlementTime) }),
-              settlementAmount,
+              settlementAmount: settlement,
             },
           })
           logProgress()
