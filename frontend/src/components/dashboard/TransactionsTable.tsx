@@ -45,6 +45,7 @@ export default function TransactionsTable({
   totalPages,
   buildParams,
   onDateChange,
+  onSelectIds,
 }: TransactionsTableProps) {
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
