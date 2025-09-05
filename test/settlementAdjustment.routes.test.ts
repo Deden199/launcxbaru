@@ -61,12 +61,19 @@ test('returns ids of updated settlements', async () => {
     { id: 'o1', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
   ]
   prisma.transaction_request.findMany = async () => []
+  let orderUpdate: any
+  prisma.order.update = async ({ data }: any) => {
+    orderUpdate = data
+    return {}
+  }
   const res = await request(app)
     .post('/settlement/adjust')
-    .send({ transactionIds: ['o1'], settlementStatus: 'SETTLED' })
+    .send({ transactionIds: ['o1'], settlementStatus: 'SETTLED', feeLauncx: 5 })
   assert.equal(res.status, 200)
   assert.deepEqual(res.body.data.ids, ['o1'])
   assert.equal(res.body.data.updated, 1)
+  assert.equal(orderUpdate.feeLauncx, 5)
+  assert.equal(orderUpdate.settlementAmount, 95)
 })
 
 test('adjusting PAID order to SETTLED updates both status and settlementStatus', async () => {
@@ -137,7 +144,7 @@ test('updates old transaction requests', async () => {
   let trxWhere: any
   prisma.transaction_request.findMany = async ({ where }: any) => {
     trxWhere = where
-    return [{ id: 't1', amount: 100, settlementAmount: null }]
+    return [{ id: 't1', amount: 200, settlementAmount: null }]
   }
   let trxUpdate: any
   prisma.transaction_request.update = async ({ data }: any) => {
@@ -151,7 +158,7 @@ test('updates old transaction requests', async () => {
   assert.deepEqual(res.body.data.ids, ['t1'])
   assert.equal(res.body.data.updated, 1)
   assert.equal(trxWhere.status, 'SUCCESS')
-  assert.equal(trxUpdate.settlementAmount, 90)
+  assert.equal(trxUpdate.settlementAmount, 180)
 })
 
 test('returns 500 when enums are invalid', async () => {
