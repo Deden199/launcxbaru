@@ -84,18 +84,25 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
           const netAmount = o.amount - (o.fee3rdParty ?? 0)
           const feePct = getFeePct(o.id, o.feeLauncx ?? undefined, netAmount)
           const { fee, settlement } = computeSettlement(netAmount, { percent: feePct })
-          updates.push({ id: o.id, model: 'order', settlementAmount: settlement })
-          await tx.order.update({
-            where: { id: o.id },
+          const result = await tx.order.updateMany({
+            where: { id: o.id, status: 'PAID' },
             data: {
               settlementStatus,
               ...(settlementTime && { settlementTime: new Date(settlementTime) }),
               feeLauncx: fee,
               settlementAmount: settlement,
-              ...(isFinalSettlement && { status: 'SETTLED', pendingAmount: null }),
             },
           })
-          logProgress()
+          if (result.count > 0) {
+            if (isFinalSettlement) {
+              await tx.order.updateMany({
+                where: { id: o.id },
+                data: { status: 'SETTLED', pendingAmount: null },
+              })
+            }
+            updates.push({ id: o.id, model: 'order', settlementAmount: settlement })
+            logProgress()
+          }
         }
 
         for (const t of oldTrx) {
