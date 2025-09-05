@@ -8,6 +8,12 @@ import { Tx } from '@/types/dashboard'
 import { AlertCircle, CheckCircle } from 'lucide-react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
+import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
+
+dayjs.extend(utc)
+dayjs.extend(timezone)
 
 export default function SettlementAdjustPage() {
   useRequireAuth()
@@ -24,7 +30,7 @@ export default function SettlementAdjustPage() {
   const [totalPages, setTotalPages] = useState(1)
 
   const [newStatus, setNewStatus] = useState('SETTLED')
-  const [settlementTime, setSettlementTime] = useState('')
+  const [settlementTime, setSettlementTime] = useState<Date | null>(null)
   const [fee, setFee] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
@@ -37,8 +43,8 @@ export default function SettlementAdjustPage() {
 
   const buildParams = () => {
     const p: any = { page, limit: perPage }
-    if (startDate) p.date_from = startDate.toISOString()
-    if (endDate) p.date_to = endDate.toISOString()
+    if (startDate) p.date_from = dayjs(startDate).tz('Asia/Jakarta', true).toDate().toISOString()
+    if (endDate) p.date_to = dayjs(endDate).tz('Asia/Jakarta', true).toDate().toISOString()
     if (statusFilter !== 'all') p.status = statusFilter
     if (search.trim()) p.search = search.trim()
     return p
@@ -102,20 +108,18 @@ export default function SettlementAdjustPage() {
       const payload: any = { settlementStatus: newStatus }
       if (mode === 'FULL_DAY') {
         if (!adjustDate) throw new Error('Date is required')
-        const start = new Date(adjustDate)
-        start.setHours(0, 0, 0, 0)
-        const end = new Date(start)
-        end.setDate(end.getDate() + 1)
-        payload.dateFrom = start.toISOString()
-        payload.dateTo = end.toISOString()
+        const start = dayjs(adjustDate).tz('Asia/Jakarta', true).startOf('day')
+        if (!start.isValid()) throw new Error('Invalid date')
+        const end = start.add(1, 'day')
+        payload.dateFrom = start.toDate().toISOString()
+        payload.dateTo = end.toDate().toISOString()
       } else if (mode === 'PER_HOUR') {
         if (!adjustDate) throw new Error('Date and hour are required')
-        const start = new Date(adjustDate)
-        start.setMinutes(0, 0, 0)
-        const end = new Date(start)
-        end.setHours(end.getHours() + 1)
-        payload.dateFrom = start.toISOString()
-        payload.dateTo = end.toISOString()
+        const start = dayjs(adjustDate).tz('Asia/Jakarta', true).startOf('hour')
+        if (!start.isValid()) throw new Error('Invalid date and hour')
+        const end = start.add(1, 'hour')
+        payload.dateFrom = start.toDate().toISOString()
+        payload.dateTo = end.toDate().toISOString()
       } else if (mode === 'TRANSACTION_ID') {
         const ids = transactionIds
           .split(',')
@@ -125,9 +129,9 @@ export default function SettlementAdjustPage() {
         payload.transactionIds = ids
       }
       if (settlementTime) {
-        const d = new Date(settlementTime)
-        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000)
-        payload.settlementTime = wib.toISOString().replace('Z', '+07:00')
+        const st = dayjs(settlementTime).tz('Asia/Jakarta', true)
+        if (!st.isValid()) throw new Error('Invalid settlement time')
+        payload.settlementTime = st.toDate().toISOString()
       }
       if (fee) payload.feeLauncx = Number(fee)
       const { data } = await api.post('/admin/settlement/adjust', payload)
@@ -238,8 +242,8 @@ export default function SettlementAdjustPage() {
               <option value="UNSUCCESSFUL">UNSUCCESSFUL</option>
             </select>
             <DatePicker
-              selected={settlementTime ? new Date(settlementTime) : null}
-              onChange={(date: Date | null) => setSettlementTime(date ? date.toISOString() : '')}
+              selected={settlementTime}
+              onChange={(date: Date | null) => setSettlementTime(date)}
               showTimeSelect
               dateFormat="dd-MM-yyyy HH:mm"
               withPortal
