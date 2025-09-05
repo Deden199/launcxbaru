@@ -57,6 +57,7 @@ export default function SettlementAdjustPage() {
   const handleDateChange = (dates: [Date | null, Date | null]) => {
     setStartDate(dates[0])
     setEndDate(dates[1])
+    fetchTransactions()
   }
 
   async function fetchTransactions() {
@@ -78,7 +79,7 @@ export default function SettlementAdjustPage() {
   useEffect(() => {
     fetchTransactions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate, search, statusFilter, page, perPage])
+  }, [search, statusFilter, page, perPage])
 
   const submit = async () => {
     setSubmitting(true)
