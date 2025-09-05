@@ -28,6 +28,7 @@ interface TransactionsTableProps {
   totalPages: number
   buildParams: () => any
   onDateChange: (dates: [Date | null, Date | null]) => void
+  onSelectIds?: (ids: string[]) => void
 }
 
 export default function TransactionsTable({
@@ -46,6 +47,7 @@ export default function TransactionsTable({
   onDateChange,
 }: TransactionsTableProps) {
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const hasData = txs && txs.length > 0
 
   // Ensure a portal root for the datepicker so the popper isn't clipped
@@ -104,6 +106,7 @@ export default function TransactionsTable({
 
   const columns = useMemo(
     () => [
+      { key: 'select', label: '', className: 'min-w-[40px]' },
       { key: 'date', label: 'Date', className: 'min-w-[160px]' },
       { key: 'paymentReceivedTime', label: 'Update At', className: 'min-w-[160px]' },
       { key: 'settlementTime', label: 'Settled At', className: 'min-w-[160px]' },
@@ -120,6 +123,28 @@ export default function TransactionsTable({
     ],
     []
   )
+
+  useEffect(() => {
+    onSelectIds?.(selectedIds)
+  }, [selectedIds, onSelectIds])
+
+  useEffect(() => {
+    setSelectedIds([])
+  }, [txs])
+
+  const toggleAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(txs.map(t => t.id))
+    } else {
+      setSelectedIds([])
+    }
+  }
+
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelectedIds(prev =>
+      checked ? [...prev, id] : prev.filter(sid => sid !== id)
+    )
+  }
 
   return (
     // force dark mode for this page
@@ -232,7 +257,16 @@ export default function TransactionsTable({
                         key={c.key}
                         className={`px-3 py-2 text-left font-medium text-neutral-300 ${c.className || ''}`}
                       >
-                        {c.label}
+                        {c.key === 'select' ? (
+                          <input
+                            type="checkbox"
+                            aria-label="Select all"
+                            checked={selectedIds.length === txs.length && txs.length > 0}
+                            onChange={(e) => toggleAll(e.target.checked)}
+                          />
+                        ) : (
+                          c.label
+                        )}
                       </th>
                     ))}
                   </tr>
@@ -240,6 +274,14 @@ export default function TransactionsTable({
                 <tbody>
                   {txs.map((t) => (
                     <tr key={t.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-900/60">
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select transaction ${t.id}`}
+                          checked={selectedIds.includes(t.id)}
+                          onChange={(e) => toggleOne(t.id, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {new Date(t.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
                       </td>
