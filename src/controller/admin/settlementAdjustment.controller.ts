@@ -2,6 +2,7 @@ import { Response } from 'express'
 import { prisma } from '../../core/prisma'
 import { AuthRequest } from '../../middleware/auth'
 import { logAdminAction } from '../../util/adminLog'
+import { computeSettlement } from '../../service/feeSettlement'
 
 export async function adjustSettlements(req: AuthRequest, res: Response) {
   const { transactionIds, dateFrom, dateTo, settlementStatus, settlementTime, feeLauncx } = req.body as any
@@ -53,7 +54,7 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
   for (const o of orders) {
     const netAmount = o.amount - (o.fee3rdParty ?? 0)
     const newFee = getFee(o.id, o.feeLauncx ?? undefined)
-    const settlementAmount = netAmount - newFee
+    const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
     await prisma.order.update({
       where: { id: o.id },
       data: {
@@ -70,7 +71,7 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
   for (const t of oldTrx) {
     const netAmount = t.settlementAmount ?? t.amount
     const newFee = getFee(t.id)
-    const settlementAmount = netAmount - newFee
+    const { settlement: settlementAmount } = computeSettlement(netAmount, { flat: newFee })
     await prisma.transaction_request.update({
       where: { id: t.id },
       data: {
