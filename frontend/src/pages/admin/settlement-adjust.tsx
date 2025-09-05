@@ -33,6 +33,7 @@ export default function SettlementAdjustPage() {
   const [mode, setMode] = useState<'FULL_DAY' | 'TRANSACTION_ID' | 'PER_HOUR'>('FULL_DAY')
   const [adjustDate, setAdjustDate] = useState<Date | null>(null)
   const [transactionIds, setTransactionIds] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   const buildParams = () => {
     const p: any = { page, limit: perPage }
@@ -86,6 +87,12 @@ export default function SettlementAdjustPage() {
     fetchTransactions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, statusFilter, page, perPage])
+
+  useEffect(() => {
+    if (mode === 'TRANSACTION_ID') {
+      setTransactionIds(selectedIds.join(','))
+    }
+  }, [mode, selectedIds])
 
   const submit = async () => {
     setSubmitting(true)
@@ -170,6 +177,7 @@ export default function SettlementAdjustPage() {
             totalPages={totalPages}
             buildParams={buildParams}
             onDateChange={handleDateChange}
+            onSelectIds={setSelectedIds}
           />
         </div>
 
