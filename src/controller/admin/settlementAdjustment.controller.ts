@@ -17,7 +17,7 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     return res.status(400).json({ error: 'provide either transactionIds or date range, not both' })
   }
 
-  const where: any = {}
+  const where: any = { status: 'PAID' }
   if (hasIds) {
     where.id = { in: transactionIds }
   } else if (hasDateRange) {
@@ -65,7 +65,6 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
       where: { id: o.id },
       data: {
         settlementStatus,
-        status: settlementStatus,
         ...(settlementTime && { settlementTime: new Date(settlementTime) }),
         feeLauncx: newFee,
         settlementAmount,
@@ -82,7 +81,6 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     await prisma.transaction_request.update({
       where: { id: t.id },
       data: {
-        status: settlementStatus,
         ...(settlementTime && { settlementAt: new Date(settlementTime) }),
         settlementAmount,
       }

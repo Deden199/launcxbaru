@@ -67,7 +67,7 @@ test('returns ids of updated settlements', async () => {
   assert.equal(res.body.data.updated, 1)
 })
 
-test('adjusting PAID order to SETTLED updates status', async () => {
+test('adjusting PAID order to SETTLED keeps status PAID and updates settlementStatus', async () => {
   const prisma = require.cache[prismaPath].exports.prisma
   prisma.order.findMany = async () => [
     { id: 'o2', amount: 200, fee3rdParty: 0, feeLauncx: 0 },
@@ -82,7 +82,30 @@ test('adjusting PAID order to SETTLED updates status', async () => {
     .post('/settlement/adjust')
     .send({ transactionIds: ['o2'], settlementStatus: 'SETTLED' })
   assert.equal(res.status, 200)
-  assert.equal(updatedData.status, 'SETTLED')
+  assert.equal(updatedData.settlementStatus, 'SETTLED')
+  assert.equal('status' in updatedData, false)
   assert.equal(updatedData.pendingAmount, null)
+})
+
+test('unpaid orders are ignored by adjustment routine', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  let whereArg: any
+  prisma.order.findMany = async ({ where }: any) => {
+    whereArg = where
+    return []
+  }
+  prisma.transaction_request.findMany = async () => []
+  let updateCalled = false
+  prisma.order.update = async () => {
+    updateCalled = true
+    return {}
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o3'], settlementStatus: 'SETTLED' })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.data.updated, 0)
+  assert.equal(updateCalled, false)
+  assert.equal(whereArg.status, 'PAID')
 })
 
