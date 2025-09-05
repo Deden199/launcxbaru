@@ -5,7 +5,7 @@ import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
 import TransactionsTable from '@/components/dashboard/TransactionsTable'
 import { Tx } from '@/types/dashboard'
-import { AlertCircle, CheckCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle, ClipboardCopy } from 'lucide-react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import dayjs from 'dayjs'
@@ -36,6 +36,7 @@ export default function SettlementAdjustPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [updatedIds, setUpdatedIds] = useState<string[]>([])
 
   const [mode, setMode] = useState<'FULL_DAY' | 'TRANSACTION_ID' | 'PER_HOUR'>('FULL_DAY')
   const [adjustDate, setAdjustDate] = useState<Date | null>(null)
@@ -105,6 +106,7 @@ export default function SettlementAdjustPage() {
     setSubmitting(true)
     setError('')
     setMessage('')
+    setUpdatedIds([])
     try {
       const payload: any = { settlementStatus: newStatus }
       if (mode === 'FULL_DAY') {
@@ -136,6 +138,7 @@ export default function SettlementAdjustPage() {
       if (fee) payload.feeLauncx = Number(fee)
       const { data } = await api.post('/admin/settlement/adjust', payload)
       setMessage(`Updated ${data.data.updated} transactions`)
+      setUpdatedIds(data.data.ids || [])
     } catch (e: any) {
       setError(e?.response?.data?.error || e.message || 'Failed to adjust settlements')
     } finally {
@@ -156,6 +159,17 @@ export default function SettlementAdjustPage() {
             {message && (
               <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-900/40 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
                 <CheckCircle size={16} /> {message}
+              </div>
+            )}
+            {message && updatedIds.length > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  onClick={() => navigator.clipboard.writeText(updatedIds.join(','))}
+                  className="inline-flex items-center gap-1 underline"
+                >
+                  <ClipboardCopy size={14} /> Copy IDs
+                </button>
+                <span className="break-all">{updatedIds.join(', ')}</span>
               </div>
             )}
             {error && (
