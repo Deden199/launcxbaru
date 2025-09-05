@@ -70,6 +70,8 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
       }
     }
 
+    const isFinalSettlement = ['SETTLED', 'DONE', 'SUCCESS', 'COMPLETED'].includes(settlementStatus)
+
     await prisma.$transaction(async tx => {
       await Promise.all([
         ...orders.map(o => {
@@ -85,7 +87,7 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
                 ...(settlementTime && { settlementTime: new Date(settlementTime) }),
                 feeLauncx: newFee,
                 settlementAmount,
-                ...(settlementStatus === 'SETTLED' && { pendingAmount: null }),
+                ...(isFinalSettlement && { status: 'SETTLED', pendingAmount: null }),
               },
             })
             .then(logProgress)
