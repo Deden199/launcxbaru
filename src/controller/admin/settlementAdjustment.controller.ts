@@ -65,11 +65,12 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
       where: { id: o.id },
       data: {
         settlementStatus,
+        status: settlementStatus,
         ...(settlementTime && { settlementTime: new Date(settlementTime) }),
         feeLauncx: newFee,
         settlementAmount,
-        pendingAmount: null,
-      }
+        ...(settlementStatus === 'SETTLED' && { pendingAmount: null }),
+      },
     })
     updates.push({ id: o.id, model: 'order', settlementAmount })
   }
