@@ -10,7 +10,6 @@ import { AlertCircle, CheckCircle } from 'lucide-react'
 export default function SettlementAdjustPage() {
   useRequireAuth()
 
-  const [transactionIds, setTransactionIds] = useState('')
   const [startDate, setStartDate] = useState<Date | null>(null)
   const [endDate, setEndDate] = useState<Date | null>(null)
 
@@ -21,7 +20,6 @@ export default function SettlementAdjustPage() {
   const [perPage, setPerPage] = useState(10)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [previewed, setPreviewed] = useState(false)
 
   const [newStatus, setNewStatus] = useState('SETTLED')
   const [settlementTime, setSettlementTime] = useState('')
@@ -65,27 +63,11 @@ export default function SettlementAdjustPage() {
     setError('')
     setLoadingTx(true)
     try {
-      const ids = transactionIds.split(/[\s,]+/).filter(Boolean)
-      let collected: Tx[] = []
-      if (ids.length > 0) {
-        for (const id of ids) {
-          const { data } = await api.get('/admin/merchants/dashboard/transactions', {
-            params: { search: id, limit: 1, page: 1 },
-          })
-          const mapped = (data.transactions || []).map(mapTx)
-          const found = mapped.find((t: Tx) => t.id === id)
-          if (found) collected.push(found)
-        }
-        setTotalPages(1)
-      } else {
-        const params = buildParams()
-        const { data } = await api.get('/admin/merchants/dashboard/transactions', { params })
-        const mapped = (data.transactions || []).map(mapTx)
-        setTotalPages(Math.max(1, Math.ceil((data.total || mapped.length) / perPage)))
-        collected = mapped
-      }
-      setTxs(collected)
-      setPreviewed(true)
+      const params = buildParams()
+      const { data } = await api.get('/admin/merchants/dashboard/transactions', { params })
+      const mapped = (data.transactions || []).map(mapTx)
+      setTotalPages(Math.max(1, Math.ceil((data.total || mapped.length) / perPage)))
+      setTxs(mapped)
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to fetch transactions')
     } finally {
@@ -94,18 +76,16 @@ export default function SettlementAdjustPage() {
   }
 
   useEffect(() => {
-    if (previewed) fetchTransactions()
+    fetchTransactions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, perPage])
+  }, [startDate, endDate, search, statusFilter, page, perPage])
 
   const submit = async () => {
     setSubmitting(true)
     setError('')
     setMessage('')
     try {
-      const ids = transactionIds.split(/[\s,]+/).filter(Boolean)
       const payload: any = { settlementStatus: newStatus }
-      if (ids.length) payload.transactionIds = ids
       if (startDate) payload.dateFrom = startDate.toISOString()
       if (endDate) payload.dateTo = endDate.toISOString()
       if (settlementTime) payload.settlementTime = new Date(settlementTime).toISOString()
@@ -141,24 +121,6 @@ export default function SettlementAdjustPage() {
             )}
           </div>
         )}
-
-        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-4 sm:p-5 shadow-sm space-y-3">
-          <textarea
-            placeholder="Transaction IDs (comma or newline separated)"
-            className="w-full h-24 rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-sm placeholder:text-neutral-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-            value={transactionIds}
-            onChange={e => setTransactionIds(e.target.value)}
-          />
-          <button
-            onClick={() => {
-              setPage(1)
-              fetchTransactions()
-            }}
-            className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-500"
-          >
-            Preview Transactions
-          </button>
-        </section>
 
         <div className="rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow-sm">
           <TransactionsTable
