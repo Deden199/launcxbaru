@@ -11,6 +11,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
+import { hourRange } from '@/utils/timeRange'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -115,11 +116,10 @@ export default function SettlementAdjustPage() {
         payload.dateTo = end.toDate().toISOString()
       } else if (mode === 'PER_HOUR') {
         if (!adjustDate) throw new Error('Date and hour are required')
-        const start = dayjs(adjustDate).tz('Asia/Jakarta', true).startOf('hour')
-        if (!start.isValid()) throw new Error('Invalid date and hour')
-        const end = start.add(1, 'hour')
-        payload.dateFrom = start.toDate().toISOString()
-        payload.dateTo = end.toDate().toISOString()
+        // Derive hourly range in Jakarta time for the selected adjustment
+        const { from, to } = hourRange(adjustDate, adjustDate.getHours())
+        payload.dateFrom = from
+        payload.dateTo = to
       } else if (mode === 'TRANSACTION_ID') {
         const ids = transactionIds
           .split(',')
