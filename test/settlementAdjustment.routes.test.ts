@@ -6,15 +6,17 @@ import request from 'supertest'
 process.env.JWT_SECRET = 'test'
 
 const prismaPath = require.resolve('../src/core/prisma')
+const prismaMock: any = {
+  order: { findMany: async () => [], update: async () => {} },
+  transaction_request: { findMany: async () => [], update: async () => {} },
+}
+prismaMock.$transaction = async (fn: any) => fn(prismaMock)
 require.cache[prismaPath] = {
   id: prismaPath,
   filename: prismaPath,
   loaded: true,
   exports: {
-    prisma: {
-      order: { findMany: async () => [], update: async () => {} },
-      transaction_request: { findMany: async () => [], update: async () => {} },
-    },
+    prisma: prismaMock,
   },
 } as any
 
@@ -67,7 +69,7 @@ test('returns ids of updated settlements', async () => {
   assert.equal(res.body.data.updated, 1)
 })
 
-test('adjusting PAID order to SETTLED keeps status PAID and updates settlementStatus', async () => {
+test('adjusting PAID order to SETTLED updates both status and settlementStatus', async () => {
   const prisma = require.cache[prismaPath].exports.prisma
   prisma.order.findMany = async () => [
     { id: 'o2', amount: 200, fee3rdParty: 0, feeLauncx: 0 },
@@ -83,8 +85,28 @@ test('adjusting PAID order to SETTLED keeps status PAID and updates settlementSt
     .send({ transactionIds: ['o2'], settlementStatus: 'SETTLED' })
   assert.equal(res.status, 200)
   assert.equal(updatedData.settlementStatus, 'SETTLED')
-  assert.equal('status' in updatedData, false)
+  assert.equal(updatedData.status, 'SETTLED')
   assert.equal(updatedData.pendingAmount, null)
+})
+
+test('non-final settlementStatus does not change order status', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => [
+    { id: 'o5', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
+  ]
+  prisma.transaction_request.findMany = async () => []
+  let updatedData: any
+  prisma.order.update = async ({ data }: any) => {
+    updatedData = data
+    return {}
+  }
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o5'], settlementStatus: 'PENDING' })
+  assert.equal(res.status, 200)
+  assert.equal(updatedData.settlementStatus, 'PENDING')
+  assert.ok(!('status' in updatedData))
+  assert.ok(!('pendingAmount' in updatedData))
 })
 
 test('unpaid orders are ignored by adjustment routine', async () => {
