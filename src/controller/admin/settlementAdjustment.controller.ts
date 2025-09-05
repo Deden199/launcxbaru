@@ -78,50 +78,63 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
 
     const isFinalSettlement = ['SETTLED', 'DONE', 'SUCCESS', 'COMPLETED'].includes(settlementStatus)
 
-    await prisma.$transaction(
-      async tx => {
-        for (const o of orders) {
-          const netAmount = o.amount - (o.fee3rdParty ?? 0)
-          const feePct = getFeePct(o.id, o.feeLauncx ?? undefined, netAmount)
-          const { fee, settlement } = computeSettlement(netAmount, { percent: feePct })
-          const result = await tx.order.updateMany({
-            where: { id: o.id, status: 'PAID' },
-            data: {
-              settlementStatus,
-              ...(settlementTime && { settlementTime: new Date(settlementTime) }),
-              feeLauncx: fee,
-              settlementAmount: settlement,
-            },
-          })
-          if (result.count > 0) {
-            if (isFinalSettlement) {
-              await tx.order.updateMany({
-                where: { id: o.id },
-                data: { status: 'SETTLED', pendingAmount: null },
-              })
-            }
-            updates.push({ id: o.id, model: 'order', settlementAmount: settlement })
-            logProgress()
-          }
-        }
+    const batchSize = 200
+    const records = [
+      ...orders.map(o => ({ type: 'order' as const, data: o })),
+      ...oldTrx.map(t => ({ type: 'trx' as const, data: t })),
+    ]
 
-        for (const t of oldTrx) {
-          const netAmount = t.settlementAmount ?? t.amount
-          const feePct = getFeePct(t.id)
-          const { settlement } = computeSettlement(netAmount, { percent: feePct })
-          updates.push({ id: t.id, model: 'trx', settlementAmount: settlement })
-          await tx.transaction_request.update({
-            where: { id: t.id },
-            data: {
-              ...(settlementTime && { settlementAt: new Date(settlementTime) }),
-              settlementAmount: settlement,
-            },
-          })
-          logProgress()
-        }
-      },
-      { timeout: 30000 }
-    )
+    for (let i = 0; i < records.length; i += batchSize) {
+      const batch = records.slice(i, i + batchSize)
+      const batchUpdates = await prisma.$transaction(
+        async tx => {
+          const bu: { id: string; model: 'order' | 'trx'; settlementAmount: number }[] = []
+          for (const item of batch) {
+            if (item.type === 'order') {
+              const o = item.data
+              const netAmount = o.amount - (o.fee3rdParty ?? 0)
+              const feePct = getFeePct(o.id, o.feeLauncx ?? undefined, netAmount)
+              const { fee, settlement } = computeSettlement(netAmount, { percent: feePct })
+              const result = await tx.order.updateMany({
+                where: { id: o.id, status: 'PAID' },
+                data: {
+                  settlementStatus,
+                  ...(settlementTime && { settlementTime: new Date(settlementTime) }),
+                  feeLauncx: fee,
+                  settlementAmount: settlement,
+                },
+              })
+              if (result.count > 0) {
+                if (isFinalSettlement) {
+                  await tx.order.updateMany({
+                    where: { id: o.id },
+                    data: { status: 'SETTLED', pendingAmount: null },
+                  })
+                }
+                bu.push({ id: o.id, model: 'order', settlementAmount: settlement })
+              }
+            } else {
+              const t = item.data
+              const netAmount = t.settlementAmount ?? t.amount
+              const feePct = getFeePct(t.id)
+              const { settlement } = computeSettlement(netAmount, { percent: feePct })
+              await tx.transaction_request.update({
+                where: { id: t.id },
+                data: {
+                  ...(settlementTime && { settlementAt: new Date(settlementTime) }),
+                  settlementAmount: settlement,
+                },
+              })
+              bu.push({ id: t.id, model: 'trx', settlementAmount: settlement })
+            }
+          }
+          return bu
+        },
+        { timeout: 120000 }
+      )
+      updates.push(...batchUpdates)
+      batchUpdates.forEach(() => logProgress())
+    }
 
     console.log(`Settlement adjustment completed for ${processed} records`)
 
