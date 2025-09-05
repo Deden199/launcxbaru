@@ -53,3 +53,17 @@ test('rejects when neither transactionIds nor date range provided', async () => 
   assert.equal(res.body.error, 'transactionIds or date range required')
 })
 
+test('returns ids of updated settlements', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  prisma.order.findMany = async () => [
+    { id: 'o1', amount: 100, fee3rdParty: 0, feeLauncx: 0 },
+  ]
+  prisma.transaction_request.findMany = async () => []
+  const res = await request(app)
+    .post('/settlement/adjust')
+    .send({ transactionIds: ['o1'], settlementStatus: 'SETTLED' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body.data.ids, ['o1'])
+  assert.equal(res.body.data.updated, 1)
+})
+

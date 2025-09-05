@@ -101,6 +101,6 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     })
   }
 
-  res.json({ data: { updated: updates.length } })
+  res.json({ data: { updated: updates.length, ids: updates.map(u => u.id) } })
 }
 
