@@ -30,6 +30,10 @@ export default function SettlementAdjustPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
+  const [mode, setMode] = useState<'FULL_DAY' | 'TRANSACTION_ID' | 'PER_HOUR'>('FULL_DAY')
+  const [adjustDate, setAdjustDate] = useState<Date | null>(null)
+  const [transactionIds, setTransactionIds] = useState('')
+
   const buildParams = () => {
     const p: any = { page, limit: perPage }
     if (startDate) p.date_from = startDate.toISOString()
@@ -89,8 +93,30 @@ export default function SettlementAdjustPage() {
     setMessage('')
     try {
       const payload: any = { settlementStatus: newStatus }
-      if (startDate) payload.dateFrom = startDate.toISOString()
-      if (endDate) payload.dateTo = endDate.toISOString()
+      if (mode === 'FULL_DAY') {
+        if (!adjustDate) throw new Error('Date is required')
+        const start = new Date(adjustDate)
+        start.setHours(0, 0, 0, 0)
+        const end = new Date(start)
+        end.setDate(end.getDate() + 1)
+        payload.dateFrom = start.toISOString()
+        payload.dateTo = end.toISOString()
+      } else if (mode === 'PER_HOUR') {
+        if (!adjustDate) throw new Error('Date and hour are required')
+        const start = new Date(adjustDate)
+        start.setMinutes(0, 0, 0)
+        const end = new Date(start)
+        end.setHours(end.getHours() + 1)
+        payload.dateFrom = start.toISOString()
+        payload.dateTo = end.toISOString()
+      } else if (mode === 'TRANSACTION_ID') {
+        const ids = transactionIds
+          .split(',')
+          .map(id => id.trim())
+          .filter(Boolean)
+        if (!ids.length) throw new Error('Transaction IDs are required')
+        payload.transactionIds = ids
+      }
       if (settlementTime) {
         const d = new Date(settlementTime)
         const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000)
@@ -100,7 +126,7 @@ export default function SettlementAdjustPage() {
       const { data } = await api.post('/admin/settlement/adjust', payload)
       setMessage(`Updated ${data.data.updated} transactions`)
     } catch (e: any) {
-      setError(e?.response?.data?.error || 'Failed to adjust settlements')
+      setError(e?.response?.data?.error || e.message || 'Failed to adjust settlements')
     } finally {
       setSubmitting(false)
     }
@@ -148,6 +174,51 @@ export default function SettlementAdjustPage() {
         </div>
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-4 sm:p-5 shadow-sm space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <select
+              value={mode}
+              onChange={e => setMode(e.target.value as any)}
+              className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+            >
+              <option value="FULL_DAY">FULL_DAY</option>
+              <option value="PER_HOUR">PER_HOUR</option>
+              <option value="TRANSACTION_ID">TRANSACTION_ID</option>
+            </select>
+            {mode === 'FULL_DAY' && (
+              <DatePicker
+                selected={adjustDate}
+                onChange={(date: Date | null) => setAdjustDate(date)}
+                dateFormat="dd-MM-yyyy"
+                withPortal
+                popperProps={{ strategy: 'fixed' }}
+                popperClassName="datepicker-popper"
+                calendarClassName="dp-dark"
+                className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+              />
+            )}
+            {mode === 'PER_HOUR' && (
+              <DatePicker
+                selected={adjustDate}
+                onChange={(date: Date | null) => setAdjustDate(date)}
+                showTimeSelect
+                timeIntervals={60}
+                dateFormat="dd-MM-yyyy HH:00"
+                withPortal
+                popperProps={{ strategy: 'fixed' }}
+                popperClassName="datepicker-popper"
+                calendarClassName="dp-dark"
+                className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+              />
+            )}
+            {mode === 'TRANSACTION_ID' && (
+              <textarea
+                placeholder="Comma-separated IDs"
+                value={transactionIds}
+                onChange={e => setTransactionIds(e.target.value)}
+                className="h-24 rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+              />
+            )}
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <select
               value={newStatus}
