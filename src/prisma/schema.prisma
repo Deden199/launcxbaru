@@ -89,6 +89,7 @@ model transaction_request {
   @@index([merchantId])
   @@index([createdAt])
   @@index([status])
+  @@index([merchantId, status, createdAt])
 }
 
 /// Simpan response mentah dari gateway
