@@ -12,7 +12,7 @@ export async function listTransactions (req: AuthRequest, res: Response) {
       : req.userId!
 
   const { ref_id, status, date_from, date_to,
-          page = 1, limit = 20 } = req.query
+          cursor, limit = 20 } = req.query
 
   const where: any = {}
   if (ref_id)     where.id         = String(ref_id)
@@ -24,16 +24,35 @@ export async function listTransactions (req: AuthRequest, res: Response) {
     if (date_to)   where.createdAt.lte = new Date(String(date_to))
   }
 
-  const skip  = (Number(page) - 1) * Number(limit)
-  const take  = Number(limit)
+  const take = Number(limit)
+  const cursorId = cursor ? String(cursor) : undefined
 
-  const [data, total] = await Promise.all([
-    prisma.transaction_request.findMany({ where, skip, take,
-      orderBy: { createdAt: 'desc' } }),
-    prisma.transaction_request.count({ where }),
+  const query: any = {
+    where,
+    take: take + 1,
+    orderBy: { createdAt: 'desc' },
+  }
+  if (cursorId) {
+    query.cursor = { id: cursorId }
+    query.skip = 1
+  }
+
+  const [rows, countResult] = await Promise.all([
+    prisma.transaction_request.findMany(query),
+    cursorId
+      ? Promise.resolve(undefined)
+      : prisma.transaction_request.aggregate({ _count: true, where })
   ])
 
-  res.json({ data, total })
+  let nextCursor: string | undefined
+  if (rows.length > take) {
+    const nextItem = rows.pop()!
+    nextCursor = nextItem.id
+  }
+
+  const total = countResult?._count
+
+  res.json({ data: rows, nextCursor, total })
 }
 
 /* ─────────── 2. Paksa-sync Hilogate ─────────── */
