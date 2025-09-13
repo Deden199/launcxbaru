@@ -47,6 +47,11 @@ router.get('/dashboard/profit',       ctrl.getPlatformProfit)
 router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
+router.patch(
+  '/dashboard/withdrawals/:refId',
+  requireSuperAdminAuth,
+  ctrl.updateWithdrawal
+)
 router.post('/dashboard/withdraw', adminIpWhitelist, requireSuperAdminAuth, ctrl.adminWithdraw)
 router.post(
   '/dashboard/validate-account',

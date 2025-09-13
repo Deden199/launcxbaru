@@ -37,6 +37,28 @@ export interface Withdrawal {
   wallet: string
 }
 
+export type WithdrawalUpdate = Partial<
+  Pick<
+    Withdrawal,
+    |
+      'accountName'
+    | 'accountNameAlias'
+    | 'accountNumber'
+    | 'bankCode'
+    | 'bankName'
+    | 'branchName'
+    | 'amount'
+    | 'withdrawFeePercent'
+    | 'withdrawFeeFlat'
+    | 'pgFee'
+    | 'netAmount'
+    | 'paymentGatewayId'
+    | 'isTransferProcess'
+    | 'status'
+    | 'completedAt'
+  >
+>
+
 export type SubBalance = {
   id: string
   name: string

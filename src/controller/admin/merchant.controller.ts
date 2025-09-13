@@ -734,6 +734,90 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
   }
 }
 
+export const updateWithdrawal = async (req: AuthRequest, res: Response) => {
+  const { refId } = req.params
+  const {
+    accountName,
+    accountNameAlias,
+    accountNumber,
+    bankCode,
+    bankName,
+    branchName,
+    amount,
+    netAmount,
+    pgFee,
+    paymentGatewayId,
+    isTransferProcess,
+    status,
+    withdrawFeePercent,
+    withdrawFeeFlat,
+    completedAt,
+  } = req.body as any
+
+  const data: any = {}
+
+  if (accountName != null) data.accountName = String(accountName)
+  if (accountNameAlias != null) data.accountNameAlias = String(accountNameAlias)
+  if (accountNumber != null) data.accountNumber = String(accountNumber)
+  if (bankCode != null) data.bankCode = String(bankCode)
+  if (bankName != null) data.bankName = String(bankName)
+  if (branchName !== undefined) data.branchName = branchName === null ? null : String(branchName)
+
+  if (amount != null) {
+    const n = Number(amount)
+    if (isNaN(n) || n <= 0) return res.status(400).json({ error: 'Invalid amount' })
+    data.amount = n
+  }
+  if (netAmount !== undefined) {
+    const n = Number(netAmount)
+    if (isNaN(n)) return res.status(400).json({ error: 'Invalid netAmount' })
+    data.netAmount = n
+  }
+  if (pgFee !== undefined) {
+    const n = Number(pgFee)
+    if (isNaN(n)) return res.status(400).json({ error: 'Invalid pgFee' })
+    data.pgFee = n
+  }
+  if (paymentGatewayId !== undefined) data.paymentGatewayId = paymentGatewayId ? String(paymentGatewayId) : null
+  if (typeof isTransferProcess === 'boolean') data.isTransferProcess = isTransferProcess
+
+  if (status != null) {
+    if (!Object.values(DisbursementStatus).includes(status as DisbursementStatus)) {
+      return res.status(400).json({ error: 'Invalid status' })
+    }
+    data.status = status
+  }
+
+  if (withdrawFeePercent != null) {
+    const n = Number(withdrawFeePercent)
+    if (isNaN(n)) return res.status(400).json({ error: 'Invalid withdrawFeePercent' })
+    data.withdrawFeePercent = n
+  }
+  if (withdrawFeeFlat != null) {
+    const n = Number(withdrawFeeFlat)
+    if (isNaN(n)) return res.status(400).json({ error: 'Invalid withdrawFeeFlat' })
+    data.withdrawFeeFlat = n
+  }
+
+  if (completedAt !== undefined) {
+    data.completedAt = completedAt ? new Date(completedAt) : null
+  }
+
+  try {
+    const wr = await prisma.withdrawRequest.update({
+      where: { refId },
+      data,
+    })
+    if (req.userId) {
+      await logAdminAction(req.userId, 'updateWithdrawal', refId, data)
+    }
+    return res.json(wr)
+  } catch (err: any) {
+    console.error('[updateWithdrawal]', err)
+    return res.status(500).json({ error: 'Failed to update withdrawal' })
+  }
+}
+
 export const getProfitPerSubMerchant = async (req: Request, res: Response) => {
   try {
     const { date_from, date_to, merchantId } = req.query as any;

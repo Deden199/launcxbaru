@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import { Search, Calendar, ChevronLeft, ChevronRight, FileText } from 'lucide-react'
 import api from '@/lib/api'
-import { Withdrawal } from '@/types/dashboard'
+import { Withdrawal, WithdrawalUpdate } from '@/types/dashboard'
 import 'react-datepicker/dist/react-datepicker.css'
 
 export default function WithdrawalHistory(_: any) {
@@ -19,31 +19,33 @@ export default function WithdrawalHistory(_: any) {
   const [perPage, setPerPage] = useState(10)
   const [totalPages, setTotalPages] = useState(1)
   const [startDate, endDate] = dateRange
+  const [editing, setEditing] = useState<Withdrawal | null>(null)
+  const [form, setForm] = useState<WithdrawalUpdate>({})
 
-  // ——— fetch
-  useEffect(() => {
-    const fetch = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const params: any = { page, limit: perPage, ref: searchRef }
-        if (statusFilter) params.status = statusFilter
-        if (startDate) params.fromDate = startDate.toISOString()
-        if (endDate) params.toDate = endDate.toISOString()
+  const loadWithdrawals = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const params: any = { page, limit: perPage, ref: searchRef }
+      if (statusFilter) params.status = statusFilter
+      if (startDate) params.fromDate = startDate.toISOString()
+      if (endDate) params.toDate = endDate.toISOString()
 
-        const { data } = await api.get<{ data: Withdrawal[]; total: number }>(
-          '/admin/merchants/dashboard/withdrawals',
-          { params }
-        )
-        setWithdrawals(data.data)
-        setTotalPages(Math.max(1, Math.ceil((data.total || 0) / perPage)))
-      } catch {
-        setError('Failed to load withdrawals')
-      } finally {
-        setLoading(false)
-      }
+      const { data } = await api.get<{ data: Withdrawal[]; total: number }>(
+        '/admin/merchants/dashboard/withdrawals',
+        { params }
+      )
+      setWithdrawals(data.data)
+      setTotalPages(Math.max(1, Math.ceil((data.total || 0) / perPage)))
+    } catch {
+      setError('Failed to load withdrawals')
+    } finally {
+      setLoading(false)
     }
-    fetch()
+  }
+
+  useEffect(() => {
+    loadWithdrawals()
   }, [searchRef, statusFilter, startDate, endDate, page, perPage])
 
   // ——— badges
@@ -71,6 +73,42 @@ export default function WithdrawalHistory(_: any) {
       {b ? 'Yes' : 'No'}
     </span>
   )
+
+  const openEdit = (w: Withdrawal) => {
+    setEditing(w)
+    setForm({
+      accountName: w.accountName,
+      accountNameAlias: w.accountNameAlias,
+      accountNumber: w.accountNumber,
+      bankCode: w.bankCode,
+      bankName: w.bankName,
+      branchName: w.branchName ?? '',
+      amount: w.amount,
+      withdrawFeePercent: w.withdrawFeePercent,
+      withdrawFeeFlat: w.withdrawFeeFlat,
+      pgFee: w.pgFee,
+      netAmount: w.netAmount,
+      paymentGatewayId: w.paymentGatewayId,
+      isTransferProcess: w.isTransferProcess,
+      status: w.status,
+      completedAt: w.completedAt ? w.completedAt.slice(0, 16) : '',
+    })
+  }
+
+  const handleChange = (field: keyof WithdrawalUpdate, value: any) => {
+    setForm(f => ({ ...f, [field]: value }))
+  }
+
+  const saveEdit = async () => {
+    if (!editing) return
+    try {
+      await api.patch(`/admin/merchants/dashboard/withdrawals/${editing.refId}` , form)
+      setEditing(null)
+      await loadWithdrawals()
+    } catch {
+      alert('Failed to update withdrawal')
+    }
+  }
 
   // ——— export (current view) to CSV
   const exportCsv = () => {
@@ -222,7 +260,7 @@ export default function WithdrawalHistory(_: any) {
                   <tr className="border-b bg-neutral-50/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80">
                     {[
                       'Date','Ref ID','Account Name','Alias','Account No.','Bank Code','Bank Name','Branch',
-                      'Wallet/Submerchant','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At',
+                      'Wallet/Submerchant','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At','Actions',
                     ].map((h) => (
                       <th key={h} className="px-3 py-2 text-left font-medium text-neutral-700 dark:text-neutral-300">
                         {h}
@@ -267,6 +305,14 @@ export default function WithdrawalHistory(_: any) {
                           ? new Date(w.completedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
                           : '-'}
                       </td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => openEdit(w)}
+                          className="text-indigo-600 hover:underline"
+                        >
+                          Edit
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -303,6 +349,140 @@ export default function WithdrawalHistory(_: any) {
           </div>
         </section>
       </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg dark:bg-neutral-900">
+            <h3 className="mb-4 text-lg font-semibold">Edit Withdrawal</h3>
+            <div className="grid gap-3 max-h-[70vh] overflow-y-auto">
+              <input
+                type="text"
+                placeholder="Account Name"
+                value={form.accountName || ''}
+                onChange={(e) => handleChange('accountName', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="Alias"
+                value={form.accountNameAlias || ''}
+                onChange={(e) => handleChange('accountNameAlias', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="Account Number"
+                value={form.accountNumber || ''}
+                onChange={(e) => handleChange('accountNumber', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="Bank Code"
+                value={form.bankCode || ''}
+                onChange={(e) => handleChange('bankCode', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="Bank Name"
+                value={form.bankName || ''}
+                onChange={(e) => handleChange('bankName', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="Branch Name"
+                value={form.branchName || ''}
+                onChange={(e) => handleChange('branchName', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="number"
+                placeholder="Amount"
+                value={form.amount ?? ''}
+                onChange={(e) => handleChange('amount', Number(e.target.value))}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="number"
+                placeholder="Net Amount"
+                value={form.netAmount ?? ''}
+                onChange={(e) => handleChange('netAmount', Number(e.target.value))}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="number"
+                placeholder="PG Fee"
+                value={form.pgFee ?? ''}
+                onChange={(e) => handleChange('pgFee', Number(e.target.value))}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="text"
+                placeholder="PG Trx ID"
+                value={form.paymentGatewayId || ''}
+                onChange={(e) => handleChange('paymentGatewayId', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.isTransferProcess || false}
+                  onChange={(e) => handleChange('isTransferProcess', e.target.checked)}
+                  className="h-4 w-4 rounded border dark:border-neutral-700"
+                />
+                <span className="text-sm">In Process</span>
+              </div>
+              <select
+                value={form.status || ''}
+                onChange={(e) => handleChange('status', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              >
+                <option value="">Status</option>
+                <option value="PENDING">PENDING</option>
+                <option value="COMPLETED">COMPLETED</option>
+                <option value="FAILED">FAILED</option>
+              </select>
+              <input
+                type="number"
+                placeholder="Withdraw Fee %"
+                value={form.withdrawFeePercent ?? ''}
+                onChange={(e) => handleChange('withdrawFeePercent', Number(e.target.value))}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="number"
+                placeholder="Withdraw Fee Flat"
+                value={form.withdrawFeeFlat ?? ''}
+                onChange={(e) => handleChange('withdrawFeeFlat', Number(e.target.value))}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+              <input
+                type="datetime-local"
+                placeholder="Completed At"
+                value={form.completedAt || ''}
+                onChange={(e) => handleChange('completedAt', e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setEditing(null)}
+                className="rounded-md border px-3 py-2 text-sm dark:border-neutral-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                className="rounded-md bg-indigo-600 px-3 py-2 text-sm text-white"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ⬇️ Global style: z-index popper & tema dark datepicker */}
       <style jsx global>{`
