@@ -2,6 +2,7 @@
 import { Router } from 'express'
 import { authMiddleware } from '../../middleware/auth'
 import * as ctrl from '../../controller/admin/client.controller'
+import validator from '../../validation/validation'
 
 const router = Router()
 
@@ -24,6 +25,12 @@ router.get('/:clientId/dashboard', ctrl.getClientDashboardAdmin)
 router.get('/:clientId/withdrawals', ctrl.getClientWithdrawalsAdmin)
 router.get('/:clientId/subwallets',  ctrl.getClientSubWallets)
 router.post('/:clientId/reconcile-balance', ctrl.reconcileClientBalance)
+router.patch(
+  '/:clientId/balance',
+  validator.adjustClientBalanceValidation,
+  validator.handleValidationErrors,
+  ctrl.adjustClientBalance
+)
 
 // 3) [Dihapus] Koneksi PG per client
 // Feature deprecated: fee kini ditetapkan global di PartnerClient

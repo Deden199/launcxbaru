@@ -234,6 +234,26 @@ const confirmCardSessionValidation = [
     }),
 ];
 
+const adjustClientBalanceValidation = [
+  body('newBalance')
+    .optional()
+    .isNumeric()
+    .withMessage('newBalance must be a number'),
+  body('delta')
+    .optional()
+    .isNumeric()
+    .withMessage('delta must be a number'),
+  body().custom((value) => {
+    if (value.newBalance == null && value.delta == null) {
+      throw new Error('newBalance or delta required');
+    }
+    if (value.newBalance != null && value.delta != null) {
+      throw new Error('Provide either newBalance or delta, not both');
+    }
+    return true;
+  }),
+];
+
 const validation = {
   handleValidationErrors,
   initiatePaymentValidation,
@@ -243,6 +263,7 @@ const validation = {
   checkAccountValidation,
   createCardSessionValidation,
   confirmCardSessionValidation,
+  adjustClientBalanceValidation,
 };
 
 export default validation;

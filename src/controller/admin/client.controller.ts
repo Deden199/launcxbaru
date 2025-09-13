@@ -600,3 +600,54 @@ export const reconcileClientBalance = async (req: AuthRequest, res: Response) =>
 
   res.json({ balance: newBalance })
 }
+
+// 9) Adjust client balance manually
+export const adjustClientBalance = async (req: AuthRequest, res: Response) => {
+  const { clientId } = req.params as { clientId: string }
+  const { newBalance, delta } = req.body as {
+    newBalance?: number
+    delta?: number
+  }
+
+  if (newBalance == null && delta == null) {
+    return res.status(400).json({ error: 'newBalance or delta required' })
+  }
+  if (newBalance != null && delta != null) {
+    return res
+      .status(400)
+      .json({ error: 'Provide either newBalance or delta, not both' })
+  }
+
+  const client = await prisma.partnerClient.findUnique({
+    where: { id: clientId },
+    select: { balance: true },
+  })
+  if (!client) return res.status(404).json({ error: 'Client not found' })
+
+  let updatedBalance: number
+  if (newBalance != null) {
+    const nb = Number(newBalance)
+    if (isNaN(nb))
+      return res.status(400).json({ error: 'newBalance must be a number' })
+    updatedBalance = nb
+  } else {
+    const d = Number(delta)
+    if (isNaN(d))
+      return res.status(400).json({ error: 'delta must be a number' })
+    updatedBalance = (client.balance ?? 0) + d
+  }
+
+  await prisma.partnerClient.update({
+    where: { id: clientId },
+    data: { balance: updatedBalance },
+  })
+
+  if (req.userId) {
+    await logAdminAction(req.userId, 'adjustClientBalance', clientId, {
+      newBalance: newBalance != null ? Number(newBalance) : undefined,
+      delta: delta != null ? Number(delta) : undefined,
+    })
+  }
+
+  res.json({ balance: updatedBalance })
+}
