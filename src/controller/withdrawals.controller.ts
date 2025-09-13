@@ -336,6 +336,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
       if (!adminW) return res.status(404).send('Not found')
       isAdmin = true
     }
+    const oldStatus = wr ? wr.status : adminW!.status
     // 5) Tentukan newStatus + completedAt
     let newStatus: DisbursementStatus
     let completedAt: Date | undefined
@@ -389,24 +390,39 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
     const { count } = await retry(() =>
       (isAdmin
         ? prisma.adminWithdraw.updateMany({
-            where: { refId, status: DisbursementStatus.PENDING },
+            where: {
+              refId,
+              status: { in: [DisbursementStatus.PENDING, DisbursementStatus.FAILED] },
+            },
             data: updateData,
           })
         : prisma.withdrawRequest.updateMany({
-            where: { refId, status: DisbursementStatus.PENDING },
+            where: {
+              refId,
+              status: { in: [DisbursementStatus.PENDING, DisbursementStatus.FAILED] },
+            },
             data: updateData,
 
           }))
     )
 
-    // 7) Jika gagal & memang pertama kali gagal, refund
-    if (!isAdmin && count > 0 && newStatus === DisbursementStatus.FAILED) {
-      await retry(() =>
-        prisma.partnerClient.update({
-          where: { id: wr!.partnerClientId },
-          data: { balance: { increment: wr!.amount } },
-        })
-      )
+    // 7) Balance adjustments based on status transition
+    if (!isAdmin && count > 0 && oldStatus !== newStatus) {
+      if (oldStatus === DisbursementStatus.FAILED && newStatus === DisbursementStatus.COMPLETED) {
+        await retry(() =>
+          prisma.partnerClient.update({
+            where: { id: wr!.partnerClientId },
+            data: { balance: { decrement: wr!.amount } },
+          })
+        )
+      } else if (oldStatus === DisbursementStatus.PENDING && newStatus === DisbursementStatus.FAILED) {
+        await retry(() =>
+          prisma.partnerClient.update({
+            where: { id: wr!.partnerClientId },
+            data: { balance: { increment: wr!.amount } },
+          })
+        )
+      }
     }
 
     return res.status(200).json({ message: 'OK' })
