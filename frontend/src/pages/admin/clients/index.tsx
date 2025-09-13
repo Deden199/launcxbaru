@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { ClipboardCopy, Search, X, Building2, UserPlus, KeyRound, ChevronRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Search, X, Building2, UserPlus, KeyRound, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 
 interface Client {
   id: string
@@ -18,6 +17,7 @@ interface Client {
   forceSchedule?: string
   parentClient?: { id: string; name: string }
   children?: { id: string; name: string }[]
+  balance: number
 }
 
 type CreateResp = {
@@ -27,7 +27,6 @@ type CreateResp = {
 
 export default function ApiClientsPage() {
   useRequireAuth()
-  const router = useRouter()
 
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,6 +49,11 @@ export default function ApiClientsPage() {
   // creds modal
   const [creds, setCreds] = useState<CreateResp | null>(null)
 
+  // edit balance state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [balanceEdit, setBalanceEdit] = useState<number>(0)
+  const [saving, setSaving] = useState(false)
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250)
     return () => clearTimeout(t)
@@ -64,7 +68,7 @@ export default function ApiClientsPage() {
     setErr('')
     try {
       const res = await api.get<Client[]>('/admin/clients')
-      setClients(res.data || [])
+      setClients((res.data || []).map(c => ({ ...c, balance: c.balance ?? 0 })))
     } catch {
       setErr('Gagal memuat daftar client')
       setClients([])
@@ -114,8 +118,27 @@ export default function ApiClientsPage() {
     }
   }
 
-  function copy(txt: string) {
-    navigator.clipboard.writeText(txt).catch(() => {})
+  function startEdit(c: Client) {
+    setEditingId(c.id)
+    setBalanceEdit(c.balance)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+  }
+
+  async function saveEdit(id: string) {
+    setErr('')
+    setSaving(true)
+    try {
+      await api.put(`/admin/clients/${id}`, { balance: balanceEdit })
+      await loadClients()
+      setEditingId(null)
+    } catch {
+      setErr('Gagal menyimpan saldo')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -285,87 +308,71 @@ export default function ApiClientsPage() {
           </div>
         </div>
 
-        {/* Cards grid */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-44 w-full animate-pulse rounded-2xl border border-neutral-800 bg-neutral-900/70" />
-            ))
-          ) : filteredClients.length === 0 ? (
-            <div className="col-span-full grid place-items-center rounded-2xl border border-dashed border-neutral-800 py-14 text-sm text-neutral-400">
-              {clients.length === 0 ? 'Belum ada client' : 'No clients found'}
-            </div>
-          ) : (
-            filteredClients.map(c => (
-              <div key={c.id} className="flex flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow hover:shadow-md transition">
-                {/* header */}
-                <div className="flex items-center justify-between bg-gradient-to-r from-teal-700 to-indigo-700 px-4 py-3">
-                  <h4 className="font-semibold">{c.name}</h4>
-                  <span
-                    className={`rounded-lg px-2 py-0.5 text-xs font-semibold ${c.isActive ? 'bg-white/25' : 'bg-black/30'}`}
-                  >
-                    {c.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-
-                {/* body */}
-                <div className="space-y-2 px-4 py-3 text-sm">
-                  <p className="grid grid-cols-[max-content_1fr_max-content] items-center gap-2">
-                    <strong className="text-neutral-400">Key:</strong>
-                    <span className="font-mono break-all rounded bg-neutral-950 px-1.5 py-0.5">{c.apiKey}</span>
-                    <button
-                      className="rounded-lg p-1.5 text-neutral-300 hover:bg-neutral-800"
-                      title="Copy API Key"
-                      onClick={() => copy(c.apiKey)}
-                    >
-                      <ClipboardCopy size={14} />
-                    </button>
-                  </p>
-
-                  {/* Secret (opsional, tetap disembunyikan seperti source) */}
-                  {/* <p className="grid grid-cols-[max-content_1fr_max-content] items-center gap-2">
-                    <strong className="text-neutral-400">Secret:</strong>
-                    <span className="font-mono break-all rounded bg-neutral-950 px-1.5 py-0.5">{c.apiSecret}</span>
-                    <button className="rounded-lg p-1.5 text-neutral-300 hover:bg-neutral-800" onClick={() => copy(c.apiSecret)}>
-                      <ClipboardCopy size={14} />
-                    </button>
-                  </p> */}
-
-                  <p><strong className="text-neutral-400">Default PG:</strong> <span className="ml-1">{c.defaultProvider}</span></p>
-                  {c.forceSchedule && (
-                    <p><strong className="text-neutral-400">Force Schedule:</strong> <span className="ml-1">{c.forceSchedule}</span></p>
-                  )}
-                  <p><strong className="text-neutral-400">Parent:</strong> <span className="ml-1">{c.parentClient?.name || '-'}</span></p>
-                  <p><strong className="text-neutral-400">Children:</strong> <span className="ml-1">{c.children?.length || 0}</span></p>
-                  <p><strong className="text-neutral-400">Fee %:</strong> <span className="ml-1">{c.feePercent.toFixed(3)}</span></p>
-                  <p><strong className="text-neutral-400">Fee Flat:</strong> <span className="ml-1">{c.feeFlat.toFixed(2)}</span></p>
-                </div>
-
-                {/* footer */}
-                <div className="flex flex-wrap gap-2 border-t border-neutral-800 px-4 py-3">
-                  <button
-                    onClick={() => router.push(`/admin/clients/${c.id}`)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
-                  >
-                    Manage <ChevronRight size={14} />
-                  </button>
-                  <button
-                    onClick={() => router.push(`/admin/clients/${c.id}/dashboard`)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
-                  >
-                    Dashboard <ChevronRight size={14} />
-                  </button>
-                  <button
-                    onClick={() => router.push(`/admin/clients/${c.id}/withdraw`)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
-                  >
-                    Withdrawals <ChevronRight size={14} />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+        {/* Clients table */}
+        {loading ? (
+          <div className="grid place-items-center py-10 text-sm text-neutral-400">Memuat…</div>
+        ) : filteredClients.length === 0 ? (
+          <div className="grid place-items-center rounded-2xl border border-dashed border-neutral-800 py-14 text-sm text-neutral-400">
+            {clients.length === 0 ? 'Belum ada client' : 'No clients found'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-neutral-800">
+            <table className="min-w-full divide-y divide-neutral-800 text-sm">
+              <thead className="bg-neutral-900">
+                <tr>
+                  <th className="px-3 py-2 text-left">Name</th>
+                  <th className="px-3 py-2 text-left">Balance</th>
+                  <th className="px-3 py-2 text-left">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800">
+                {filteredClients.map(c => (
+                  <tr key={c.id}>
+                    <td className="px-3 py-2">{c.name}</td>
+                    <td className="px-3 py-2">
+                      {editingId === c.id ? (
+                        <input
+                          type="number"
+                          value={balanceEdit}
+                          onChange={e => setBalanceEdit(parseFloat(e.target.value) || 0)}
+                          className="w-32 rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm outline-none focus:border-indigo-700 focus:ring-2 focus:ring-indigo-800"
+                        />
+                      ) : (
+                        c.balance.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {editingId === c.id ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => saveEdit(c.id)}
+                            disabled={saving}
+                            className="rounded-lg bg-indigo-700 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-60"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="rounded-lg border border-neutral-700 px-3 py-1 text-xs hover:bg-neutral-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startEdit(c)}
+                          className="rounded-lg border border-neutral-800 px-3 py-1 text-xs hover:bg-neutral-800"
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

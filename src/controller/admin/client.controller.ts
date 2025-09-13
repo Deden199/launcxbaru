@@ -20,6 +20,7 @@ export const getAllClients = async (_: Request, res: Response) => {
       isActive:       true,
       feePercent:     true,
       feeFlat:        true,
+      balance:        true,
       weekendFeePercent: true,
       weekendFeeFlat:    true,
       withdrawFeePercent: true,
@@ -190,7 +191,8 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     defaultProvider,
     forceSchedule,
     parentClientId = null,
-    childrenIds = []
+    childrenIds = [],
+    balance,
   } = req.body as {
     name?: string
     isActive?: boolean
@@ -204,6 +206,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
     forceSchedule?: string
     parentClientId?: string | null
     childrenIds?: string[]
+    balance?: number
   }
 
   // validasi sederhana
@@ -264,6 +267,11 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: `defaultProvider must be one of ${allowed.join(', ')}` })
     }
     data.defaultProvider = dp
+  }
+  if (balance != null) {
+    const b = Number(balance)
+    if (isNaN(b)) return res.status(400).json({ error: 'balance must be a number' })
+    data.balance = b
   }
   data.parentClientId = parentClientId || null
 
