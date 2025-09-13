@@ -15,6 +15,7 @@ import {
   User,
   Banknote,
   Wrench,
+  Wallet,
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 
@@ -25,6 +26,7 @@ interface AdminLayoutProps {
 const navItems = [
   { label: 'Dashboard',         href: '/dashboard',        Icon: Home },
   { label: 'API Clients',       href: '/admin/clients',    Icon: Box },
+  { label: 'Client Balances',   href: '/admin/clients',    Icon: Wallet },
   { label: 'Merchant Settings', href: '/admin/merchants',  Icon: BoomBox },
   { label: 'Admins',            href: '/admin/users',      Icon: User },
   { label: '2FA Setup',         href: '/admin/2fa',        Icon: ShieldCheck },
