@@ -67,7 +67,7 @@ export default function ClientBalancesPage() {
     setErr('')
     setSaving(true)
     try {
-      await api.patch(`/admin/clients/${id}/balance`, { balance: balanceEdit })
+      await api.patch(`/admin/clients/${id}/balance`, { newBalance: balanceEdit })
       await loadClients()
       setEditingId(null)
     } catch {
