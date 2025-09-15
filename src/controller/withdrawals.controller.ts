@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { prisma } from '../core/prisma'
 import { retryDisbursement } from '../service/hilogate.service'
 import { ClientAuthRequest } from '../middleware/clientAuth'
+import { ApiKeyRequest } from '../middleware/apiKeyAuth'
 import { HilogateClient,HilogateConfig } from '../service/hilogateClient'
 import { GidiClient, GidiDisbursementConfig, GidiError } from '../service/gidiClient'
 import crypto from 'crypto'
@@ -188,6 +189,85 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
   }));
 
   return res.json({ data, total });
+}
+
+export async function listWithdrawalsS2S(req: ApiKeyRequest, res: Response) {
+  const parentId = req.clientId!
+  const childIds = req.childrenIds ?? []
+
+  const {
+    clientId: qClientId,
+    status,
+    date_from,
+    date_to,
+    ref,
+    page = '1',
+    limit = '20',
+  } = req.query
+  const fromDate = parseDateSafely(date_from)
+  const toDate = parseDateSafely(date_to)
+  let clientIds: string[]
+  if (typeof qClientId === 'string' && qClientId !== 'all') {
+    clientIds = [qClientId]
+  } else {
+    clientIds = [parentId, ...childIds]
+  }
+
+  const where: any = {
+    partnerClientId: { in: clientIds },
+  }
+  if (status) where.status = status as string
+  if (ref) where.refId = { contains: ref as string, mode: 'insensitive' }
+  if (fromDate || toDate) {
+    where.createdAt = {}
+    if (fromDate) where.createdAt.gte = fromDate
+    if (toDate) where.createdAt.lte = toDate
+  }
+
+  const pageNum = Math.max(1, parseInt(page as string, 10))
+  const pageSize = Math.min(100, parseInt(limit as string, 10))
+  const [rows, total] = await Promise.all([
+    prisma.withdrawRequest.findMany({
+      where,
+      skip: (pageNum - 1) * pageSize,
+      take: pageSize,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        refId: true,
+        bankName: true,
+        accountName: true,
+        accountNumber: true,
+        amount: true,
+        netAmount: true,
+        pgFee: true,
+        withdrawFeePercent: true,
+        withdrawFeeFlat: true,
+        status: true,
+        createdAt: true,
+        completedAt: true,
+        subMerchant: { select: { name: true, provider: true } },
+      },
+    }),
+    prisma.withdrawRequest.count({ where }),
+  ])
+
+  const data = rows.map(w => ({
+    refId: w.refId,
+    bankName: w.bankName,
+    accountName: w.accountName,
+    accountNumber: w.accountNumber,
+    amount: w.amount,
+    netAmount: w.netAmount,
+    pgFee: w.pgFee ?? null,
+    withdrawFeePercent: w.withdrawFeePercent,
+    withdrawFeeFlat: w.withdrawFeeFlat,
+    status: w.status,
+    createdAt: w.createdAt.toISOString(),
+    completedAt: w.completedAt?.toISOString() ?? null,
+    wallet: w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+  }))
+
+  return res.json({ data, total })
 }
 
 // POST /api/v1/withdrawals/:id/retry
@@ -479,7 +559,47 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
     console.error('[validateAccount] error:', err);
     return res
       .status(500)
-      .json({ message: err.message || 'Validasi akun gagal' });
+    .json({ message: err.message || 'Validasi akun gagal' });
+  }
+}
+
+export async function validateAccountS2S(req: ApiKeyRequest, res: Response) {
+  const { account_number, bank_code } = req.body
+
+  try {
+    const merchant = await prisma.merchant.findFirst({
+      where: { name: 'hilogate' },
+    })
+    if (!merchant) {
+      return res.status(500).json({ error: 'Internal Hilogate merchant not found' })
+    }
+
+    const pc = await prisma.partnerClient.findUnique({
+      where: { id: req.clientId! },
+      select: { forceSchedule: true },
+    })
+    const subs = await getActiveProviders(merchant.id, 'hilogate', {
+      schedule: pc?.forceSchedule as any || undefined,
+    })
+    if (subs.length === 0) {
+      return res.status(500).json({ error: 'No active Hilogate credentials today' })
+    }
+    const cfg = subs[0].config as unknown as HilogateConfig
+
+    const client = new HilogateClient(cfg)
+    const payload = await client.validateAccount(account_number, bank_code)
+    if (payload.status !== 'valid') {
+      return res.status(400).json({ error: 'Invalid account' })
+    }
+    return res.json({
+      account_number: payload.account_number,
+      account_holder: payload.account_holder,
+      bank_code: payload.bank_code,
+      status: payload.status,
+    })
+  } catch (err: any) {
+    console.error('[validateAccountS2S] error:', err)
+    return res.status(500).json({ message: err.message || 'Validasi akun gagal' })
   }
 }
 
@@ -783,6 +903,276 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     if (err instanceof GidiError)
       return res.status(400).json({ error: err.message })
     logger.error('[requestWithdraw]', err)
+    return res.status(500).json({ error: err.message || 'Internal server error' })
+  }
+}
+
+export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
+  const {
+    subMerchantId,
+    sourceProvider,
+    account_number,
+    bank_code,
+    account_name_alias,
+    amount,
+  } = req.body as {
+    subMerchantId: string
+    sourceProvider: 'hilogate' | 'oy' | 'gidi'
+    account_number: string
+    bank_code: string
+    account_name_alias?: string
+    amount: number
+  }
+
+  if (req.isParent) {
+    return res.status(403).json({ error: 'Parent accounts cannot perform withdrawals' })
+  }
+  const partnerClientId = req.clientId!
+
+  const [minSet, maxSet] = await Promise.all([
+    prisma.setting.findUnique({ where: { key: 'withdraw_min' } }),
+    prisma.setting.findUnique({ where: { key: 'withdraw_max' } }),
+  ])
+  const minVal = parseFloat(minSet?.value ?? '0')
+  const maxVal = parseFloat(maxSet?.value ?? '0')
+  if (!isNaN(minVal) && minVal > 0 && amount < minVal) {
+    return res.status(400).json({ error: `Minimum withdraw Rp ${minVal}` })
+  }
+  if (!isNaN(maxVal) && maxVal > 0 && amount > maxVal) {
+    return res.status(400).json({ error: `Maximum withdraw Rp ${maxVal}` })
+  }
+
+  try {
+    const sub = await prisma.sub_merchant.findUnique({
+      where: { id: subMerchantId },
+      select: { credentials: true, provider: true },
+    })
+    if (!sub) throw new Error('Credentials not found for sub-merchant')
+
+    let providerCfg: any
+    if (sourceProvider === 'hilogate') {
+      const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
+      providerCfg = {
+        merchantId: raw.merchantId,
+        secretKey: raw.secretKey,
+        env: raw.env ?? 'sandbox',
+      } as HilogateConfig
+    } else if (sourceProvider === 'oy') {
+      const raw = sub.credentials as { merchantId: string; secretKey: string }
+      providerCfg = {
+        baseUrl: 'https://partner.oyindonesia.com',
+        username: raw.merchantId,
+        apiKey: raw.secretKey,
+      } as OyConfig
+    } else {
+      const raw = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
+      providerCfg = {
+        baseUrl: raw.baseUrl,
+        merchantId: raw.merchantId,
+        credentialKey: raw.credentialKey,
+      } as GidiDisbursementConfig
+    }
+
+    const pgClient =
+      sourceProvider === 'hilogate'
+        ? new HilogateClient(providerCfg)
+        : sourceProvider === 'oy'
+          ? new OyClient(providerCfg)
+          : new GidiClient(providerCfg)
+
+    let acctHolder: string
+    let alias: string
+    let bankName: string
+    if (sourceProvider === 'hilogate') {
+      const valid = await (pgClient as HilogateClient).validateAccount(account_number, bank_code)
+      if (valid.status !== 'valid') {
+        return res.status(400).json({ error: 'Akun bank tidak valid' })
+      }
+      acctHolder = valid.account_holder
+      alias = account_name_alias || acctHolder
+      const banks = await (pgClient as HilogateClient).getBankCodes()
+      const b = banks.find(b => b.code === bank_code)
+      if (!b) return res.status(400).json({ error: 'Bank code tidak dikenal' })
+      bankName = b.name
+    } else if (sourceProvider === 'gidi') {
+      let inq
+      try {
+        inq = await (pgClient as GidiClient).inquiryAccount(
+          bank_code,
+          account_number,
+          Date.now().toString(),
+        )
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message })
+      }
+      acctHolder = inq.beneficiaryAccountName
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name
+    } else {
+      acctHolder = req.body.account_name || ''
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name
+    }
+
+    const wr = await prisma.$transaction(async tx => {
+      const pc = await tx.partnerClient.findUniqueOrThrow({
+        where: { id: partnerClientId },
+        select: { withdrawFeePercent: true, withdrawFeeFlat: true },
+      })
+
+      const inAgg = await tx.order.aggregate({
+        _sum: { settlementAmount: true },
+        where: {
+          subMerchantId,
+          partnerClientId,
+          settlementTime: { not: null },
+        },
+      })
+      const totalIn = inAgg._sum.settlementAmount ?? 0
+
+      const outAgg = await tx.withdrawRequest.aggregate({
+        _sum: { amount: true },
+        where: {
+          subMerchantId,
+          partnerClientId,
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.COMPLETED] },
+        },
+      })
+      const totalOut = outAgg._sum.amount ?? 0
+
+      const available = totalIn - totalOut
+      if (amount > available) throw new Error('InsufficientBalance')
+
+      const feePctAmt = (pc.withdrawFeePercent / 100) * amount
+      const netAmt = amount - feePctAmt - pc.withdrawFeeFlat
+
+      const refId = `wd-${Date.now()}`
+      const w = await tx.withdrawRequest.create({
+        data: {
+          refId,
+          amount,
+          netAmount: netAmt,
+          status: DisbursementStatus.PENDING,
+          withdrawFeePercent: pc.withdrawFeePercent,
+          withdrawFeeFlat: pc.withdrawFeeFlat,
+          sourceProvider,
+          partnerClient: { connect: { id: partnerClientId } },
+          subMerchant: { connect: { id: subMerchantId } },
+          accountName: acctHolder,
+          accountNameAlias: alias,
+          accountNumber: account_number,
+          bankCode: bank_code,
+          bankName,
+        },
+      })
+
+      await tx.partnerClient.update({
+        where: { id: partnerClientId },
+        data: { balance: { decrement: amount } },
+      })
+
+      return w
+    })
+
+    try {
+      let resp: any
+      if (sourceProvider === 'hilogate') {
+        resp = await (pgClient as HilogateClient).createWithdrawal({
+          ref_id: wr.refId,
+          amount: wr.netAmount,
+          currency: 'IDR',
+          account_number,
+          account_name: wr.accountName,
+          account_name_alias: wr.accountNameAlias,
+          bank_code,
+          bank_name: wr.bankName,
+          branch_name: '',
+          description: `Withdraw Rp ${wr.netAmount}`,
+        })
+      } else if (sourceProvider === 'gidi') {
+        resp = await (pgClient as GidiClient).createTransfer({
+          requestId: `${wr.refId}-r`,
+          transactionId: wr.refId,
+          channelId: bank_code,
+          accountNo: account_number,
+          amount: wr.netAmount,
+          transferNote: `Withdraw Rp ${wr.netAmount}`,
+        })
+      } else {
+        const disburseReq = {
+          recipient_bank: bank_code,
+          recipient_account: account_number,
+          amount: wr.netAmount,
+          note: `Withdraw Rp ${wr.netAmount}`,
+          partner_trx_id: wr.refId,
+          email: 'client@launcx.com',
+        }
+        resp = await (pgClient as OyClient).disburse(disburseReq)
+      }
+
+      const newStatus =
+        sourceProvider === 'hilogate'
+          ? ['WAITING', 'PENDING'].includes(resp.status)
+            ? DisbursementStatus.PENDING
+            : ['COMPLETED', 'SUCCESS'].includes(resp.status)
+              ? DisbursementStatus.COMPLETED
+              : DisbursementStatus.FAILED
+          : sourceProvider === 'gidi'
+            ? resp.statusTransfer === 'Success'
+              ? DisbursementStatus.COMPLETED
+              : resp.statusTransfer === 'Failed'
+                ? DisbursementStatus.FAILED
+                : DisbursementStatus.PENDING
+            : resp.status.code === '101'
+              ? DisbursementStatus.PENDING
+              : resp.status.code === '000'
+                ? DisbursementStatus.COMPLETED
+                : DisbursementStatus.FAILED
+
+      await prisma.withdrawRequest.update({
+        where: { refId: wr.refId },
+        data: {
+          paymentGatewayId: resp.trx_id || resp.trxId || resp.transactionId,
+          isTransferProcess:
+            sourceProvider === 'hilogate' ? resp.is_transfer_process ?? false : true,
+          status: newStatus,
+        },
+      })
+
+      if (newStatus === DisbursementStatus.FAILED) {
+        await prisma.partnerClient.update({
+          where: { id: partnerClientId },
+          data: { balance: { increment: amount } },
+        })
+        return res.status(400).json({ error: 'Withdrawal failed', status: resp.status })
+      }
+
+      return res.status(201).json({ id: wr.id, refId: wr.refId, status: newStatus })
+    } catch (err: any) {
+      logger.error('[requestWithdrawS2S provider]', err)
+      try {
+        await prisma.$transaction([
+          prisma.withdrawRequest.update({
+            where: { refId: wr.refId },
+            data: { status: DisbursementStatus.FAILED },
+          }),
+          prisma.partnerClient.update({
+            where: { id: partnerClientId },
+            data: { balance: { increment: amount } },
+          }),
+        ])
+      } catch (rollbackErr) {
+        logger.error('[requestWithdrawS2S rollback]', rollbackErr)
+      }
+      const status = err instanceof GidiError ? 400 : 500
+      return res.status(status).json({ error: err.message || 'Internal server error' })
+    }
+  } catch (err: any) {
+    if (err.message === 'InsufficientBalance')
+      return res.status(400).json({ error: 'Saldo tidak mencukupi' })
+    if (err instanceof GidiError)
+      return res.status(400).json({ error: err.message })
+    logger.error('[requestWithdrawS2S]', err)
     return res.status(500).json({ error: err.message || 'Internal server error' })
   }
 }
