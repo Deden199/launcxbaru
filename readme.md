@@ -14,10 +14,12 @@ Run `npm run reconcile-balances` after setting database environment variables to
 
 ## API Documentation
 
-Generate and serve Swagger docs for payment and withdrawal routes:
+Generate and serve Swagger docs for payment, withdrawal, and withdrawal S2S routes:
 
 ```bash
 npm run docs
 ```
 
-This command writes `docs/api/payment.yaml` and `docs/api/withdrawal.yaml` and hosts them at `http://localhost:3001/docs/payment` and `/docs/withdrawal`.
+This command writes `docs/api/payment.yaml`, `docs/api/withdrawal.yaml`, and `docs/api/withdrawal.s2s.yaml` and hosts them at `http://localhost:3001/docs/payment`, `/docs/withdrawal`, and `/docs/withdrawal-s2s`.
+
+S2S withdrawal requests must include `X-API-Key`, `X-Timestamp`, and `X-Signature` headers and originate from an IP address whitelisted under the `s2s_ip_whitelist` setting.

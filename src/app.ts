@@ -45,6 +45,7 @@ import { oyTransactionCallback, gidiTransactionCallback } from './controller/pay
 import merchantDashRoutes from './route/merchant/dashboard.routes';
 import clientWebRoutes from './route/client/web.routes';    // partner-client routes
 import withdrawalRoutes from './route/withdrawals.routes';  // add withdrawal routes
+import withdrawalS2SRoutes from './route/withdrawals.s2s.routes';
 
 import apiKeyAuth from './middleware/apiKeyAuth';
 import { authMiddleware } from './middleware/auth';
@@ -138,6 +139,7 @@ app.get('/ops/ifp-status', (_req, res) => {
 
 // Routes ringan lain
 app.use('/api/v1/withdrawals', withdrawalRoutes);
+app.use('/api/v1/withdrawals/s2s', withdrawalS2SRoutes);
 app.use('/api/v1', bankRoutes);
 
 /* ========== 1. PUBLIC ROUTES ========== */
