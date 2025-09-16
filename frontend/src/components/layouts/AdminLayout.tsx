@@ -16,6 +16,7 @@ import {
   Banknote,
   Wrench,
   Wallet,
+  Globe,
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 
@@ -34,6 +35,7 @@ const navItems = [
   { label: 'Settlement',        href: '/admin/settlement', Icon: Banknote },
   { label: 'Settlement Adjust', href: '/admin/settlement-adjust', Icon: Wrench },
   { label: 'Logs',              href: '/admin/logs',       Icon: FileText },
+  { label: 'IP Whitelist',      href: '/super-admin/ip-whitelist', Icon: Globe },
 ]
 
 // aktif juga untuk child paths
