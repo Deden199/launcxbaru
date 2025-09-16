@@ -49,6 +49,7 @@ import withdrawalS2SRoutes from './route/withdrawals.s2s.routes';
 
 import apiKeyAuth from './middleware/apiKeyAuth';
 import { authMiddleware } from './middleware/auth';
+import { globalIpWhitelist } from './middleware/ipWhitelist';
 
 import { config } from './config';
 import logger from './logger';
@@ -121,6 +122,7 @@ app.get('/api/v1/qris/:orderId', proxyOyQris);
 
 // Global middleware
 app.set('trust proxy', 1);
+app.use(globalIpWhitelist);
 app.use(helmet());
 app.use(rateLimit({
   windowMs: 60_000,
