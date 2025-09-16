@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [minW, setMinW] = useState('')
   const [maxW, setMaxW] = useState('')
   const [settlementCron, setSettlementCron] = useState('0 16 * * *')
+  const [ipWhitelist, setIpWhitelist] = useState('')
   const [overrideDates, setOverrideDates] = useState<Date[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -32,6 +33,7 @@ export default function SettingsPage() {
         setMinW(d.withdraw_min || '')
         setMaxW(d.withdraw_max || '')
         setSettlementCron(d.settlement_cron || '0 16 * * *')
+        setIpWhitelist(d.s2s_ip_whitelist || '')
         const raw = d.weekend_override_dates || ''
         const dates = raw
           .split(',')
@@ -58,6 +60,7 @@ export default function SettingsPage() {
         withdraw_max: maxW,
         weekend_override_dates: datesString,
         settlement_cron: settlementCron,
+        s2s_ip_whitelist: ipWhitelist,
       })
       setSuccess('Settings saved successfully.')
     } catch (e: any) {
@@ -153,6 +156,17 @@ export default function SettingsPage() {
                   <Info size={14} className="mt-0.5" />
                   <span>Cron format: minute hour day-of-month month day-of-week (WIB recommended).</span>
                 </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-neutral-300">S2S IP Whitelist</label>
+                <input
+                  type="text"
+                  value={ipWhitelist}
+                  onChange={(e) => setIpWhitelist(e.target.value)}
+                  placeholder="e.g. 103.150.10.1, 103.150.10.0/24"
+                  className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none placeholder:text-neutral-500 focus:border-indigo-700 focus:ring-2 focus:ring-indigo-800"
+                />
+                <p className="mt-1 text-xs text-neutral-400">Pisahkan beberapa IP dengan koma. CIDR diperbolehkan.</p>
               </div>
             </section>
           </div>
