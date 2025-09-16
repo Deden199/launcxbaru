@@ -22,4 +22,4 @@ npm run docs
 
 This command writes `docs/api/payment.yaml`, `docs/api/withdrawal.yaml`, and `docs/api/withdrawal.s2s.yaml` and hosts them at `http://localhost:3001/docs/payment`, `/docs/withdrawal`, and `/docs/withdrawal-s2s`.
 
-S2S withdrawal requests must include `X-API-Key`, `X-Timestamp`, and `X-Signature` headers and originate from an IP address whitelisted under the `s2s_ip_whitelist` setting.
+S2S withdrawal requests must include `X-API-Key`, `X-Timestamp`, and `X-Signature` headers and originate from an IP address whitelisted under the `s2s_ip_whitelist` setting. Whitelist entries dapat dikonfigurasi melalui halaman Admin Settings di frontend.
