@@ -25,6 +25,7 @@ import { IfpClient, IfpConfig } from './ifpClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQrisFinal, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
+import { Ing1Client, Ing1Config } from './ing1Client';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -99,6 +100,101 @@ export const createTransaction = async (
 
   const amount = Number(request.price);
   const pid    = request.playerId ?? buyerId;
+
+  if (mName === 'ing1') {
+    const merchantRec = await prisma.merchant.findFirst({ where: { name: 'ing1' } });
+    if (!merchantRec) throw new Error('Internal ING1 merchant not found');
+
+    const trx = await prisma.transaction_request.create({
+      data: {
+        merchantId: merchantRec.id,
+        subMerchantId: request.subMerchantId,
+        buyerId: request.buyer,
+        playerId: pid,
+        amount,
+        status: 'PENDING',
+        settlementAmount: amount,
+      },
+    });
+    const refId = trx.id;
+
+    const ingSubs = await getActiveProviders(merchantRec.id, 'ing1', {
+      schedule: (forceSchedule as any) || undefined,
+    });
+    if (!ingSubs.length) throw new Error('No active ING1 credentials');
+
+    const ingCfg = ingSubs[0].config as Ing1Config;
+    const ingClient = new Ing1Client(ingCfg);
+    const cashinResp = await ingClient.createCashin({
+      amount,
+      clientReff: refId,
+      remark: request.transactionDescription || `Payment ${refId}`,
+    });
+
+    await prisma.transaction_response.create({
+      data: {
+        referenceId: refId,
+        responseBody: cashinResp.raw as Prisma.InputJsonValue,
+        playerId: pid,
+      },
+    });
+
+    const host = pickRandomHost();
+    const fallbackCheckoutUrl = `${host}/order/${refId}`;
+    const providerCheckoutUrl = cashinResp.paymentUrl ?? fallbackCheckoutUrl;
+
+    const parseExpiry = (value: string | null | undefined) => {
+      if (!value) return undefined;
+      const trimmed = value.trim();
+      const attempts = [trimmed];
+      if (trimmed.includes(' ')) attempts.push(trimmed.replace(' ', 'T'));
+      if (!trimmed.endsWith('Z')) {
+        if (trimmed.includes(' ')) {
+          attempts.push(trimmed.replace(' ', 'T') + 'Z');
+        } else {
+          attempts.push(`${trimmed}Z`);
+        }
+      }
+      for (const candidate of attempts) {
+        const ts = Date.parse(candidate);
+        if (!Number.isNaN(ts)) return new Date(ts);
+      }
+      return undefined;
+    };
+
+    const expiration = parseExpiry(cashinResp.expiredAt);
+
+    await prisma.order.create({
+      data: {
+        id: refId,
+        userId: request.buyer,
+        merchantId: merchantRec.id,
+        subMerchant: { connect: { id: request.subMerchantId } },
+        partnerClient: { connect: { id: request.buyer } },
+        playerId: pid,
+        amount,
+        channel: 'ing1',
+        status: 'PENDING',
+        qrPayload: cashinResp.qrContent ?? null,
+        checkoutUrl: providerCheckoutUrl,
+        fee3rdParty: 0,
+        settlementAmount: null,
+        pgRefId: cashinResp.reff ?? null,
+        pgClientRef: cashinResp.clientReff ?? null,
+        providerPayload: (cashinResp.data ?? null) as Prisma.InputJsonValue,
+        trxExpirationTime: expiration,
+      },
+    });
+
+    return {
+      orderId: refId,
+      checkoutUrl: providerCheckoutUrl,
+      qrPayload: cashinResp.qrContent ?? undefined,
+      playerId: pid,
+      totalAmount: amount,
+      expiredTs: cashinResp.expiredAt ?? undefined,
+    };
+  }
 
   // ─── Hilogate branch ───────────────────────────────────
   if (mName === 'hilogate') {

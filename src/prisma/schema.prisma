@@ -224,6 +224,9 @@ model Order {
   feeLauncx        Float?
   qrPayload        String?
   checkoutUrl      String
+  pgRefId          String?
+  pgClientRef      String?
+  providerPayload  Json?
   paymentReceivedTime  DateTime?      // full.payment_received_time
   settlementTime       DateTime?      // full.settlement_time
   trxExpirationTime    DateTime?      // full.trx_expiration_time

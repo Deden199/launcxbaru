@@ -7,12 +7,13 @@ import { HilogateClient, HilogateConfig } from '../service/hilogateClient';
 import { OyClient, OyConfig } from '../service/oyClient';
 import { GidiConfig } from '../service/gidi.service';
 import { IfpClient, IfpConfig } from '../service/ifpClient';
+import { Ing1Client, Ing1Config } from '../service/ing1Client';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
   id: string;
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp';
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1';
   fee: number;
   credentials: unknown;
   schedule: unknown;
@@ -77,13 +78,26 @@ export async function getActiveProviders(
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<IfpConfig>[]>;
 
+// overload untuk ING1
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'ing1',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<Ing1Config>[]>;
+
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp',
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1',
   opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
-  Array<ResultSub<HilogateConfig> | ResultSub<OyConfig> | ResultSub<GidiConfig> | ResultSub<IfpConfig>>
+  Array<
+    | ResultSub<HilogateConfig>
+    | ResultSub<OyConfig>
+    | ResultSub<GidiConfig>
+    | ResultSub<IfpConfig>
+    | ResultSub<Ing1Config>
+  >
 > {
   const isWeekend = opts.schedule
     ? opts.schedule === 'weekend'
@@ -162,6 +176,28 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<IfpConfig>;
+    } else if (provider === 'ing1') {
+      const raw = s.credentials as any;
+      const baseUrl = raw?.baseUrl ?? raw?.base_url;
+      if (!baseUrl || !raw?.email || !raw?.password) {
+        throw new Error(`Invalid ING1 credentials for sub_merchant ${s.id}`);
+      }
+
+      const cfg: Ing1Config = {
+        baseUrl,
+        email: raw.email,
+        password: raw.password,
+        productCode: raw.productCode ?? raw.product_code,
+        callbackUrl: raw.callbackUrl ?? raw.callback_url ?? raw.return_url,
+        permanentToken: raw.permanentToken ?? raw.permanent_token ?? raw.token,
+        merchantId: raw.merchantId ?? raw.merchant_id,
+        apiVersion: raw.apiVersion ?? raw.api_version ?? raw.version,
+      };
+
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<Ing1Config>;
     } else {
       // gidi
       const raw = s.credentials as any;
@@ -190,6 +226,12 @@ export interface Provider {
   supportsQR: boolean;
   generateQR?: (p: { amount: number; orderId: string }) => Promise<string>;
   generateCheckoutUrl: (p: { amount: number; orderId: string }) => Promise<string>;
+  checkStatus?: (p: { reff: string; clientReff?: string }) => Promise<{
+    status: string;
+    raw: any;
+    rc?: number;
+    message?: string;
+  }>;
 }
 
 /* ═══════════ List provider aktif ═══════════ */
@@ -201,6 +243,7 @@ export async function getActiveProvidersForClient(
   const oySubs = await getActiveProviders(merchantId, 'oy', opts);
   const gidiSubs = await getActiveProviders(merchantId, 'gidi', opts);
   const ifpSubs = await getActiveProviders(merchantId, 'ifp', opts);
+  const ing1Subs = await getActiveProviders(merchantId, 'ing1', opts);
 
   return [
     /* ──── Hilogate ──── */
@@ -245,6 +288,63 @@ export async function getActiveProvidersForClient(
         return resp.checkout_url;
       },
     },
+
+    /* ──── ING1 ──── */
+    ((): Provider => {
+      const computeSupportsQR = (cfg?: Ing1Config) => {
+        const code = cfg?.productCode ?? '';
+        return /qr/i.test(code);
+      };
+
+      const supportsQR = computeSupportsQR(
+        (ing1Subs[0]?.config as Ing1Config | undefined) ?? undefined
+      );
+
+      return {
+        name: 'ing1',
+        supportsQR,
+        async generateCheckoutUrl({ orderId, amount }) {
+          if (!ing1Subs.length) throw new Error('No active ING1 credentials');
+          const cfg = ing1Subs[0].config as Ing1Config;
+          const client = new Ing1Client(cfg);
+          const resp = await client.createCashin({
+            amount,
+            clientReff: orderId,
+            remark: `Order ${orderId}`,
+          });
+          return resp.paymentUrl ?? resp.qrContent ?? '';
+        },
+        async generateQR({ orderId, amount }) {
+          if (!supportsQR) {
+            throw new Error('ING1 QR generation not supported for this product');
+          }
+          if (!ing1Subs.length) throw new Error('No active ING1 credentials');
+          const cfg = ing1Subs[0].config as Ing1Config;
+          const client = new Ing1Client(cfg);
+          const resp = await client.createCashin({
+            amount,
+            clientReff: orderId,
+            remark: `Order ${orderId}`,
+          });
+          if (!resp.qrContent) {
+            throw new Error('ING1 did not return QR content');
+          }
+          return resp.qrContent;
+        },
+        async checkStatus({ reff, clientReff }) {
+          if (!ing1Subs.length) throw new Error('No active ING1 credentials');
+          const cfg = ing1Subs[0].config as Ing1Config;
+          const client = new Ing1Client(cfg);
+          const resp = await client.checkCashin({ reff, clientReff });
+          return {
+            status: resp.status,
+            raw: resp.raw,
+            rc: resp.rc,
+            message: resp.message,
+          };
+        },
+      };
+    })(),
 
     /* ──── IFP ──── */
     {
