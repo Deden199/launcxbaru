@@ -72,7 +72,8 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
    if (
       defaultProvider !== 'hilogate' &&
       defaultProvider !== 'oy' &&
-      defaultProvider !== 'gidi'
+      defaultProvider !== 'gidi' &&
+      defaultProvider !== 'ing1'
     ) {
             return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
@@ -97,8 +98,12 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
    subs = await getActiveProviders(merchant.id, 'oy', {
      schedule: (forceSchedule as any) || undefined,
    });
- } else {
+ } else if (defaultProvider === 'gidi') {
    subs = await getActiveProviders(merchant.id, 'gidi', {
+     schedule: (forceSchedule as any) || undefined,
+   });
+ } else {
+   subs = await getActiveProviders(merchant.id, 'ing1', {
      schedule: (forceSchedule as any) || undefined,
    });
  }

@@ -77,7 +77,7 @@ export const createClient = async (req: AuthRequest, res: Response) => {
     typeof req.body.defaultProvider === 'string'
       ? req.body.defaultProvider.trim().toLowerCase()
       : 'hilogate'
-  const allowedDp = ['hilogate', 'oy', 'gv', 'gidi']
+  const allowedDp = ['hilogate', 'oy', 'gv', 'gidi', 'ing1']
   if (!allowedDp.includes(defaultProvider)) {
     return res.status(400).json({ error: `defaultProvider must be one of ${allowedDp.join(', ')}` })
   }
@@ -262,7 +262,7 @@ export const updateClient = async (req: AuthRequest, res: Response) => {
   }
   if (defaultProvider != null) {
     const dp = String(defaultProvider).trim().toLowerCase()
-    const allowed = ['hilogate', 'oy', 'gv', 'gidi']
+    const allowed = ['hilogate', 'oy', 'gv', 'gidi', 'ing1']
     if (!allowed.includes(dp)) {
       return res.status(400).json({ error: `defaultProvider must be one of ${allowed.join(', ')}` })
     }
