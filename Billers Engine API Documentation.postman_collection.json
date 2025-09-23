@@ -1,0 +1,2195 @@
+{
+	"info": {
+		"_postman_id": "d884142e-d369-4de0-8795-da4482251246",
+		"name": "Billers Engine API Documentation",
+		"description": "## Overview\n\nBillers Engine helps your business to do all financial needs through our API and dashboard features. you can build feature in your application to send money to your customers, accept payment from your customers, or automate financial process.\n\n## API\n\nOur API use HTTP request with only POST method and all the response use JSON format. Our Authentication use Token Based (Token will be destroy if user reset the password otherwise Token will active permanently). All request Header must have :\n\n- `Content-Type: application/json`\n    \n- `Accept: application/json`\n    \n\n## Getting Started\n\nYou need to get URL, email & password to use our Billers Engine & Dashboard, you can get it from our team. for development only, our team will give you free balance for testing purposes\n\n## FAQ\n\nQ: How long the login token live?  \nA: Token will live permanently, unless the credential(email/password) is reset or changed\n\n---\n\nQ: How to get credential email and password?  \nA: You can get email and password from our team\n\n---\n\nQ: How to test in sandbox account?  \nA: unfortunately we don't have sandbox right now, but you can request free balance for development, just contact our team for testing purposes\n\n## Response Code(RC) List\n\nrc: 99 => FAILED  \nrc: 0 => SUCCESS  \nrc: 91 => PENDING  \nrc: 98 => Invalid Token",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "1913583"
+	},
+	"item": [
+		{
+			"name": "Cash-in",
+			"item": [
+				{
+					"name": "Create",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"product_code\": \"{{product_code}}\",\r\n    \"amount\": {{amount}},\r\n    \"remark\": \"{{remark}}\",\r\n    \"client_reff\": \"{{client_reff}}\",\r\n    \"expiry_time\": \"{{expiry_time}}\",\r\n    \"return_url\": \"{{return_url}}\",\r\n    \"merchant_id\": \"{{merchant_id}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/create",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"cashin",
+								"create"
+							]
+						},
+						"description": "your balance will be deduct based on `total` parameter in inquiry response.\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | product_code | get from list product from our admin |\n| Optional | amount | fill amount parameter with open denom/amount product like QRIS or VA |\n| Optional | remark | remark will be send to customer (if the biller support) |\n| Optional | client_reff | unique_id from client to reconcile transaction or validate transaction |\n| Optional | expiry_time | default is 60 minutes |\n| Optional | return_url | default will use the Cash In/Pay In callback inform to our admin |\n| Optional | merchant_id | for QRIS transaction only |"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"product_code\": \"{{product_code}}\",\r\n    \"amount\": {{amount}},\r\n    \"remark\": \"{{remark}}\",\r\n    \"client_reff\": \"{{client_reff}}\",\r\n    \"expiry_time\": \"{{expiry_time}}\",\r\n    \"return_url\": \"{{return_url}}\",\r\n    \"merchant_id\": \"{{merchant_id}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/create",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"cashin",
+										"create"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 03 Jun 2025 14:17:55 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Content-Length",
+									"value": "356"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "Nel",
+									"value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "private, must-revalidate"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "Expires",
+									"value": "-1"
+								},
+								{
+									"key": "Pragma",
+									"value": "no-cache"
+								},
+								{
+									"key": "Vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.4.7"
+								},
+								{
+									"key": "Cf-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=wQ1Kb3C00XXx5vFiyLPxJqbJOOT0sSonWF%2BHy2Q5u%2Frfk8xFvpaCurEKEb4oy%2B79w%2FWLjJ8%2FLFTF4gJ50ZVDX95p%2FPD79HujWmELbRvfZy8mAw%3D%3D\"}]}"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "949fd119bf7a9e3e-SIN"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"successfuly create cash-in transaction\",\n    \"data\": {\n        \"amount\": 10000,\n        \"payment_url\": null,\n        \"content\": \"00020101021226660015COM.INACASH.WWW01189360083165430980750214INAC74170987120303UKE51440014ID.CO.QRIS.WWW0215ID20253989030420303UKE5204737253033605405100005802ID5913Bayar Digital6008Semarang610550132622105171748960275QG1HNug6304929D\",\n        \"return_url\": \"https://google.com\",\n        \"status\": \"pending\",\n        \"remark\": \"remark-4\",\n        \"expired_at\": \"2025-06-03 21:27:55\",\n        \"created_at\": \"2025-06-03 21:17:55\"\n    },\n    \"reff\": \"1748960275QG1HNug\",\n    \"client_reff\": \"test-7-2\",\n    \"product_code\": \"QRIS_DIRECT\"\n}"
+						}
+					]
+				},
+				{
+					"name": "History V2",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/history?page=1&per_page=15&start_date&end_date&client_reff&reff=",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"cashin",
+								"history"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "15"
+								},
+								{
+									"key": "start_date",
+									"value": null
+								},
+								{
+									"key": "end_date",
+									"value": null
+								},
+								{
+									"key": "client_reff",
+									"value": null
+								},
+								{
+									"key": "reff",
+									"value": ""
+								}
+							]
+						},
+						"description": "your balance will be deduct based on `total` parameter in inquiry response.\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | product_code | get from list product from our admin |\n| Optional | amount | fill amount parameter with open denom/amount product like QRIS or VA |\n| Optional | remark | remark will be send to customer (if the biller support) |\n| Optional | client_reff | unique_id from client to reconcile transaction or validate transaction |\n| Optional | expiry_time | default is 60 minutes |\n| Optional | return_url | default will use the Cash In/Pay In callback inform to our admin |\n| Optional | merchant_id | for QRIS transaction only |"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"product_code\": \"{{product_code}}\",\r\n    \"amount\": {{amount}},\r\n    \"remark\": \"{{remark}}\",\r\n    \"client_reff\": \"{{client_reff}}\",\r\n    \"expiry_time\": \"{{expiry_time}}\",\r\n    \"return_url\": \"{{return_url}}\",\r\n    \"merchant_id\": \"{{merchant_id}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/create",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"cashin",
+										"create"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 03 Jun 2025 14:17:55 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Content-Length",
+									"value": "356"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "Nel",
+									"value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "private, must-revalidate"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "Expires",
+									"value": "-1"
+								},
+								{
+									"key": "Pragma",
+									"value": "no-cache"
+								},
+								{
+									"key": "Vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.4.7"
+								},
+								{
+									"key": "Cf-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=wQ1Kb3C00XXx5vFiyLPxJqbJOOT0sSonWF%2BHy2Q5u%2Frfk8xFvpaCurEKEb4oy%2B79w%2FWLjJ8%2FLFTF4gJ50ZVDX95p%2FPD79HujWmELbRvfZy8mAw%3D%3D\"}]}"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "949fd119bf7a9e3e-SIN"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get history transaction cashin\",\n    \"histories\": [\n        {\n            \"amount\": 8919754,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"Mj6zOG6Mnz9p\",\n            \"reff\": \"1753030745rKo9NFy\",\n            \"client_reff\": \"CFKksiu0gFk7lfKGec5nKY\",\n            \"name\": \"QR Dr. Johann Corkery I\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 6925904,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"IJ4MM85gF4vY\",\n            \"reff\": \"1753030745mFbk7bW\",\n            \"client_reff\": \"CFVRjlobWjHFx00I2ZdJGu\",\n            \"name\": \"QR Wilhelmine Schumm\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 5071821,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"rHshPhV03Ydj\",\n            \"reff\": \"1753030745XX1LNSf\",\n            \"client_reff\": \"CFh0mTvtb2f9VDzRPXE34X\",\n            \"name\": \"QR Prof. Osvaldo D'Amore I\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 6910981,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"aUbeYTZvyeve\",\n            \"reff\": \"1753030745EIRLGHV\",\n            \"client_reff\": \"CFWgShbsv04qF6he92aIuF\",\n            \"name\": \"QR Dr. Pink Wehner\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 3469352,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"ymgsjqxGoTZS\",\n            \"reff\": \"1753030745Ky0Pppg\",\n            \"client_reff\": \"CFcKj4cp0qI2Wm4WQZyTzZ\",\n            \"name\": \"QR Omari Kiehn\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 7069950,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"vVzX68urd4jc\",\n            \"reff\": \"1753030745Ah8tbAJ\",\n            \"client_reff\": \"CFustfbG9TQw43fKsgMPpY\",\n            \"name\": \"QR Wilhelmine Schumm\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 253959,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"geTCIBiPqgZc\",\n            \"reff\": \"1753030745mh4Nubq\",\n            \"client_reff\": \"CFyZavciWonbY0Fjq7BDVL\",\n            \"name\": \"QR Don Nienow\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 1416946,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"YmHk4dJI8ggi\",\n            \"reff\": \"1753030745BCsD4xH\",\n            \"client_reff\": \"CFeVsXkTO9TgOiMkZwF5j8\",\n            \"name\": \"QR Dr. Johann Corkery I\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 4309209,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"qBfYBZGUqsWV\",\n            \"reff\": \"1753030745pWpKoUh\",\n            \"client_reff\": \"CFNKDFA6jR6NKwAMIliME8\",\n            \"name\": \"QR Don Nienow\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 3186680,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"4t7kI9HhbLA3\",\n            \"reff\": \"1753030745nOF5feR\",\n            \"client_reff\": \"CFktboGAV5GNRxV58SHlrr\",\n            \"name\": \"QR Ms. Vincenza Bogisich\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 443418,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"qGktFSArmsgm\",\n            \"reff\": \"1753030745FCW0Ew3\",\n            \"client_reff\": \"CFegjaLokz8r25N7xjd7IW\",\n            \"name\": \"QR Mylene Macejkovic\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 6539468,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"v4GQGxRUH6fX\",\n            \"reff\": \"1753030745JokYBAn\",\n            \"client_reff\": \"CFuPkj3djyhgkcHx846Qvy\",\n            \"name\": \"Sahtia Qr\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 1373356,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"PCItGQBH18yJ\",\n            \"reff\": \"1753030745lJJNe8v\",\n            \"client_reff\": \"CFlK6qH75DbqArovnZ5Sax\",\n            \"name\": \"Sahtia Qr\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 9136003,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"ZQCgMZe86As7\",\n            \"reff\": \"17530307455A4wAkK\",\n            \"client_reff\": \"CF8kFoXf2DZQalTjJ2pkmQ\",\n            \"name\": \"QR Prof. Osvaldo D'Amore I\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        },\n        {\n            \"amount\": 5522418,\n            \"payment_url\": null,\n            \"content\": \"\",\n            \"return_url\": null,\n            \"status\": \"success\",\n            \"rrn\": \"hXa3Bxo6CZT3\",\n            \"reff\": \"1753030745mYshoWs\",\n            \"client_reff\": \"CF98XBr6cIpXtL0xMmJzaJ\",\n            \"name\": \"QR Omari Kiehn\",\n            \"remark\": null,\n            \"paid_at\": \"2025-07-20T16:59:05.000000Z\",\n            \"expired_at\": \"2025-07-20T17:59:05.000000Z\",\n            \"created_at\": \"2025-07-20T16:59:05.000000Z\"\n        }\n    ],\n    \"current_page\": 1,\n    \"per_page\": 15,\n    \"total\": 1268015,\n    \"last_page\": 84535,\n    \"from\": 1,\n    \"to\": 15,\n    \"has_next_page\": true,\n    \"next_page_url\": \"http://localhost:8000/api/v2/transaction/cashin/history?page=2\",\n    \"prev_page_url\": null\n}"
+						}
+					]
+				},
+				{
+					"name": "Check",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"reff\": \"{{reff}}\",\r\n    \"client_reff\": \"{{client_reff}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/check",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"cashin",
+								"check"
+							]
+						},
+						"description": "your balance will be deduct based on `total` parameter in inquiry response.\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Optional | reff | unique_id from our side to reconcile transaction or validate transaction |\n| Optional | client_reff | unique_id from client to reconcile transaction or validate transaction |"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"reff\": \"{{reff}}\",\r\n    \"client_reff\": \"{{client_reff}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashin/check",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"cashin",
+										"check"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 03 Jun 2025 14:18:47 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Content-Length",
+									"value": "364"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "Nel",
+									"value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "private, must-revalidate"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "Expires",
+									"value": "-1"
+								},
+								{
+									"key": "Pragma",
+									"value": "no-cache"
+								},
+								{
+									"key": "Vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.4.7"
+								},
+								{
+									"key": "Cf-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=DbCUDpfHBESRhRd1R4Dsa%2B9bpoSnFwsMdqiGMSTYfuqe%2B5QD3BAiq9k3%2FvXFCHyS1oi8tl%2FiOkf1%2Fhfed79ENZg4PsFcmxD4b%2FH5DFJ5tFctAA%3D%3D\"}]}"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "949fd25ccf1a9e3e-SIN"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"check status cash-in transaction\",\n    \"data\": {\n        \"amount\": 10000,\n        \"payment_url\": null,\n        \"content\": \"00020101021226660015COM.INACASH.WWW01189360083165430980750214INAC74170987120303UKE51440014ID.CO.QRIS.WWW0215ID20253989030420303UKE5204737253033605405100005802ID5913Bayar Digital6008Semarang610550132622105171748960275QG1HNug6304929D\",\n        \"return_url\": \"https://google.com\",\n        \"status\": \"pending\",\n        \"rrn\": null,\n        \"remark\": \"remark-4\",\n        \"paid_at\": null,\n        \"expired_at\": \"2025-06-03T14:27:55.000000Z\",\n        \"created_at\": \"2025-06-03T14:17:55.000000Z\"\n    },\n    \"reff\": \"1748960275QG1HNug\",\n    \"client_reff\": \"test-7-2\",\n    \"product_code\": \"QRIS\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Payment Notification / Callback / Webhook",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{CLIENT_CALLBACK_URL}}?reff=1748855522LSxXqSF&client_reff=CB20250602161270211329&rrn=quscfMfTW607&status=success&amount=15000&total=15000&remark=CB20250602161270211329&expired_at=2025-06-02+17%3A12%3A02&paid_at=2025-06-02+16%3A12%3A28&created_at=2025-06-02+16%3A12%3A02",
+							"host": [
+								"{{CLIENT_CALLBACK_URL}}"
+							],
+							"query": [
+								{
+									"key": "reff",
+									"value": "1748855522LSxXqSF"
+								},
+								{
+									"key": "client_reff",
+									"value": "CB20250602161270211329"
+								},
+								{
+									"key": "rrn",
+									"value": "quscfMfTW607"
+								},
+								{
+									"key": "status",
+									"value": "success"
+								},
+								{
+									"key": "amount",
+									"value": "15000"
+								},
+								{
+									"key": "total",
+									"value": "15000"
+								},
+								{
+									"key": "remark",
+									"value": "CB20250602161270211329"
+								},
+								{
+									"key": "expired_at",
+									"value": "2025-06-02+17%3A12%3A02"
+								},
+								{
+									"key": "paid_at",
+									"value": "2025-06-02+16%3A12%3A28"
+								},
+								{
+									"key": "created_at",
+									"value": "2025-06-02+16%3A12%3A02"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Cash Out",
+			"item": [
+				{
+					"name": "List Product",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "",
+								"value": "",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/product",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"product"
+							]
+						},
+						"description": "get product code to make inquiry, you can save the product code, usually product code doesn't change"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "",
+										"value": "",
+										"disabled": true
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/product",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"product"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Fri, 12 Jul 2024 10:33:35 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.0.30"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "X-RateLimit-Limit",
+									"value": "60"
+								},
+								{
+									"key": "X-RateLimit-Remaining",
+									"value": "59"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Vary",
+									"value": "Authorization"
+								},
+								{
+									"key": "CF-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"endpoints\":[{\"url\":\"https:\\/\\/a.nel.cloudflare.com\\/report\\/v4?s=QtXh4AedLADQRwEf8Hw5M7YdvgCuNLB4a%2FobMOsbYk6GawdmCjlvGMSU0xgWhMoZ%2FglThG4J6J1R5z3PvjiZZSNL9Yep8QnQu26ssiPuALnRPd%2FzHVb59yYwjoF8ZvVDLkud9eoXQqk0ILHL3DHw\"}],\"group\":\"cf-nel\",\"max_age\":604800}"
+								},
+								{
+									"key": "NEL",
+									"value": "{\"success_fraction\":0,\"report_to\":\"cf-nel\",\"max_age\":604800}"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "8a206024bc6bdf7c-CGK"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"rc\": 0,\n  \"message\": \"successfully get all products\",\n  \"data\": {\n    \"categories\": [\n      {\n        \"id\": 2,\n        \"name\": \"Tagihan / PPOB\",\n        \"info\": null,\n        \"icon\": null,\n        \"color_background\": \"#000000\",\n        \"color_text\": \"#000000\",\n        \"reorder\": 0,\n        \"product_group_ones\": [\n          {\n            \"id\": 7,\n            \"name\": \"Tagihan PLN\",\n            \"info\": null,\n            \"icon\": null,\n            \"color_background\": \"#000000\",\n            \"color_text\": \"#000000\",\n            \"reorder\": 0,\n            \"product_category_id\": 2,\n            \"product_group_twos\": [\n              {\n                \"id\": 21,\n                \"name\": \"PLN Postpaid\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": \"#000000\",\n                \"color_text\": \"#000000\",\n                \"reorder\": 0,\n                \"product_group_one_id\": 7,\n                \"products\": [\n                  {\n                    \"id\": 590,\n                    \"code\": \"PLNPOSTPAID\",\n                    \"name\": \"Tagihan PLN\",\n                    \"info\": \"PLN admin 3000\",\n                    \"icon\": null,\n                    \"color_background\": \"#000000\",\n                    \"color_text\": \"#000000\",\n                    \"reorder\": 0,\n                    \"price\": 0,\n                    \"markup\": 1000,\n                    \"admin\": 3000,\n                    \"product_group_two_id\": 21,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              }\n            ]\n          }\n        ]\n      },\n      {\n        \"id\": 1,\n        \"name\": \"Voucher / Top Up\",\n        \"info\": null,\n        \"icon\": null,\n        \"color_background\": \"#000000\",\n        \"color_text\": \"#000000\",\n        \"reorder\": 1,\n        \"product_group_ones\": [\n          {\n            \"id\": 2,\n            \"name\": \"Pulsa\",\n            \"info\": null,\n            \"icon\": null,\n            \"color_background\": null,\n            \"color_text\": null,\n            \"reorder\": 0,\n            \"product_category_id\": 1,\n            \"product_group_twos\": [\n              {\n                \"id\": 2,\n                \"name\": \"XL/Axis\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 2,\n                \"products\": [\n                  {\n                    \"id\": 4,\n                    \"code\": \"X5\",\n                    \"name\": \"Pulsa XL/Axis 5k\",\n                    \"info\": \"Isi Pulsa XL/Axis 5.000 (+Masa Aktif 10 hari)\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 4,\n                    \"price\": 5850,\n                    \"markup\": 10,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 2,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  }\n                ]\n              }\n            ]\n          },\n          {\n            \"id\": 5,\n            \"name\": \"Transfer Bank\",\n            \"info\": null,\n            \"icon\": null,\n            \"color_background\": null,\n            \"color_text\": null,\n            \"reorder\": 0,\n            \"product_category_id\": 1,\n            \"product_group_twos\": [\n              {\n                \"id\": 15,\n                \"name\": \"Transfer Ke BCA (Bank Central Asia)\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 5,\n                \"products\": [\n                  {\n                    \"id\": 591,\n                    \"code\": \"BCA_BACKUP\",\n                    \"name\": \"BCA Backup\",\n                    \"info\": null,\n                    \"icon\": null,\n                    \"color_background\": \"#000000\",\n                    \"color_text\": \"#000000\",\n                    \"reorder\": 0,\n                    \"price\": 0,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 15,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 561,\n                    \"code\": \"TRF_BCA\",\n                    \"name\": \"Transfer Ke BCA\",\n                    \"info\": \"Transfer ke rekening BCA (Bank Central Asia)\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 1,\n                    \"price\": 1500,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 15,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              },\n              {\n                \"id\": 16,\n                \"name\": \"Transfer Ke BNI (Bank Negara Indonesia)\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 5,\n                \"products\": [\n                  {\n                    \"id\": 592,\n                    \"code\": \"BNI_BACKUP\",\n                    \"name\": \"BNI Backup\",\n                    \"info\": null,\n                    \"icon\": null,\n                    \"color_background\": \"#000000\",\n                    \"color_text\": \"#000000\",\n                    \"reorder\": 0,\n                    \"price\": 0,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 16,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 562,\n                    \"code\": \"TRF_BNI\",\n                    \"name\": \"Transfer Ke BNI\",\n                    \"info\": \"Transfer ke rekening BNI (Bank Negara Indonesia)\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 2,\n                    \"price\": 1500,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 16,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              },\n              {\n                \"id\": 17,\n                \"name\": \"Transfer Ke Mandiri\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 5,\n                \"products\": [\n                  {\n                    \"id\": 593,\n                    \"code\": \"MANDIRI_BACKUP\",\n                    \"name\": \"MANDIRI Backup\",\n                    \"info\": null,\n                    \"icon\": null,\n                    \"color_background\": \"#000000\",\n                    \"color_text\": \"#000000\",\n                    \"reorder\": 0,\n                    \"price\": 0,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 17,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 563,\n                    \"code\": \"TRF_MANDIRI\",\n                    \"name\": \"Transfer Ke MANDIRI\",\n                    \"info\": \"Transfer ke rekening Mandiri\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 3,\n                    \"price\": 1500,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 17,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              },\n              {\n                \"id\": 18,\n                \"name\": \"Transfer Ke BRI (Bank Rakyat Indonesia)\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 5,\n                \"products\": [\n                  {\n                    \"id\": 564,\n                    \"code\": \"TRF_BRI\",\n                    \"name\": \"Transfer Ke BRI\",\n                    \"info\": \"Transfer ke rekening BRI (Bank Rakyat Indonesia)\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 4,\n                    \"price\": 1500,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 18,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              },\n              {\n                \"id\": 39,\n                \"name\": \"Transfer ke Bank China Construction Bank Indonesia\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 5,\n                \"products\": [\n                  {\n                    \"id\": 630,\n                    \"code\": \"TRF_CCB\",\n                    \"name\": \"Transfer ke Bank China Construction Bank Indonesia\",\n                    \"info\": \"Transfer ke Bank China Construction Bank Indonesia\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 20,\n                    \"price\": 1500,\n                    \"markup\": 1500,\n                    \"admin\": 2500,\n                    \"product_group_two_id\": 39,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              }\n            ]\n          },\n          {\n            \"id\": 6,\n            \"name\": \"EWallet\",\n            \"info\": null,\n            \"icon\": null,\n            \"color_background\": null,\n            \"color_text\": null,\n            \"reorder\": 0,\n            \"product_category_id\": 1,\n            \"product_group_twos\": [\n              {\n                \"id\": 20,\n                \"name\": \"OVO\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 6,\n                \"products\": [\n                  {\n                    \"id\": 566,\n                    \"code\": \"ISI SALDO OVO 10k\",\n                    \"name\": \"ISI SALDO OVO 10k\",\n                    \"info\": \"ISI SALDO OVO 10k\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 1,\n                    \"price\": 10550,\n                    \"markup\": 350,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 20,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 567,\n                    \"code\": \"ISI SALDO OVO 15k\",\n                    \"name\": \"ISI SALDO OVO 15k\",\n                    \"info\": \"ISI SALDO OVO 15k\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 2,\n                    \"price\": 15550,\n                    \"markup\": 350,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 20,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  }\n                ]\n              },\n              {\n                \"id\": 146,\n                \"name\": \"DANA\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": \"#000000\",\n                \"color_text\": \"#000000\",\n                \"reorder\": 0,\n                \"product_group_one_id\": 6,\n                \"products\": [\n                  {\n                    \"id\": 737,\n                    \"code\": \"DANAOPEN75\",\n                    \"name\": \"DANA Open Denom\",\n                    \"info\": null,\n                    \"icon\": null,\n                    \"color_background\": \"#000000\",\n                    \"color_text\": \"#000000\",\n                    \"reorder\": 0,\n                    \"price\": 5075,\n                    \"markup\": 200,\n                    \"admin\": 1000,\n                    \"product_group_two_id\": 146,\n                    \"price_type_id\": 1,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 1,\n                      \"name\": \"POSTPAID\"\n                    }\n                  }\n                ]\n              }\n            ]\n          },\n          {\n            \"id\": 1,\n            \"name\": \"Token PLN\",\n            \"info\": null,\n            \"icon\": null,\n            \"color_background\": \"#000000\",\n            \"color_text\": \"#000000\",\n            \"reorder\": 1,\n            \"product_category_id\": 1,\n            \"product_group_twos\": [\n              {\n                \"id\": 13,\n                \"name\": \"PLN\",\n                \"info\": null,\n                \"prefix\": null,\n                \"icon\": null,\n                \"color_background\": null,\n                \"color_text\": null,\n                \"reorder\": 0,\n                \"product_group_one_id\": 1,\n                \"products\": [\n                  {\n                    \"id\": 554,\n                    \"code\": \"PLN TOKEN 20K FULL REPLY\",\n                    \"name\": \"TOKEN 20K FULL REPLY\",\n                    \"info\": \"TOKEN 20K FULL REPLY\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 332,\n                    \"price\": 20030,\n                    \"markup\": 250,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 13,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 555,\n                    \"code\": \"PLN TOKEN 50K FULL REPLY\",\n                    \"name\": \"TOKEN 50K FULL REPLY\",\n                    \"info\": \"TOKEN 50K FULL REPLY\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 333,\n                    \"price\": 50030,\n                    \"markup\": 250,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 13,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  },\n                  {\n                    \"id\": 556,\n                    \"code\": \"PLN TOKEN 100K FULL REPLY\",\n                    \"name\": \"TOKEN 100K FULL REPLY\",\n                    \"info\": \"TOKEN 100K FULL REPLY\",\n                    \"icon\": null,\n                    \"color_background\": null,\n                    \"color_text\": null,\n                    \"reorder\": 334,\n                    \"price\": 100030,\n                    \"markup\": 250,\n                    \"admin\": 0,\n                    \"product_group_two_id\": 13,\n                    \"price_type_id\": 2,\n                    \"markup_user\": 0,\n                    \"price_type\": {\n                      \"id\": 2,\n                      \"name\": \"PREPAID\"\n                    }\n                  }\n                ]\n              }\n            ]\n          }\n        ]\n      }\n    ]\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "Inquiry",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"product_code\": \"{{product_code}}\",\r\n    \"custno\": \"{{custno}}\",\r\n    \"amount\": {{amount}},\r\n    \"remark\": \"{{remark}}\",\r\n    \"client_reff\": \"{{client_reff}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/inquiry",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"inquiry"
+							]
+						},
+						"description": "your balance will be deduct based on `total` parameter in inquiry response.\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | product_code | get from list product Endpoint |\n| Mandatory | custno | destination number / bank account number / phone number |\n| Optional | amount | fill amount parameter with open denom/amount product like E-Wallet/Disbursment |\n| Optional | remark | remark will be send to customer (if the biller support) |\n| Optional | client_reff | unique_id from client to reconcile transaction or validate transaction |"
+					},
+					"response": [
+						{
+							"name": "DANA Open - Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"product_code\": \"{{product_code}}\",\r\n    \"custno\": \"{{custno}}\",\r\n    \"amount\": {{amount}},\r\n    \"remark\": \"{{remark}}\",\r\n    \"client_reff\": \"{{client_reff}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/inquiry",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"inquiry"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Sat, 19 Jul 2025 12:33:20 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "Nel",
+									"value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cf-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=OnDLguU77moYmjZcZx0fDyNhFOCyF0Ny5wESwkAXBa7adUiDBce35AkAPlDJ8nh6%2FYrZN43VXwPZnFWIsVhZljYL%2F7K%2FOVg04jUmnI1lqYKYpfDwAQFnzBoo6RI%3D\"}]}"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "961a3f22b864ce09-SIN"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"successfuly\",\n    \"data\": {\n        \"item\": {\n            \"custno\": \"085939753687\",\n            \"custname\": \"\",\n            \"code\": \"DANAOPEN\",\n            \"name\": \"DANA Open Denom\",\n            \"info\": \"\",\n            \"price\": 20000,\n            \"admin\": 1000,\n            \"markup\": 1500,\n            \"merchant_admin\": 0,\n            \"total\": 21500,\n            \"total_price\": 21000\n        },\n        \"raw\": \"Konfirmasi Transaksi||Produk  : DANA Open Denom||ID Pel  : 085939753687||Nama    : ||Ket     : ||Harga   : Rp 20.000||Admin   : Rp 1.000||Adm Trx : Rp 0||Total   : Rp 21.000||\",\n        \"reff\": \"1752928400dFBXV4Z\",\n        \"client_reff\": \"test-cmi-0064\"\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Payment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"reff\": \"{{reff}}\",\r\n    \"pin\": \"{{pin}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/payment",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"payment"
+							]
+						},
+						"description": "Your balance will deduct if the payment response is SUCCESS(rc:0) or PENDING(rc:91) based on `total` paramter in payment response. if you get PENDING(rc:91) response you need to wait the Callback for a valid status.\n\nCallback will be send to your registered link with GET method in 1 - 2 second after doing Payment, you can validate callback with payment reff and update transaction status with SUCCESS(rc:0) or FAILED(rc:99). if the callback status FAILED(rc:99) we will refund your balance.\n\nYou can see list balance mutation in Billers Engine Dashboard\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | reff | get from inquiry Endpoint |\n| Optional | pin | fill if your activate this feature (if not just set to NULL) |"
+					},
+					"response": [
+						{
+							"name": "Failed",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json",
+										"type": "text"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{TOKEN}}",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"reff\": \"1697782936GTY\",\r\n    \"pin\": \"123456\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/payment",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"payment"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Host",
+									"value": "localhost:8000"
+								},
+								{
+									"key": "Date",
+									"value": "Fri, 20 Oct 2023 06:23:04 GMT"
+								},
+								{
+									"key": "Date",
+									"value": "Fri, 20 Oct 2023 06:23:04 GMT"
+								},
+								{
+									"key": "Connection",
+									"value": "close"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.2.11"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "X-RateLimit-Limit",
+									"value": "60"
+								},
+								{
+									"key": "X-RateLimit-Remaining",
+									"value": "58"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 99,\n    \"message\": \"gagal payment\",\n    \"data\": {\n        \"item\": {\n            \"product_id\": 1,\n            \"custno\": \"085939753687\",\n            \"name\": \"PULSA XL AXIS REGULER 5.000\",\n            \"info\": \"\",\n            \"code\": \"X5\",\n            \"supplier_code\": null,\n            \"supplier_name\": null,\n            \"supplier_reff\": null,\n            \"reff\": \"1697782936GTY\",\n            \"price\": 6959,\n            \"markup\": 200,\n            \"markup_user\": 0,\n            \"merchant_admin\": 5000,\n            \"admin\": 0,\n            \"total\": 7159,\n            \"receipt_header\": \"sadmin header\",\n            \"receipt_footer\": \"sadmin footer\"\n        },\n        \"raw\": \"Transaksi gagal||Produk   : PULSA XL AXIS REGULER 5.000||ID Pel   : 085939753687||Tgl Bayar: 2023-10-20 13:23:04||Reff     : 1697782936GTY||Ket      : ||Harga    : Rp 7.159||Adm Trx  : Rp 5.000||Total    : Rp 12.159||\",\n        \"reff\": \"1697782936GTY\",\n        \"code\": \"X5\"\n    },\n    \"last_balance\": 12906\n}"
+						},
+						{
+							"name": "Pending",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"reff\": \"{{reff}}\",\r\n    \"pin\": \"{{pin}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/payment",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"payment"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Fri, 12 Jul 2024 10:32:09 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.0.30"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "X-RateLimit-Limit",
+									"value": "60"
+								},
+								{
+									"key": "X-RateLimit-Remaining",
+									"value": "58"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Vary",
+									"value": "Authorization"
+								},
+								{
+									"key": "CF-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"endpoints\":[{\"url\":\"https:\\/\\/a.nel.cloudflare.com\\/report\\/v4?s=52fnl8wi3o9toYy2h11Dxk39YUWzqrwSYwI1W9i0RpCoDO91UjncKP71ZXrwqVf9y20sz27JNRIrlJro2Wb1NrtVD%2BAaX8ROaKSf%2F2PQDl703aug%2Fnwl9Gy1Xva5PweRsYiIR3xHRJM%2B9DWtHMBg\"}],\"group\":\"cf-nel\",\"max_age\":604800}"
+								},
+								{
+									"key": "NEL",
+									"value": "{\"success_fraction\":0,\"report_to\":\"cf-nel\",\"max_age\":604800}"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "8a205e230889df7c-CGK"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 91,\n    \"message\": \"PENDING payment\",\n    \"data\": {\n        \"item\": {\n            \"product_id\": 737,\n            \"custno\": \"085939753687\",\n            \"name\": \"DANA Open Denom\",\n            \"info\": \"\",\n            \"code\": \"DANAOPEN75\",\n            \"supplier_code\": null,\n            \"supplier_name\": null,\n            \"supplier_reff\": \"1720780313wzL\",\n            \"reff\": \"1720780313wzL\",\n            \"price\": 5000,\n            \"markup\": 200,\n            \"markup_user\": 0,\n            \"merchant_admin\": 0,\n            \"admin\": 1000,\n            \"total\": 5800,\n            \"receipt_header\": null,\n            \"receipt_footer\": null\n        },\n        \"raw\": \"Transaksi PENDING||Produk   : DANA Open Denom||ID Pel   : 085939753687||Tgl Bayar: 2024-07-12 17:32:09||Reff     : 1720780313wzL||Ket      : ||Harga    : Rp 5.800||Adm Trx  : Rp 0||Total    : Rp 5.800||\",\n        \"reff\": \"1720780313wzL\",\n        \"code\": \"DANAOPEN75\"\n    },\n    \"last_balance\": 247903\n}"
+						},
+						{
+							"name": "DANA Open - Payment",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"reff\": \"{{reff}}\",\r\n    \"pin\": \"{{pin}}\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/payment",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"payment"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Date",
+									"value": "Sat, 19 Jul 2025 12:34:12 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "Nel",
+									"value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cf-Cache-Status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Report-To",
+									"value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=9lkBiq4OpIsBd%2FwUOikR8zrqPw5oct0FhvS6atuHDq9ONLx7yYRMYokI0rYf0AyVzUUA6ajP1f9PHz9ERDl1TGFHZ6uQfSerLyrtc5lagxnGdYhmecyZwOAhNbc%3D\"}]}"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "961a406cb962ce09-SIN"
+								},
+								{
+									"key": "alt-svc",
+									"value": "h3=\":443\"; ma=86400"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 91,\n    \"message\": \"PENDING payment\",\n    \"data\": {\n        \"item\": {\n            \"product_id\": 737,\n            \"custno\": \"085939753687\",\n            \"custname\": \"\",\n            \"name\": \"DANA Open Denom\",\n            \"info\": \"\",\n            \"code\": \"DANAOPEN\",\n            \"supplier_code\": null,\n            \"supplier_name\": null,\n            \"supplier_reff\": \"1752928400dFBXV4Z\",\n            \"reff\": \"1752928400dFBXV4Z\",\n            \"client_reff\": \"test-cmi-0064\",\n            \"sn\": null,\n            \"price\": 21500,\n            \"markup\": 0,\n            \"markup_user\": 0,\n            \"merchant_admin\": 0,\n            \"admin\": 1000,\n            \"total\": 21500,\n            \"total_price\": 21000,\n            \"receipt_header\": null,\n            \"receipt_footer\": null\n        },\n        \"raw\": \"Transaksi PENDING||Produk   : DANA Open Denom||ID Pel   : 085939753687||Nama     : ||Tgl Bayar: 2025-07-19 19:34:12||Reff     : 1752928400dFBXV4Z||Ket      : ||Harga    : Rp 21.500||Adm Trx  : Rp 0||Total    : Rp 21.000||\",\n        \"reff\": \"1752928400dFBXV4Z\",\n        \"client_reff\": \"test-cmi-0064\",\n        \"code\": \"DANAOPEN\"\n    },\n    \"last_balance\": 336222\n}"
+						}
+					]
+				},
+				{
+					"name": "History",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"limit\": 10,\r\n    \"offset\": 0,\r\n    \"start_date\": \"2025-07-20\",\r\n    \"end_date\": \"2025-07-23\",\r\n    \"reff\": \"{{reff}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/history",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"history"
+							]
+						},
+						"description": "to get history transaction and detail transaction status\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | limit | total data will show (max:500) |\n| Optional | start_date | if not set will set today |\n| Optional | end_date | if not set NULL will set today |\n| Optional | reff | if set will find only this reff |"
+					},
+					"response": [
+						{
+							"name": "History",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json",
+										"type": "text"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{TOKEN}}",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"limit\": 10,\r\n    \"offset\": 0,\r\n    \"start_date\": \"2023-04-14\",\r\n    \"end_date\": \"2023-04-14\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/history",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"history"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Host",
+									"value": "localhost:8000"
+								},
+								{
+									"key": "Date",
+									"value": "Fri, 20 Oct 2023 07:52:16 GMT"
+								},
+								{
+									"key": "Date",
+									"value": "Fri, 20 Oct 2023 07:52:16 GMT"
+								},
+								{
+									"key": "Connection",
+									"value": "close"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.2.11"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "X-RateLimit-Limit",
+									"value": "60"
+								},
+								{
+									"key": "X-RateLimit-Remaining",
+									"value": "59"
+								},
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get history transaction\",\n    \"data\": {\n        \"histories\": [\n            {\n                \"custno\": \"085939123123\",\n                \"price\": 1000,\n                \"admin\": 1000,\n                \"total\": 2000,\n                \"custname\": null,\n                \"sn\": \"DNID SAHXXX MURXX/1000/2024072210121481030100166068421920994\",\n                \"reff\": \"1721644744YWa\",\n                \"client_reff\": \"unique_key_3\",\n                \"period\": null,\n                \"status\": \"SUCCESS\",\n                \"created_at\": \"2024-07-22T10:39:36.000000Z\",\n                \"product_code\": \"DANAOPEN\",\n                \"product_name\": \"DANA Open Denom\",\n                \"product_info\": \"\",\n                \"receipt_header\": null,\n                \"receipt_footer\": null,\n                \"bill_number\": null,\n                \"package\": null,\n                \"category\": null,\n                \"address\": null,\n                \"penalty\": 0,\n                \"raw\": \"[CU] Sukses Transaksi||--------------------------||Produk   : DANA Open Denom||ID Pel   : 085939123123||SN       : DNID SAHXXX MURXX/1000/2024072210121481030100166068421920994||Tgl Bayar: 2024-07-22 17:39:36||Reff     : 1721644744YWa||Harga    : Rp 2.000||Total    : Rp 2.000||||\",\n                \"transaction_report_details\": []\n            }\n        ]\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "History V2",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashout/history?page=1&per_page=15&start_date=&end_date=&client_reff=&reff=&status=&custno",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"transaction",
+								"cashout",
+								"history"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "15"
+								},
+								{
+									"key": "start_date",
+									"value": ""
+								},
+								{
+									"key": "end_date",
+									"value": ""
+								},
+								{
+									"key": "client_reff",
+									"value": ""
+								},
+								{
+									"key": "reff",
+									"value": ""
+								},
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "custno",
+									"value": null
+								}
+							]
+						},
+						"description": "to get history transaction and detail transaction status\n\n| Type | Parameter | Value |\n| --- | --- | --- |\n| Mandatory | limit | total data will show (max:500) |\n| Optional | start_date | if not set will set today |\n| Optional | end_date | if not set NULL will set today |\n| Optional | reff | if set will find only this reff |"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{BASE_URL}}/{{VERSION}}/transaction/cashout/history?page=1&per_page=15&start_date=&end_date=&client_reff=&reff=&status=&custno",
+									"host": [
+										"{{BASE_URL}}"
+									],
+									"path": [
+										"{{VERSION}}",
+										"transaction",
+										"cashout",
+										"history"
+									],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "per_page",
+											"value": "15"
+										},
+										{
+											"key": "start_date",
+											"value": ""
+										},
+										{
+											"key": "end_date",
+											"value": ""
+										},
+										{
+											"key": "client_reff",
+											"value": ""
+										},
+										{
+											"key": "reff",
+											"value": ""
+										},
+										{
+											"key": "status",
+											"value": ""
+										},
+										{
+											"key": "custno",
+											"value": null
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Access-Control-Allow-Origin",
+									"value": "*"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, private"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "br"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 20 Jul 2025 18:53:42 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Caddy"
+								},
+								{
+									"key": "Vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "X-Powered-By",
+									"value": "PHP/8.4.6"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get history transaction cashin\",\n    \"histories\": [\n        {\n            \"custno\": \"2629264\",\n            \"price\": 3461,\n            \"admin\": 3000,\n            \"total\": 3961,\n            \"custname\": \"Margret Turcotte\",\n            \"sn\": null,\n            \"reff\": \"1753029036LCMxgTu\",\n            \"client_reff\": \"CFPOoC5bAATwPzn0Y72fQX\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-9nT\",\n            \"product_name\": \"Mr. Chadd Donnelly\",\n            \"product_info\": \"Letitia Garden\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Mr. Chadd Donnelly||ID Pel   : 2629264||Nama Pel : Margret Turcotte||Ket      : Letitia Garden||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036LCMxgTu||Harga    : Rp 3.961||Total    : Rp 3.961||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"8764184\",\n            \"price\": 5832,\n            \"admin\": 1000,\n            \"total\": 8832,\n            \"custname\": \"Abdullah Walker\",\n            \"sn\": null,\n            \"reff\": \"17530290361Mw5EXd\",\n            \"client_reff\": \"CF8lYjdVwAJeb7xvfTlw6O\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-I0q\",\n            \"product_name\": \"Jo Boehm\",\n            \"product_info\": \"Rath Vista\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Jo Boehm||ID Pel   : 8764184||Nama Pel : Abdullah Walker||Ket      : Rath Vista||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 17530290361Mw5EXd||Harga    : Rp 8.832||Total    : Rp 8.832||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"2045078\",\n            \"price\": 2256,\n            \"admin\": 4000,\n            \"total\": 2556,\n            \"custname\": \"Dr. Manuela Greenholt Jr.\",\n            \"sn\": null,\n            \"reff\": \"1753029036MGo9Q8I\",\n            \"client_reff\": \"CFr0bBekGVUG2vkbdQNu9i\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-RA0\",\n            \"product_name\": \"Mrs. Elfrieda Schulist PhD\",\n            \"product_info\": \"Upton Turnpike\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Mrs. Elfrieda Schulist PhD||ID Pel   : 2045078||Nama Pel : Dr. Manuela Greenholt Jr.||Ket      : Upton Turnpike||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036MGo9Q8I||Harga    : Rp 2.556||Total    : Rp 2.556||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"1017604\",\n            \"price\": 2401,\n            \"admin\": 1000,\n            \"total\": 2801,\n            \"custname\": \"Tamia Metz\",\n            \"sn\": null,\n            \"reff\": \"1753029036xw9zpaH\",\n            \"client_reff\": \"CFeK8JeKVVTvi0Y58ikskk\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-jJf\",\n            \"product_name\": \"Cruz Stoltenberg\",\n            \"product_info\": \"Cortney Heights\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Cruz Stoltenberg||ID Pel   : 1017604||Nama Pel : Tamia Metz||Ket      : Cortney Heights||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036xw9zpaH||Harga    : Rp 2.801||Total    : Rp 2.801||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"1955651\",\n            \"price\": 9109,\n            \"admin\": 1000,\n            \"total\": 14109,\n            \"custname\": \"Mrs. Adrianna Boyle\",\n            \"sn\": null,\n            \"reff\": \"1753029036ZlP0DeV\",\n            \"client_reff\": \"CFnqfpwZAPfNKSvL4DbKb4\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-icz\",\n            \"product_name\": \"Madaline Moore\",\n            \"product_info\": \"Gulgowski Trace\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Madaline Moore||ID Pel   : 1955651||Nama Pel : Mrs. Adrianna Boyle||Ket      : Gulgowski Trace||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036ZlP0DeV||Harga    : Rp 14.109||Total    : Rp 14.109||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"1711209\",\n            \"price\": 9028,\n            \"admin\": 1000,\n            \"total\": 9528,\n            \"custname\": \"Stan Schulist\",\n            \"sn\": null,\n            \"reff\": \"1753029036AFLdgaW\",\n            \"client_reff\": \"CFarEkk9L6wwQq3qjWuPNa\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-hb7\",\n            \"product_name\": \"Prof. Ray Wyman\",\n            \"product_info\": \"Aylin Glens\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Prof. Ray Wyman||ID Pel   : 1711209||Nama Pel : Stan Schulist||Ket      : Aylin Glens||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036AFLdgaW||Harga    : Rp 9.528||Total    : Rp 9.528||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"2467069\",\n            \"price\": 9234,\n            \"admin\": 4000,\n            \"total\": 9734,\n            \"custname\": \"Augustus Prohaska\",\n            \"sn\": null,\n            \"reff\": \"1753029036YvzvA7Z\",\n            \"client_reff\": \"CF1pQ8CRzukAFPcudQNV3o\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-ClR\",\n            \"product_name\": \"Clark Friesen\",\n            \"product_info\": \"Nelda Pass\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Clark Friesen||ID Pel   : 2467069||Nama Pel : Augustus Prohaska||Ket      : Nelda Pass||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036YvzvA7Z||Harga    : Rp 9.734||Total    : Rp 9.734||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"7531555\",\n            \"price\": 9371,\n            \"admin\": 5000,\n            \"total\": 9871,\n            \"custname\": \"Shaun Jaskolski\",\n            \"sn\": null,\n            \"reff\": \"1753029036ljRFHFB\",\n            \"client_reff\": \"CF5tqjymWby26Hfg0YRWVJ\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-ont\",\n            \"product_name\": \"Agnes D'Amore II\",\n            \"product_info\": \"Yessenia Squares\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Agnes D'Amore II||ID Pel   : 7531555||Nama Pel : Shaun Jaskolski||Ket      : Yessenia Squares||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036ljRFHFB||Harga    : Rp 9.871||Total    : Rp 9.871||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"7546887\",\n            \"price\": 4597,\n            \"admin\": 1000,\n            \"total\": 7597,\n            \"custname\": \"Jedidiah Murphy\",\n            \"sn\": null,\n            \"reff\": \"1753029036oy9zdp2\",\n            \"client_reff\": \"CFrRB7seu4zcPkUehT5qw4\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-l3w\",\n            \"product_name\": \"Bernie Dicki\",\n            \"product_info\": \"Boyd Road\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Bernie Dicki||ID Pel   : 7546887||Nama Pel : Jedidiah Murphy||Ket      : Boyd Road||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036oy9zdp2||Harga    : Rp 7.597||Total    : Rp 7.597||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"1982018\",\n            \"price\": 1172,\n            \"admin\": 3000,\n            \"total\": 1572,\n            \"custname\": \"Delores Prosacco DDS\",\n            \"sn\": null,\n            \"reff\": \"1753029036witT77V\",\n            \"client_reff\": \"CF9UhP8zdkqaPeeTTb6VTx\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-lKH\",\n            \"product_name\": \"Prof. Elsa Bayer Jr.\",\n            \"product_info\": \"Tillman Ridge\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Prof. Elsa Bayer Jr.||ID Pel   : 1982018||Nama Pel : Delores Prosacco DDS||Ket      : Tillman Ridge||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036witT77V||Harga    : Rp 1.572||Total    : Rp 1.572||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"6946547\",\n            \"price\": 4150,\n            \"admin\": 4000,\n            \"total\": 7150,\n            \"custname\": \"Miss Amya Wyman\",\n            \"sn\": null,\n            \"reff\": \"1753029036j0IXMnH\",\n            \"client_reff\": \"CFZcWQkbTaQ4FRs7FFiBuk\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-UsZ\",\n            \"product_name\": \"Abdullah O'Hara\",\n            \"product_info\": \"Howell Ports\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Abdullah O'Hara||ID Pel   : 6946547||Nama Pel : Miss Amya Wyman||Ket      : Howell Ports||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036j0IXMnH||Harga    : Rp 7.150||Total    : Rp 7.150||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"8654950\",\n            \"price\": 8093,\n            \"admin\": 3000,\n            \"total\": 8493,\n            \"custname\": \"Jarrod Hackett\",\n            \"sn\": null,\n            \"reff\": \"1753029036753zxdf\",\n            \"client_reff\": \"CFZVWTxVYyxxcpwmPiLnCo\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-T43\",\n            \"product_name\": \"Ronaldo Sauer\",\n            \"product_info\": \"Ritchie River\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Ronaldo Sauer||ID Pel   : 8654950||Nama Pel : Jarrod Hackett||Ket      : Ritchie River||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036753zxdf||Harga    : Rp 8.493||Total    : Rp 8.493||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"215673\",\n            \"price\": 3212,\n            \"admin\": 5000,\n            \"total\": 4212,\n            \"custname\": \"Velma Labadie DDS\",\n            \"sn\": null,\n            \"reff\": \"175302903670mWlfK\",\n            \"client_reff\": \"CFU1oZWI407ULqrENhYOdO\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-7Wx\",\n            \"product_name\": \"Cordie Fahey\",\n            \"product_info\": \"Carmel Crest\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Cordie Fahey||ID Pel   : 215673||Nama Pel : Velma Labadie DDS||Ket      : Carmel Crest||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 175302903670mWlfK||Harga    : Rp 4.212||Total    : Rp 4.212||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"3031471\",\n            \"price\": 6335,\n            \"admin\": 5000,\n            \"total\": 7335,\n            \"custname\": \"Ramona Pacocha\",\n            \"sn\": null,\n            \"reff\": \"1753029036BkPwJaQ\",\n            \"client_reff\": \"CF36tRDx1ErvFLebRGlhfv\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-oX2\",\n            \"product_name\": \"Prof. Uriel King\",\n            \"product_info\": \"Abbey Springs\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Prof. Uriel King||ID Pel   : 3031471||Nama Pel : Ramona Pacocha||Ket      : Abbey Springs||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036BkPwJaQ||Harga    : Rp 7.335||Total    : Rp 7.335||||\",\n            \"transaction_report_details\": []\n        },\n        {\n            \"custno\": \"5526260\",\n            \"price\": 733,\n            \"admin\": 2000,\n            \"total\": 833,\n            \"custname\": \"Stan Turner\",\n            \"sn\": null,\n            \"reff\": \"1753029036gfXsJNP\",\n            \"client_reff\": \"CFmHIySII5LdcNcg5dO4vq\",\n            \"period\": null,\n            \"status\": \"FAILED\",\n            \"created_at\": \"2025-07-20T16:30:36.000000Z\",\n            \"product_code\": \"PC-fnu\",\n            \"product_name\": \"Kaleigh Lowe\",\n            \"product_info\": \"Ruby Falls\",\n            \"receipt_header\": null,\n            \"receipt_footer\": null,\n            \"bill_number\": null,\n            \"package\": null,\n            \"category\": null,\n            \"address\": null,\n            \"penalty\": 0,\n            \"raw\": \"[CU] Gagal Transaksi||--------------------------||Produk   : Kaleigh Lowe||ID Pel   : 5526260||Nama Pel : Stan Turner||Ket      : Ruby Falls||Tgl Bayar: 2025-07-20 23:30:36||Reff     : 1753029036gfXsJNP||Harga    : Rp 833||Total    : Rp 833||||\",\n            \"transaction_report_details\": []\n        }\n    ],\n    \"current_page\": 1,\n    \"per_page\": 15,\n    \"total\": 386567,\n    \"last_page\": 25772,\n    \"from\": 1,\n    \"to\": 15,\n    \"has_next_page\": true,\n    \"next_page_url\": \"http://localhost:8000/api/v2/transaction/cashout/history?page=2\",\n    \"prev_page_url\": null\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Login",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"email\": \"{{email}}\",\r\n    \"password\": \"{{password}}\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/login",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"login"
+					]
+				},
+				"description": "get token just one time and use in `Authorization` header to make next request"
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer -"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"email\": \"member@gmail.com\",\r\n    \"password\": \"namasaya\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/login",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"login"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Host",
+							"value": "localhost:8000"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:08 GMT"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:08 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "close"
+						},
+						{
+							"key": "X-Powered-By",
+							"value": "PHP/8.2.11"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "X-RateLimit-Limit",
+							"value": "60"
+						},
+						{
+							"key": "X-RateLimit-Remaining",
+							"value": "58"
+						},
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully login\",\n    \"data\": {\n        \"user\": {\n            \"id\": 2,\n            \"fullname\": \"Member Text\",\n            \"email\": \"[[email]]\",\n            \"phone\": \"0812312312322\",\n            \"info\": null,\n            \"referal\": null,\n            \"avatar\": null,\n            \"born\": null,\n            \"gender\": null,\n            \"role_id\": 2,\n            \"mobile_app_id\": 1,\n            \"created_at\": \"2022-10-15T04:41:33+07:00\",\n            \"updated_at\": \"2023-09-30T06:19:48+07:00\",\n            \"deleted_at\": null,\n            \"address_id\": null,\n            \"price_group_id\": 1,\n            \"fcm_token\": null,\n            \"ktp_address_id\": null,\n            \"referal_1\": null,\n            \"referal_2\": null,\n            \"referal_3\": null,\n            \"referal_4\": null,\n            \"referal_5\": null,\n            \"pin\": null,\n            \"url_callback\": null\n        },\n        \"token\": \"[[TOKEN_AUTHENTICATION]]\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "Balance",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/balance",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"balance"
+					]
+				},
+				"description": "get you last balance in our Billers Engine"
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{TOKEN}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/balance",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"balance"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Host",
+							"value": "localhost:8000"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "close"
+						},
+						{
+							"key": "X-Powered-By",
+							"value": "PHP/8.2.11"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "X-RateLimit-Limit",
+							"value": "60"
+						},
+						{
+							"key": "X-RateLimit-Remaining",
+							"value": "59"
+						},
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get last balance\",\n    \"data\": {\n        \"balance\": 12906\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "Balance V2",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/balance",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"balance"
+					]
+				},
+				"description": "get you last balance in our Billers Engine"
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{TOKEN}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/balance",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"balance"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Host",
+							"value": "localhost:8000"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "close"
+						},
+						{
+							"key": "X-Powered-By",
+							"value": "PHP/8.2.11"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "X-RateLimit-Limit",
+							"value": "60"
+						},
+						{
+							"key": "X-RateLimit-Remaining",
+							"value": "59"
+						},
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get last balance\",\n    \"data\": {\n        \"balance\": 12906\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "Balance Mutation",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{TOKEN}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/balance_mutation",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"balance_mutation"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{TOKEN}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/balance_mutation",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"balance_mutation"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Date",
+							"value": "Fri, 11 Apr 2025 03:34:45 GMT"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						},
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Server",
+							"value": "cloudflare"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						},
+						{
+							"key": "Cf-Cache-Status",
+							"value": "DYNAMIC"
+						},
+						{
+							"key": "Content-Encoding",
+							"value": "br"
+						},
+						{
+							"key": "CF-RAY",
+							"value": "92e76e178a44d47d-SIN"
+						},
+						{
+							"key": "alt-svc",
+							"value": "h3=\":443\"; ma=86400"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get balance mutation\",\n    \"data\": {\n        \"balances\": [\n            {\n                \"id\": 1098392,\n                \"info\": \"Settlement 2025-04-02\",\n                \"debit\": 0,\n                \"credit\": 450000,\n                \"total\": 581895,\n                \"prosesby\": \"sadmin@gmail.com\",\n                \"user_id\": 5,\n                \"created_at\": \"2025-04-11T10:34:40+07:00\",\n                \"updated_at\": \"2025-04-11T10:34:40+07:00\",\n                \"client_reff\": null,\n                \"reff\": null\n            }\n        ]\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "Balance Mutation V2",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{TOKEN}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/balance_mutation?start_date=2023-01-01&end_date=2025-07-21",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"balance_mutation"
+					],
+					"query": [
+						{
+							"key": "start_date",
+							"value": "2023-01-01"
+						},
+						{
+							"key": "end_date",
+							"value": "2025-07-21"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{TOKEN}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/balance_mutation?start_date=2023-01-01&end_date=2025-07-21",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"balance_mutation"
+							],
+							"query": [
+								{
+									"key": "start_date",
+									"value": "2023-01-01"
+								},
+								{
+									"key": "end_date",
+									"value": "2025-07-21"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Content-Encoding",
+							"value": "br"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "Date",
+							"value": "Sun, 20 Jul 2025 19:27:25 GMT"
+						},
+						{
+							"key": "Server",
+							"value": "Caddy"
+						},
+						{
+							"key": "Vary",
+							"value": "Accept-Encoding"
+						},
+						{
+							"key": "X-Powered-By",
+							"value": "PHP/8.4.6"
+						},
+						{
+							"key": "Content-Length",
+							"value": "332"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get balance mutation\",\n    \"balances\": [\n        {\n            \"info\": \"Refund Transaksi OVOOPEN#1748867150J3Q1kon#085711328636#OVO M.JAFAR\",\n            \"debit\": 0,\n            \"credit\": 51200,\n            \"total\": 263200,\n            \"created_at\": \"2025-06-02T12:31:59.980651Z\",\n            \"client_reff\": null,\n            \"reff\": \"1748867150J3Q1kon\"\n        },\n        {\n            \"info\": \"Refund Transaksi TRF_BRI#1748867180OD3TrXA#321501025501532#DANDI KUSUMAJAYA\",\n            \"debit\": 0,\n            \"credit\": 212000,\n            \"total\": 212000,\n            \"created_at\": \"2025-06-02T12:31:15.499166Z\",\n            \"client_reff\": null,\n            \"reff\": \"1748867180OD3TrXA\"\n        },\n        {\n            \"info\": \"Saldo\",\n            \"debit\": 0,\n            \"credit\": 0,\n            \"total\": 0,\n            \"created_at\": \"2025-06-02T12:31:15.497918Z\",\n            \"client_reff\": null,\n            \"reff\": \"1748867180OD3TrXA\"\n        }\n    ],\n    \"current_page\": 1,\n    \"per_page\": 15,\n    \"total\": 3,\n    \"last_page\": 1,\n    \"from\": 1,\n    \"to\": 3,\n    \"has_next_page\": false,\n    \"next_page_url\": null,\n    \"prev_page_url\": null\n}"
+				}
+			]
+		},
+		{
+			"name": "Settlement V2",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/user/settlement/2025-07-20",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"user",
+						"settlement",
+						"2025-07-20"
+					]
+				},
+				"description": "get you last balance in our Billers Engine"
+			},
+			"response": [
+				{
+					"name": "Success",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{TOKEN}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{BASE_URL}}/{{VERSION}}/user/settlement/2025-07-20",
+							"host": [
+								"{{BASE_URL}}"
+							],
+							"path": [
+								"{{VERSION}}",
+								"user",
+								"settlement",
+								"2025-07-20"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Host",
+							"value": "localhost:8000"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Date",
+							"value": "Fri, 20 Oct 2023 06:19:29 GMT"
+						},
+						{
+							"key": "Connection",
+							"value": "close"
+						},
+						{
+							"key": "X-Powered-By",
+							"value": "PHP/8.2.11"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "no-cache, private"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						},
+						{
+							"key": "X-RateLimit-Limit",
+							"value": "60"
+						},
+						{
+							"key": "X-RateLimit-Remaining",
+							"value": "59"
+						},
+						{
+							"key": "Access-Control-Allow-Origin",
+							"value": "*"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"rc\": 0,\n    \"message\": \"successfully get settlement \",\n    \"data\": {\n        \"amount\": \"3168149470642\",\n        \"total\": \"3168149470642\",\n        \"count\": 633223,\n        \"settle_amount\": \"10000.00\",\n        \"settle_status\": \"SETTLE_MINUS\",\n        \"settle_diff\": \"-3168149460642.00\"\n    }\n}"
+				}
+			]
+		},
+		{
+			"name": "Serpul Format",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{BASE_URL}}/{{VERSION}}/h2h/irs?user={{email}}&pass={{password}}&pin={{pin}}&kodeproduk={{product_code}}&tujuan={{custno}}&idtrx={{client_reff}}",
+					"host": [
+						"{{BASE_URL}}"
+					],
+					"path": [
+						"{{VERSION}}",
+						"h2h",
+						"irs"
+					],
+					"query": [
+						{
+							"key": "user",
+							"value": "{{email}}"
+						},
+						{
+							"key": "pass",
+							"value": "{{password}}"
+						},
+						{
+							"key": "pin",
+							"value": "{{pin}}"
+						},
+						{
+							"key": "kodeproduk",
+							"value": "{{product_code}}"
+						},
+						{
+							"key": "tujuan",
+							"value": "{{custno}}"
+						},
+						{
+							"key": "idtrx",
+							"value": "{{client_reff}}"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}
