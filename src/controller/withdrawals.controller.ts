@@ -5,6 +5,7 @@ import { ClientAuthRequest } from '../middleware/clientAuth'
 import { ApiKeyRequest } from '../middleware/apiKeyAuth'
 import { HilogateClient,HilogateConfig } from '../service/hilogateClient'
 import { GidiClient, GidiDisbursementConfig, GidiError } from '../service/gidiClient'
+import { Ing1Client, Ing1Config } from '../service/ing1Client'
 import crypto from 'crypto'
 import { config } from '../config'
 import logger from '../logger'
@@ -13,6 +14,17 @@ import { getActiveProviders } from '../service/provider';
 import {OyClient,OyConfig}          from '../service/oyClient'    // sesuaikan path
 import { authenticator } from 'otplib'
 import { parseDateSafely } from '../util/time'
+import { mapIng1Status, parseIng1Date, parseIng1Number } from '../service/ing1Status'
+
+const mapIng1ToDisbursement = (
+  rc?: number | null,
+  statusText?: string | null
+): DisbursementStatus => {
+  const normalized = mapIng1Status(rc ?? null, statusText ?? null)
+  if (normalized === 'PAID') return DisbursementStatus.COMPLETED
+  if (normalized === 'PENDING') return DisbursementStatus.PENDING
+  return DisbursementStatus.FAILED
+}
 
 
 
@@ -374,6 +386,97 @@ export async function queryPendingGidiWithdrawals(req: Request, res: Response) {
   }
 }
 
+export async function queryPendingIng1Withdrawals(req: Request, res: Response) {
+  try {
+    const pendings = await prisma.withdrawRequest.findMany({
+      where: { sourceProvider: 'ing1', status: DisbursementStatus.PENDING },
+      select: {
+        refId: true,
+        partnerClientId: true,
+        amount: true,
+        paymentGatewayId: true,
+        subMerchant: { select: { credentials: true } },
+      },
+    })
+
+    const results: { refId: string; status: DisbursementStatus }[] = []
+
+    for (const w of pendings) {
+      try {
+        const rawCfg = w.subMerchant?.credentials as unknown as Ing1Config
+        const cfg: Ing1Config = {
+          baseUrl: rawCfg.baseUrl,
+          email: rawCfg.email,
+          password: rawCfg.password,
+          productCode: rawCfg.productCode,
+          callbackUrl: rawCfg.callbackUrl,
+          permanentToken: rawCfg.permanentToken,
+          merchantId: rawCfg.merchantId,
+          apiVersion: rawCfg.apiVersion,
+        }
+
+        const client = new Ing1Client(cfg)
+        const history = await client.listCashoutHistory({
+          reff: w.paymentGatewayId ?? undefined,
+          clientReff: w.refId,
+        })
+
+        const match = history.histories.find((item) => {
+          if (w.paymentGatewayId && item.reff) {
+            return item.reff === w.paymentGatewayId
+          }
+          return item.clientReff === w.refId
+        })
+
+        const statusCandidate = match?.status ?? (history.raw?.status as string | undefined)
+        const newStatus = mapIng1ToDisbursement(history.rc, statusCandidate ?? null)
+
+        if (newStatus !== DisbursementStatus.PENDING) {
+          const updateData: any = {
+            status: newStatus,
+          }
+
+          if (match?.reff) {
+            updateData.paymentGatewayId = match.reff
+          }
+
+          if (match?.paidAt) {
+            const paidAt = parseIng1Date(match.paidAt)
+            if (paidAt) updateData.completedAt = paidAt
+          }
+
+          const feeCandidate =
+            typeof match?.fee === 'number' ? match.fee : parseIng1Number(match?.fee ?? null)
+          if (feeCandidate != null) {
+            updateData.pgFee = feeCandidate
+          }
+
+          await prisma.withdrawRequest.update({
+            where: { refId: w.refId },
+            data: updateData,
+          })
+
+          if (newStatus === DisbursementStatus.FAILED) {
+            await prisma.partnerClient.update({
+              where: { id: w.partnerClientId },
+              data: { balance: { increment: w.amount } },
+            })
+          }
+        }
+
+        results.push({ refId: w.refId, status: newStatus })
+      } catch (err) {
+        logger.error('[queryPendingIng1Withdrawals] error', { refId: w.refId, err })
+      }
+    }
+
+    return res.json({ processed: results.length, results })
+  } catch (err: any) {
+    logger.error('[queryPendingIng1Withdrawals] fatal', err)
+    return res.status(500).json({ error: err.message })
+  }
+}
+
 export const withdrawalCallback = async (req: Request, res: Response) => {
   try {
     // 1) Ambil & parse raw body
@@ -511,62 +614,246 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message })
   }
 }
-export async function validateAccount(req: ClientAuthRequest, res: Response) {
-  const { account_number, bank_code } = req.body;
 
+export const ing1WithdrawalCallback = async (req: Request, res: Response) => {
   try {
-    // 1) Temukan internal merchant Hilogate
- const merchant = await prisma.merchant.findFirst({
-   where: { name: 'hilogate' },
-    });
-    if (!merchant) {
-      return res.status(500).json({ error: 'Internal Hilogate merchant not found' });
+    const query = req.query as Record<string, string | undefined>
+    const rcStr = query.rc ?? query.RC
+    const statusText = query.status ?? query.STATUS
+    const billerReff = query.reff ?? query.reff_id ?? query.biller_reff
+    const clientRef =
+      query.client_reff ?? query.clientReff ?? query.client_ref ?? query.ref_id ?? query.refId
+
+    if (!clientRef) {
+      return res.status(400).json({ error: 'Missing client reference' })
     }
 
-    // 2) Ambil kredensial aktif (weekday/weekend) dari DB
+    const wr = await prisma.withdrawRequest.findUnique({
+      where: { refId: clientRef },
+      select: { status: true, partnerClientId: true, amount: true },
+    })
+
+    if (!wr) {
+      return res.status(404).json({ error: 'Withdrawal not found' })
+    }
+
+    const rc = rcStr != null ? Number(rcStr) : null
+    const newStatus = mapIng1ToDisbursement(rc, statusText ?? null)
+
+    const updateData: any = {
+      status: newStatus,
+    }
+
+    if (billerReff) {
+      updateData.paymentGatewayId = billerReff
+    }
+
+    const feeRaw =
+      parseIng1Number(query.fee ?? query.total_fee ?? query.admin_fee ?? query.pg_fee) ?? null
+    if (feeRaw != null) {
+      updateData.pgFee = feeRaw
+    }
+
+    const completedAt =
+      parseIng1Date(
+        query.completed_at ??
+          query.settlement_time ??
+          query.settlementTime ??
+          query.paid_at ??
+          query.paidAt ??
+          null
+      ) ?? null
+    if (completedAt) {
+      updateData.completedAt = completedAt
+    }
+
+    const result = await prisma.withdrawRequest.updateMany({
+      where: {
+        refId: clientRef,
+        status: { in: [DisbursementStatus.PENDING, DisbursementStatus.FAILED] },
+      },
+      data: updateData,
+    })
+
+    if (result.count === 0) {
+      return res.json({ ok: true, updated: false })
+    }
+
+    if (newStatus === DisbursementStatus.FAILED) {
+      await prisma.partnerClient.update({
+        where: { id: wr.partnerClientId },
+        data: { balance: { increment: wr.amount } },
+      })
+    } else if (wr.status === DisbursementStatus.FAILED && newStatus === DisbursementStatus.COMPLETED) {
+      await prisma.partnerClient.update({
+        where: { id: wr.partnerClientId },
+        data: { balance: { decrement: wr.amount } },
+      })
+    }
+
+    return res.json({ ok: true, updated: true })
+  } catch (err: any) {
+    logger.error('[ing1WithdrawalCallback] error', err)
+    return res.status(500).json({ error: err.message || 'Internal server error' })
+  }
+}
+export async function validateAccount(req: ClientAuthRequest, res: Response) {
+  const {
+    account_number,
+    bank_code,
+    sourceProvider = 'hilogate',
+    amount,
+  } = req.body as {
+    account_number: string
+    bank_code: string
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    amount?: number
+  }
+
+  try {
+    if (sourceProvider === 'ing1') {
+      const merchant = await prisma.merchant.findFirst({
+        where: { name: 'ing1' },
+      })
+      if (!merchant) {
+        return res.status(500).json({ error: 'Internal ING1 merchant not found' })
+      }
+
+      const subs = await getActiveProviders(merchant.id, 'ing1', {})
+      if (subs.length === 0) {
+        return res.status(500).json({ error: 'No active ING1 credentials today' })
+      }
+
+      const cfg = subs[0].config as Ing1Config
+      const client = new Ing1Client(cfg)
+      const clientReff = `inq-${Date.now()}`
+      const inquiry = await client.cashoutInquiry({
+        bankCode: bank_code,
+        accountNumber: account_number,
+        amount: amount ?? 0,
+        clientReff,
+        merchantId: cfg.merchantId,
+      })
+
+      if (inquiry.status === 'FAILED') {
+        return res.status(400).json({
+          error: inquiry.message || 'Account inquiry failed',
+          status: 'invalid',
+          rc: inquiry.rc,
+        })
+      }
+
+      return res.json({
+        account_number: inquiry.accountNumber ?? account_number,
+        account_holder: inquiry.accountName ?? '',
+        bank_code: inquiry.bankCode ?? bank_code,
+        bank_name: inquiry.bankName ?? null,
+        status: inquiry.status === 'PAID' ? 'valid' : 'pending',
+        rc: inquiry.rc,
+        reff: inquiry.reff ?? null,
+        client_reff: inquiry.clientReff ?? clientReff,
+        message: inquiry.message ?? '',
+      })
+    }
+
+    const merchant = await prisma.merchant.findFirst({
+      where: { name: 'hilogate' },
+    })
+    if (!merchant) {
+      return res.status(500).json({ error: 'Internal Hilogate merchant not found' })
+    }
+
     const pc = await prisma.partnerClient.findUnique({
       where: { id: req.partnerClientId! },
       select: { forceSchedule: true },
-    });
+    })
     const subs = await getActiveProviders(merchant.id, 'hilogate', {
-      schedule: pc?.forceSchedule as any || undefined,
-    });
+      schedule: (pc?.forceSchedule as any) || undefined,
+    })
     if (subs.length === 0) {
-      return res.status(500).json({ error: 'No active Hilogate credentials today' });
+      return res.status(500).json({ error: 'No active Hilogate credentials today' })
     }
- const cfg = subs[0].config as unknown as HilogateConfig;
+    const cfg = subs[0].config as unknown as HilogateConfig
 
-    // 3) Instansiasi client dengan kredensial DB
-    const client = new HilogateClient(cfg);
-
-    // 4) Panggil validateAccount
-    const payload = await client.validateAccount(account_number, bank_code);
-
-    // 5) Periksa hasil
+    const client = new HilogateClient(cfg)
+    const payload = await client.validateAccount(account_number, bank_code)
     if (payload.status !== 'valid') {
-      return res.status(400).json({ error: 'Invalid account' });
+      return res.status(400).json({ error: 'Invalid account' })
     }
 
-    // 6) Kembalikan detail
     return res.json({
       account_number: payload.account_number,
       account_holder: payload.account_holder,
-      bank_code:      payload.bank_code,
-      status:         payload.status,
-    });
-
+      bank_code: payload.bank_code,
+      status: payload.status,
+    })
   } catch (err: any) {
-    console.error('[validateAccount] error:', err);
+    console.error('[validateAccount] error:', err)
     return res
       .status(500)
-    .json({ message: err.message || 'Validasi akun gagal' });
+      .json({ message: err.message || 'Validasi akun gagal' })
   }
 }
 
 export async function validateAccountS2S(req: ApiKeyRequest, res: Response) {
-  const { account_number, bank_code } = req.body
+  const {
+    account_number,
+    bank_code,
+    sourceProvider = 'hilogate',
+    amount,
+  } = req.body as {
+    account_number: string
+    bank_code: string
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    amount?: number
+  }
 
   try {
+    if (sourceProvider === 'ing1') {
+      const merchant = await prisma.merchant.findFirst({
+        where: { name: 'ing1' },
+      })
+      if (!merchant) {
+        return res.status(500).json({ error: 'Internal ING1 merchant not found' })
+      }
+
+      const subs = await getActiveProviders(merchant.id, 'ing1', {})
+      if (subs.length === 0) {
+        return res.status(500).json({ error: 'No active ING1 credentials today' })
+      }
+
+      const cfg = subs[0].config as Ing1Config
+      const client = new Ing1Client(cfg)
+      const clientReff = `inq-${Date.now()}`
+      const inquiry = await client.cashoutInquiry({
+        bankCode: bank_code,
+        accountNumber: account_number,
+        amount: amount ?? 0,
+        clientReff,
+        merchantId: cfg.merchantId,
+      })
+
+      if (inquiry.status === 'FAILED') {
+        return res.status(400).json({
+          error: inquiry.message || 'Account inquiry failed',
+          status: 'invalid',
+          rc: inquiry.rc,
+        })
+      }
+
+      return res.json({
+        account_number: inquiry.accountNumber ?? account_number,
+        account_holder: inquiry.accountName ?? '',
+        bank_code: inquiry.bankCode ?? bank_code,
+        bank_name: inquiry.bankName ?? null,
+        status: inquiry.status === 'PAID' ? 'valid' : 'pending',
+        rc: inquiry.rc,
+        reff: inquiry.reff ?? null,
+        client_reff: inquiry.clientReff ?? clientReff,
+        message: inquiry.message ?? '',
+      })
+    }
+
     const merchant = await prisma.merchant.findFirst({
       where: { name: 'hilogate' },
     })
@@ -579,7 +866,7 @@ export async function validateAccountS2S(req: ApiKeyRequest, res: Response) {
       select: { forceSchedule: true },
     })
     const subs = await getActiveProviders(merchant.id, 'hilogate', {
-      schedule: pc?.forceSchedule as any || undefined,
+      schedule: (pc?.forceSchedule as any) || undefined,
     })
     if (subs.length === 0) {
       return res.status(500).json({ error: 'No active Hilogate credentials today' })
@@ -617,7 +904,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     otp 
    } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -669,70 +956,87 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
     // Cast sesuai provider
     let providerCfg: any
+    let hilogateClient: HilogateClient | null = null
+    let oyClient: OyClient | null = null
+    let gidiClient: GidiClient | null = null
+    let ingClient: Ing1Client | null = null
+    let ingCfg: Ing1Config | null = null
+
     if (sourceProvider === 'hilogate') {
       const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
       providerCfg = {
         merchantId: raw.merchantId,
-        secretKey:  raw.secretKey,
-        env:        raw.env ?? 'sandbox'
+        secretKey: raw.secretKey,
+        env: raw.env ?? 'sandbox',
       } as HilogateConfig
+      hilogateClient = new HilogateClient(providerCfg)
     } else if (sourceProvider === 'oy') {
       const raw = sub.credentials as { merchantId: string; secretKey: string }
       providerCfg = {
         baseUrl: 'https://partner.oyindonesia.com',
         username: raw.merchantId,
-        apiKey:   raw.secretKey
+        apiKey: raw.secretKey,
       } as OyConfig
-    } else {
+      oyClient = new OyClient(providerCfg)
+    } else if (sourceProvider === 'gidi') {
       const raw = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
       providerCfg = {
         baseUrl: raw.baseUrl,
         merchantId: raw.merchantId,
-        credentialKey: raw.credentialKey
+        credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
+      gidiClient = new GidiClient(providerCfg)
+    } else {
+      const raw = sub.credentials as unknown as Ing1Config
+      ingCfg = {
+        baseUrl: raw.baseUrl,
+        email: raw.email,
+        password: raw.password,
+        productCode: raw.productCode,
+        callbackUrl: raw.callbackUrl,
+        permanentToken: raw.permanentToken,
+        merchantId: raw.merchantId,
+        apiVersion: raw.apiVersion,
+      }
+      providerCfg = ingCfg
+      ingClient = new Ing1Client(ingCfg)
     }
 
-    // 2) Instantiate PG client sesuai provider
-    const pgClient = sourceProvider === 'hilogate'
-      ? new HilogateClient(providerCfg)
-      : sourceProvider === 'oy'
-        ? new OyClient(providerCfg)
-        : new GidiClient(providerCfg)
+    const withdrawRef = `wd-${Date.now()}`
 
     // 3-4) Validasi akun & dapatkan bankName / holder
     let acctHolder: string
     let alias: string
     let bankName: string
     if (sourceProvider === 'hilogate') {
-      const valid = await (pgClient as HilogateClient).validateAccount(account_number, bank_code)
+      const valid = await hilogateClient!.validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
         return res.status(400).json({ error: 'Akun bank tidak valid' })
       }
       acctHolder = valid.account_holder
       alias = account_name_alias || acctHolder
-      const banks = await (pgClient as HilogateClient).getBankCodes()
+      const banks = await hilogateClient!.getBankCodes()
       const b = banks.find(b => b.code === bank_code)
       if (!b) return res.status(400).json({ error: 'Bank code tidak dikenal' })
       bankName = b.name
     } else if (sourceProvider === 'gidi') {
       let inq
       try {
-        inq = await (pgClient as GidiClient).inquiryAccount(
-          bank_code,
-          account_number,
-          Date.now().toString()
-        )
+        inq = await gidiClient!.inquiryAccount(bank_code, account_number, Date.now().toString())
       } catch (err: any) {
         return res.status(400).json({ error: err.message })
       }
       acctHolder = inq.beneficiaryAccountName
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
-    } else {
-      // OY: skip lookup, gunakan alias atau kode sebagai label
+    } else if (sourceProvider === 'oy') {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
+    } else {
+      acctHolder = req.body.account_name || ''
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name || ''
     }
 
     // 5) Atomic transaction: hitung balance, fee, buat record, hold saldo
@@ -774,7 +1078,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       const netAmt = amount - feePctAmt - pc.withdrawFeeFlat
 
       // f) Buat WithdrawRequest dengan nested connect
-      const refId = `wd-${Date.now()}`
+      const refId = withdrawRef
       const w = await tx.withdrawRequest.create({
         data: {
           refId,
@@ -805,8 +1109,15 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
        try {
       let resp: any
+      let ingInquiry: {
+        reff?: string | null
+        fee?: number | null
+        accountName?: string | null
+        bankName?: string | null
+      } | null = null
+
       if (sourceProvider === 'hilogate') {
-        resp = await (pgClient as HilogateClient).createWithdrawal({
+        resp = await hilogateClient!.createWithdrawal({
           ref_id:             wr.refId,
           amount:             wr.netAmount,                // ← netAmt
           currency:           'IDR',
@@ -819,7 +1130,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           description:        `Withdraw Rp ${wr.netAmount}` // ← catatan juga netAmt
         })
       } else if (sourceProvider === 'gidi') {
-        resp = await (pgClient as GidiClient).createTransfer({
+        resp = await gidiClient!.createTransfer({
           requestId: `${wr.refId}-r`,
           transactionId: wr.refId,
           channelId: bank_code,
@@ -827,7 +1138,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           amount: wr.netAmount,
           transferNote: `Withdraw Rp ${wr.netAmount}`,
         })
-      } else {
+      } else if (sourceProvider === 'oy') {
         const disburseReq = {
           recipient_bank:     bank_code,
           recipient_account:  account_number,
@@ -837,10 +1148,72 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           email:             'client@launcx.com',  // ← hardcode di sini'
 
         }
-        resp = await (pgClient as OyClient).disburse(disburseReq)
+        resp = await oyClient!.disburse(disburseReq)
+      } else {
+        if (!ingClient || !ingCfg) throw new Error('Missing ING1 client configuration')
+        const inquiryAmount = wr.netAmount ?? amount
+        const inquiry = await ingClient.cashoutInquiry({
+          bankCode: bank_code,
+          accountNumber: account_number,
+          amount: inquiryAmount,
+          clientReff: wr.refId,
+          merchantId: ingCfg.merchantId,
+        })
+
+        if (inquiry.status === 'FAILED' || !inquiry.reff) {
+          await prisma.$transaction([
+            prisma.withdrawRequest.update({
+              where: { refId: wr.refId },
+              data: {
+                status: DisbursementStatus.FAILED,
+                paymentGatewayId: inquiry.reff ?? undefined,
+                accountName: inquiry.accountName ?? wr.accountName,
+                bankName: inquiry.bankName ?? wr.bankName,
+              },
+            }),
+            prisma.partnerClient.update({
+              where: { id: partnerClientId },
+              data: { balance: { increment: amount } },
+            }),
+          ])
+          return res.status(400).json({
+            error: inquiry.message || 'Withdrawal inquiry failed',
+            status: DisbursementStatus.FAILED,
+            rc: inquiry.rc,
+          })
+        }
+
+        ingInquiry = {
+          reff: inquiry.reff ?? null,
+          fee: inquiry.fee ?? null,
+          accountName: inquiry.accountName ?? null,
+          bankName: inquiry.bankName ?? null,
+        }
+
+        const aliasToStore = wr.accountNameAlias || ingInquiry.accountName || wr.accountName
+        const feeCandidate =
+          typeof ingInquiry.fee === 'number' ? ingInquiry.fee : parseIng1Number(ingInquiry.fee)
+
+        await prisma.withdrawRequest.update({
+          where: { refId: wr.refId },
+          data: {
+            accountName: ingInquiry.accountName ?? wr.accountName,
+            accountNameAlias: aliasToStore ?? wr.accountNameAlias,
+            bankName: ingInquiry.bankName ?? wr.bankName,
+            paymentGatewayId: ingInquiry.reff ?? wr.paymentGatewayId,
+            ...(feeCandidate != null ? { pgFee: feeCandidate } : {}),
+          },
+        })
+
+        resp = await ingClient.cashoutPayment({
+          reff: ingInquiry.reff!,
+          clientReff: wr.refId,
+          amount: inquiryAmount,
+          merchantId: ingCfg.merchantId,
+        })
       }
 
-       // Map response code ke DisbursementStatus
+      // Map response code ke DisbursementStatus
       const newStatus = sourceProvider === 'hilogate'
         ? (['WAITING','PENDING'].includes(resp.status)
             ? DisbursementStatus.PENDING
@@ -853,19 +1226,32 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
               : resp.statusTransfer === 'Failed'
                 ? DisbursementStatus.FAILED
                 : DisbursementStatus.PENDING)
-          : (resp.status.code === '101'
-              ? DisbursementStatus.PENDING
-              : resp.status.code === '000'
-                ? DisbursementStatus.COMPLETED
-                : DisbursementStatus.FAILED)
+          : sourceProvider === 'oy'
+            ? (resp.status.code === '101'
+                ? DisbursementStatus.PENDING
+                : resp.status.code === '000'
+                  ? DisbursementStatus.COMPLETED
+                  : DisbursementStatus.FAILED)
+            : mapIng1ToDisbursement(resp.rc, typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status)
 
       // Update withdrawal record
       await prisma.withdrawRequest.update({
         where: { refId: wr.refId },
         data: {
-          paymentGatewayId:  resp.trx_id || resp.trxId || resp.transactionId,
+          paymentGatewayId:
+            sourceProvider === 'ing1'
+              ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
+              : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
-          status:            newStatus
+          status: newStatus,
+          ...(sourceProvider === 'ing1'
+            ? (() => {
+                const feeRaw =
+                  parseIng1Number(resp?.data?.fee ?? resp?.data?.total_fee ?? resp?.data?.admin_fee?.total_fee) ??
+                  (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
+                return feeRaw != null ? { pgFee: feeRaw } : {}
+              })()
+            : {}),
         }
       })
 
@@ -917,7 +1303,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     amount,
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -950,6 +1336,12 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     if (!sub) throw new Error('Credentials not found for sub-merchant')
 
     let providerCfg: any
+    let hilogateClient: HilogateClient | null = null
+    let oyClient: OyClient | null = null
+    let gidiClient: GidiClient | null = null
+    let ingClient: Ing1Client | null = null
+    let ingCfg: Ing1Config | null = null
+
     if (sourceProvider === 'hilogate') {
       const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
       providerCfg = {
@@ -957,6 +1349,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
         secretKey: raw.secretKey,
         env: raw.env ?? 'sandbox',
       } as HilogateConfig
+      hilogateClient = new HilogateClient(providerCfg)
     } else if (sourceProvider === 'oy') {
       const raw = sub.credentials as { merchantId: string; secretKey: string }
       providerCfg = {
@@ -964,54 +1357,65 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
         username: raw.merchantId,
         apiKey: raw.secretKey,
       } as OyConfig
-    } else {
+      oyClient = new OyClient(providerCfg)
+    } else if (sourceProvider === 'gidi') {
       const raw = sub.credentials as { baseUrl: string; merchantId: string; credentialKey: string }
       providerCfg = {
         baseUrl: raw.baseUrl,
         merchantId: raw.merchantId,
         credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
+      gidiClient = new GidiClient(providerCfg)
+    } else {
+      const raw = sub.credentials as unknown as Ing1Config
+      ingCfg = {
+        baseUrl: raw.baseUrl,
+        email: raw.email,
+        password: raw.password,
+        productCode: raw.productCode,
+        callbackUrl: raw.callbackUrl,
+        permanentToken: raw.permanentToken,
+        merchantId: raw.merchantId,
+        apiVersion: raw.apiVersion,
+      }
+      providerCfg = ingCfg
+      ingClient = new Ing1Client(ingCfg)
     }
 
-    const pgClient =
-      sourceProvider === 'hilogate'
-        ? new HilogateClient(providerCfg)
-        : sourceProvider === 'oy'
-          ? new OyClient(providerCfg)
-          : new GidiClient(providerCfg)
+    const withdrawRef = `wd-${Date.now()}`
 
     let acctHolder: string
     let alias: string
     let bankName: string
     if (sourceProvider === 'hilogate') {
-      const valid = await (pgClient as HilogateClient).validateAccount(account_number, bank_code)
+      const valid = await hilogateClient!.validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
         return res.status(400).json({ error: 'Akun bank tidak valid' })
       }
       acctHolder = valid.account_holder
       alias = account_name_alias || acctHolder
-      const banks = await (pgClient as HilogateClient).getBankCodes()
+      const banks = await hilogateClient!.getBankCodes()
       const b = banks.find(b => b.code === bank_code)
       if (!b) return res.status(400).json({ error: 'Bank code tidak dikenal' })
       bankName = b.name
     } else if (sourceProvider === 'gidi') {
       let inq
       try {
-        inq = await (pgClient as GidiClient).inquiryAccount(
-          bank_code,
-          account_number,
-          Date.now().toString(),
-        )
+        inq = await gidiClient!.inquiryAccount(bank_code, account_number, Date.now().toString())
       } catch (err: any) {
         return res.status(400).json({ error: err.message })
       }
       acctHolder = inq.beneficiaryAccountName
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
-    } else {
+    } else if (sourceProvider === 'oy') {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
+    } else {
+      acctHolder = req.body.account_name || ''
+      alias = account_name_alias || acctHolder
+      bankName = req.body.bank_name || ''
     }
 
     const wr = await prisma.$transaction(async tx => {
@@ -1046,7 +1450,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
       const feePctAmt = (pc.withdrawFeePercent / 100) * amount
       const netAmt = amount - feePctAmt - pc.withdrawFeeFlat
 
-      const refId = `wd-${Date.now()}`
+      const refId = withdrawRef
       const w = await tx.withdrawRequest.create({
         data: {
           refId,
@@ -1076,8 +1480,15 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
 
     try {
       let resp: any
+      let ingInquiry: {
+        reff?: string | null
+        fee?: number | null
+        accountName?: string | null
+        bankName?: string | null
+      } | null = null
+
       if (sourceProvider === 'hilogate') {
-        resp = await (pgClient as HilogateClient).createWithdrawal({
+        resp = await hilogateClient!.createWithdrawal({
           ref_id: wr.refId,
           amount: wr.netAmount,
           currency: 'IDR',
@@ -1090,7 +1501,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           description: `Withdraw Rp ${wr.netAmount}`,
         })
       } else if (sourceProvider === 'gidi') {
-        resp = await (pgClient as GidiClient).createTransfer({
+        resp = await gidiClient!.createTransfer({
           requestId: `${wr.refId}-r`,
           transactionId: wr.refId,
           channelId: bank_code,
@@ -1098,7 +1509,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           amount: wr.netAmount,
           transferNote: `Withdraw Rp ${wr.netAmount}`,
         })
-      } else {
+      } else if (sourceProvider === 'oy') {
         const disburseReq = {
           recipient_bank: bank_code,
           recipient_account: account_number,
@@ -1107,7 +1518,69 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           partner_trx_id: wr.refId,
           email: 'client@launcx.com',
         }
-        resp = await (pgClient as OyClient).disburse(disburseReq)
+        resp = await oyClient!.disburse(disburseReq)
+      } else {
+        if (!ingClient || !ingCfg) throw new Error('Missing ING1 client configuration')
+        const inquiryAmount = wr.netAmount ?? amount
+        const inquiry = await ingClient.cashoutInquiry({
+          bankCode: bank_code,
+          accountNumber: account_number,
+          amount: inquiryAmount,
+          clientReff: wr.refId,
+          merchantId: ingCfg.merchantId,
+        })
+
+        if (inquiry.status === 'FAILED' || !inquiry.reff) {
+          await prisma.$transaction([
+            prisma.withdrawRequest.update({
+              where: { refId: wr.refId },
+              data: {
+                status: DisbursementStatus.FAILED,
+                paymentGatewayId: inquiry.reff ?? undefined,
+                accountName: inquiry.accountName ?? wr.accountName,
+                bankName: inquiry.bankName ?? wr.bankName,
+              },
+            }),
+            prisma.partnerClient.update({
+              where: { id: partnerClientId },
+              data: { balance: { increment: amount } },
+            }),
+          ])
+          return res.status(400).json({
+            error: inquiry.message || 'Withdrawal inquiry failed',
+            status: DisbursementStatus.FAILED,
+            rc: inquiry.rc,
+          })
+        }
+
+        ingInquiry = {
+          reff: inquiry.reff ?? null,
+          fee: inquiry.fee ?? null,
+          accountName: inquiry.accountName ?? null,
+          bankName: inquiry.bankName ?? null,
+        }
+
+        const aliasToStore = wr.accountNameAlias || ingInquiry.accountName || wr.accountName
+        const feeCandidate =
+          typeof ingInquiry.fee === 'number' ? ingInquiry.fee : parseIng1Number(ingInquiry.fee)
+
+        await prisma.withdrawRequest.update({
+          where: { refId: wr.refId },
+          data: {
+            accountName: ingInquiry.accountName ?? wr.accountName,
+            accountNameAlias: aliasToStore ?? wr.accountNameAlias,
+            bankName: ingInquiry.bankName ?? wr.bankName,
+            paymentGatewayId: ingInquiry.reff ?? wr.paymentGatewayId,
+            ...(feeCandidate != null ? { pgFee: feeCandidate } : {}),
+          },
+        })
+
+        resp = await ingClient.cashoutPayment({
+          reff: ingInquiry.reff!,
+          clientReff: wr.refId,
+          amount: inquiryAmount,
+          merchantId: ingCfg.merchantId,
+        })
       }
 
       const newStatus =
@@ -1123,19 +1596,32 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
               : resp.statusTransfer === 'Failed'
                 ? DisbursementStatus.FAILED
                 : DisbursementStatus.PENDING
-            : resp.status.code === '101'
-              ? DisbursementStatus.PENDING
-              : resp.status.code === '000'
-                ? DisbursementStatus.COMPLETED
-                : DisbursementStatus.FAILED
+            : sourceProvider === 'oy'
+              ? resp.status.code === '101'
+                ? DisbursementStatus.PENDING
+                : resp.status.code === '000'
+                  ? DisbursementStatus.COMPLETED
+                  : DisbursementStatus.FAILED
+              : mapIng1ToDisbursement(resp.rc, typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status)
 
       await prisma.withdrawRequest.update({
         where: { refId: wr.refId },
         data: {
-          paymentGatewayId: resp.trx_id || resp.trxId || resp.transactionId,
+          paymentGatewayId:
+            sourceProvider === 'ing1'
+              ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
+              : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess:
             sourceProvider === 'hilogate' ? resp.is_transfer_process ?? false : true,
           status: newStatus,
+          ...(sourceProvider === 'ing1'
+            ? (() => {
+                const feeRaw =
+                  parseIng1Number(resp?.data?.fee ?? resp?.data?.total_fee ?? resp?.data?.admin_fee?.total_fee) ??
+                  (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
+                return feeRaw != null ? { pgFee: feeRaw } : {}
+              })()
+            : {}),
         },
       })
 

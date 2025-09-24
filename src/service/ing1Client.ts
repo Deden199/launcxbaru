@@ -107,6 +107,114 @@ export interface Ing1HistoryResult {
   raw: any;
 }
 
+export interface Ing1CashoutInquiryParams {
+  bankCode: string;
+  accountNumber: string;
+  amount: number;
+  clientReff: string;
+  customerName?: string;
+  remark?: string;
+  merchantId?: string;
+}
+
+export interface Ing1CashoutInquiryResult {
+  rc: number;
+  message: string;
+  status: Ing1TransactionStatus;
+  reff?: string | null;
+  clientReff?: string | null;
+  bankCode?: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountName?: string | null;
+  amount?: number | null;
+  fee?: number | null;
+  data: any;
+  raw: any;
+}
+
+export interface Ing1CashoutPaymentParams {
+  reff: string;
+  clientReff?: string;
+  amount?: number;
+  otp?: string;
+  remark?: string;
+  merchantId?: string;
+}
+
+export interface Ing1CashoutPaymentResult {
+  rc: number;
+  message: string;
+  status: Ing1TransactionStatus;
+  reff?: string | null;
+  clientReff?: string | null;
+  data: any;
+  raw: any;
+}
+
+export interface Ing1CashoutCheckParams {
+  reff: string;
+  clientReff?: string;
+}
+
+export interface Ing1CashoutCheckResult {
+  rc: number;
+  message: string;
+  status: Ing1TransactionStatus;
+  reff?: string | null;
+  clientReff?: string | null;
+  data: any;
+  raw: any;
+}
+
+export interface Ing1CashoutHistoryQuery {
+  page?: number;
+  perPage?: number;
+  startDate?: string;
+  endDate?: string;
+  clientReff?: string;
+  reff?: string;
+  status?: string;
+  custno?: string;
+}
+
+export interface Ing1CashoutHistoryItem {
+  amount: number | null;
+  fee: number | null;
+  status: string;
+  normalizedStatus: Ing1TransactionStatus;
+  reff?: string | null;
+  clientReff?: string | null;
+  bankCode?: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountName?: string | null;
+  paidAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  remark?: string | null;
+  raw: any;
+}
+
+export interface Ing1CashoutHistoryResult {
+  rc: number;
+  message: string;
+  status: Ing1TransactionStatus;
+  histories: Ing1CashoutHistoryItem[];
+  pagination: {
+    currentPage?: number;
+    perPage?: number;
+    total?: number;
+    lastPage?: number;
+    from?: number;
+    to?: number;
+    hasNextPage?: boolean;
+    nextPageUrl?: string | null;
+    prevPageUrl?: string | null;
+  };
+  raw: any;
+}
+
 const mapRcToStatus = (rc: number): Ing1TransactionStatus => {
   switch (rc) {
     case 0:
@@ -125,6 +233,21 @@ const normalizeHistoryStatus = (status: string | undefined | null): Ing1Transact
   if (lowered === 'success' || lowered === 'paid') return 'PAID';
   if (lowered === 'pending' || lowered === 'process') return 'PENDING';
   return 'FAILED';
+};
+
+const parseNumeric = (value: unknown): number | null => {
+  if (value == null) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null;
+  }
+  if (typeof raw === 'string') {
+    const cleaned = raw.replace(/,/g, '').trim();
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 };
 
 export class Ing1Client {
@@ -339,6 +462,166 @@ export class Ing1Client {
       expiredAt: item?.expired_at ?? null,
       createdAt: item?.created_at ?? null,
       name: item?.name ?? null,
+      raw: item,
+    }));
+
+    const pagination = {
+      currentPage: data?.current_page,
+      perPage: data?.per_page,
+      total: data?.total,
+      lastPage: data?.last_page,
+      from: data?.from,
+      to: data?.to,
+      hasNextPage: data?.has_next_page,
+      nextPageUrl: data?.next_page_url ?? null,
+      prevPageUrl: data?.prev_page_url ?? null,
+    };
+
+    return {
+      rc,
+      message: data?.message ?? '',
+      status: mapRcToStatus(rc),
+      histories,
+      pagination,
+      raw: data,
+    };
+  }
+
+  async cashoutInquiry(params: Ing1CashoutInquiryParams): Promise<Ing1CashoutInquiryResult> {
+    const payload: Record<string, any> = {
+      bank_code: params.bankCode,
+      account_no: params.accountNumber,
+      amount: params.amount,
+      client_reff: params.clientReff,
+    };
+
+    if (params.customerName) payload.customer_name = params.customerName;
+    if (params.remark) payload.remark = params.remark;
+
+    const merchantId = params.merchantId ?? this.cfg.merchantId;
+    if (merchantId) payload.merchant_id = merchantId;
+
+    const data = await this.authorizedRequest<any>({
+      method: 'POST',
+      url: 'transaction/cashout/inquiry',
+      data: payload,
+    });
+
+    const rc = typeof data?.rc === 'number' ? data.rc : Number(data?.rc ?? 99);
+    const details = data?.data ?? {};
+
+    const result: Ing1CashoutInquiryResult = {
+      rc,
+      message: data?.message ?? '',
+      status: mapRcToStatus(rc),
+      reff: data?.reff ?? details?.reff ?? null,
+      clientReff: data?.client_reff ?? details?.client_reff ?? payload.client_reff ?? null,
+      bankCode: details?.bank_code ?? details?.bankCode ?? payload.bank_code ?? null,
+      bankName: details?.bank_name ?? details?.bankName ?? null,
+      accountNumber:
+        details?.account_number ?? details?.account_no ?? payload.account_no ?? null,
+      accountName: details?.account_name ?? details?.accountName ?? null,
+      amount: parseNumeric(details?.amount ?? data?.amount),
+      fee: parseNumeric(details?.fee ?? details?.total_fee ?? data?.fee),
+      data: details,
+      raw: data,
+    };
+
+    return result;
+  }
+
+  async cashoutPayment(params: Ing1CashoutPaymentParams): Promise<Ing1CashoutPaymentResult> {
+    const payload: Record<string, any> = {
+      reff: params.reff,
+    };
+
+    if (params.clientReff) payload.client_reff = params.clientReff;
+    if (params.amount != null) payload.amount = params.amount;
+    if (params.otp) payload.otp = params.otp;
+    if (params.remark) payload.remark = params.remark;
+
+    const merchantId = params.merchantId ?? this.cfg.merchantId;
+    if (merchantId) payload.merchant_id = merchantId;
+
+    const data = await this.authorizedRequest<any>({
+      method: 'POST',
+      url: 'transaction/cashout/payment',
+      data: payload,
+    });
+
+    const rc = typeof data?.rc === 'number' ? data.rc : Number(data?.rc ?? 99);
+
+    return {
+      rc,
+      message: data?.message ?? '',
+      status: mapRcToStatus(rc),
+      reff: data?.reff ?? payload.reff,
+      clientReff: data?.client_reff ?? payload.client_reff ?? null,
+      data: data?.data,
+      raw: data,
+    };
+  }
+
+  async checkCashout(params: Ing1CashoutCheckParams): Promise<Ing1CashoutCheckResult> {
+    const payload: Record<string, any> = { reff: params.reff };
+    if (params.clientReff) payload.client_reff = params.clientReff;
+
+    const data = await this.authorizedRequest<any>({
+      method: 'POST',
+      url: 'transaction/cashout/check',
+      data: payload,
+    });
+
+    const rc = typeof data?.rc === 'number' ? data.rc : Number(data?.rc ?? 99);
+
+    return {
+      rc,
+      message: data?.message ?? '',
+      status: mapRcToStatus(rc),
+      reff: data?.reff ?? payload.reff,
+      clientReff: data?.client_reff ?? payload.client_reff ?? null,
+      data: data?.data,
+      raw: data,
+    };
+  }
+
+  async listCashoutHistory(
+    query: Ing1CashoutHistoryQuery = {}
+  ): Promise<Ing1CashoutHistoryResult> {
+    const params: Record<string, any> = {};
+    if (query.page != null) params.page = query.page;
+    if (query.perPage != null) params.per_page = query.perPage;
+    if (query.startDate) params.start_date = query.startDate;
+    if (query.endDate) params.end_date = query.endDate;
+    if (query.clientReff) params.client_reff = query.clientReff;
+    if (query.reff) params.reff = query.reff;
+    if (query.status) params.status = query.status;
+    if (query.custno) params.custno = query.custno;
+
+    const data = await this.authorizedRequest<any>({
+      method: 'GET',
+      url: 'transaction/cashout/history',
+      params,
+    });
+
+    const rc = typeof data?.rc === 'number' ? data.rc : Number(data?.rc ?? 99);
+    const historiesRaw: any[] = Array.isArray(data?.histories) ? data.histories : [];
+
+    const histories: Ing1CashoutHistoryItem[] = historiesRaw.map((item) => ({
+      amount: parseNumeric(item?.amount),
+      fee: parseNumeric(item?.fee ?? item?.total_fee),
+      status: item?.status ?? '',
+      normalizedStatus: normalizeHistoryStatus(item?.status),
+      reff: item?.reff ?? null,
+      clientReff: item?.client_reff ?? null,
+      bankCode: item?.bank_code ?? item?.bankCode ?? null,
+      bankName: item?.bank_name ?? item?.bankName ?? null,
+      accountNumber: item?.account_number ?? item?.accountNo ?? null,
+      accountName: item?.account_name ?? item?.accountName ?? null,
+      paidAt: item?.paid_at ?? item?.paidAt ?? null,
+      createdAt: item?.created_at ?? item?.createdAt ?? null,
+      updatedAt: item?.updated_at ?? item?.updatedAt ?? null,
+      remark: item?.remark ?? null,
       raw: item,
     }));
 
