@@ -2,28 +2,158 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 
+type ProviderType = 'hilogate' | 'oy' | 'gidi' | 'ing1'
+
+type HilogateEnv = 'sandbox' | 'production' | 'live'
+
 type HilogateOyCredentials = {
   merchantId: string
-  env: string
+  env: HilogateEnv
   secretKey: string
 }
 
 type GidiCredentials = {
   baseUrl: string
   credentialKey: string
-  merchantId?: string
-  subMerchantId?: string
+  merchantId: string
+  subMerchantId: string
 }
 
-type ProviderEntry = {
-    id: string
+type Ing1Credentials = {
+  baseUrl: string
+  email: string
+  password: string
+  productCode: string
+  callbackUrl: string
+  permanentToken: string
+  merchantId: string
+  apiVersion: string
+}
+
+type ScheduleSetting = {
+  weekday: boolean
+  weekend: boolean
+}
+
+type RawProviderEntry = {
+  id: string
   name: string
-  provider: 'hilogate' | 'oy' | 'gidi'
-  credentials: HilogateOyCredentials | GidiCredentials
-  schedule: {
-    weekday: boolean
-    weekend: boolean
+  provider: ProviderType
+  credentials: any
+  schedule: ScheduleSetting
+}
+
+type ProviderForm = {
+  provider: ProviderType
+  name: string
+  credentials: HilogateOyCredentials | GidiCredentials | Ing1Credentials
+  schedule: ScheduleSetting
+}
+
+const allowedEnvs: HilogateEnv[] = ['sandbox', 'production', 'live']
+
+const trimString = (value?: unknown) =>
+  typeof value === 'string' ? value.trim() : ''
+
+const pickTrimmed = (...values: unknown[]) => {
+  for (const value of values) {
+    const str = trimString(value)
+    if (str) return str
   }
+  return ''
+}
+
+const ensureEnv = (value: string): HilogateEnv =>
+  allowedEnvs.includes(value as HilogateEnv) ? (value as HilogateEnv) : 'sandbox'
+
+function normalizeCredentialsForForm(
+  provider: ProviderType,
+  raw?: any
+): HilogateOyCredentials | GidiCredentials | Ing1Credentials {
+  const source = (raw ?? {}) as Record<string, unknown>
+
+  if (provider === 'gidi') {
+    return {
+      baseUrl: pickTrimmed(source.baseUrl, source.base_url),
+      credentialKey: pickTrimmed(source.credentialKey, source.credential_key),
+      merchantId: pickTrimmed(source.merchantId, source.merchant_id),
+      subMerchantId: pickTrimmed(source.subMerchantId, source.sub_merchant_id),
+    }
+  }
+
+  if (provider === 'ing1') {
+    return {
+      baseUrl: pickTrimmed(source.baseUrl, source.base_url),
+      email: pickTrimmed(source.email),
+      password: pickTrimmed(source.password),
+      productCode: pickTrimmed(source.productCode, source.product_code),
+      callbackUrl: pickTrimmed(source.callbackUrl, source.callback_url, source.return_url),
+      permanentToken: pickTrimmed(source.permanentToken, source.permanent_token, source.token),
+      merchantId: pickTrimmed(source.merchantId, source.merchant_id),
+      apiVersion: pickTrimmed(source.apiVersion, source.api_version, source.version),
+    }
+  }
+
+  return {
+    merchantId: pickTrimmed(source.merchantId, source.merchant_id),
+    env: ensureEnv(pickTrimmed(source.env, source.environment) || 'sandbox'),
+    secretKey: pickTrimmed(source.secretKey, source.secret_key),
+  }
+}
+
+const createEmptyForm = (provider: ProviderType = 'hilogate'): ProviderForm => ({
+  provider,
+  name: '',
+  credentials: normalizeCredentialsForForm(provider),
+  schedule: { weekday: true, weekend: false },
+})
+
+const parseSchedule = (schedule?: Partial<ScheduleSetting> | null): ScheduleSetting => ({
+  weekday: Boolean(schedule?.weekday),
+  weekend: Boolean(schedule?.weekend),
+})
+
+const optionalField = (value?: string) => {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
+const displayOrDash = (value?: unknown) => {
+  const str = trimString(value)
+  return str || '–'
+}
+
+const resolvePrimaryCredential = (entry: RawProviderEntry) => {
+  const creds = (entry.credentials ?? {}) as Record<string, unknown>
+
+  if (entry.provider === 'hilogate' || entry.provider === 'oy') {
+    return displayOrDash(creds.merchantId ?? creds.merchant_id)
+  }
+
+  if (entry.provider === 'gidi' || entry.provider === 'ing1') {
+    return displayOrDash(creds.baseUrl ?? creds.base_url)
+  }
+
+  return '–'
+}
+
+const resolveSecondaryInfo = (entry: RawProviderEntry) => {
+  const creds = (entry.credentials ?? {}) as Record<string, unknown>
+
+  if (entry.provider === 'hilogate' || entry.provider === 'oy') {
+    return displayOrDash(creds.env ?? creds.environment)
+  }
+
+  if (entry.provider === 'gidi') {
+    return displayOrDash(creds.credentialKey ?? creds.credential_key)
+  }
+
+  if (entry.provider === 'ing1') {
+    return displayOrDash(creds.email)
+  }
+
+  return '–'
 }
 
 export default function PaymentProvidersPage() {
@@ -31,15 +161,10 @@ export default function PaymentProvidersPage() {
   const { merchantId } = router.query as { merchantId?: string }
   const [editId, setEditId] = useState<string | null>(null)
   const [merchant, setMerchant] = useState<{ name: string } | null>(null)
-  const [entries, setEntries] = useState<ProviderEntry[]>([])
+  const [entries, setEntries] = useState<RawProviderEntry[]>([])
   const [showForm, setShowForm] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [form, setForm] = useState<Partial<ProviderEntry>>({
-    provider: 'hilogate',
-    credentials: { merchantId: '', env: 'sandbox', secretKey: '' },
-    schedule: { weekday: true, weekend: false },
-    name: ''
-  })
+  const [form, setForm] = useState<ProviderForm>(() => createEmptyForm())
 
   useEffect(() => {
     if (merchantId) {
@@ -52,7 +177,7 @@ export default function PaymentProvidersPage() {
 
   async function fetchEntries() {
     try {
-      const res = await api.get<ProviderEntry[]>(`/admin/merchants/${merchantId}/pg`)
+      const res = await api.get<RawProviderEntry[]>(`/admin/merchants/${merchantId}/pg`)
       setEntries(res.data)
     } catch (err) {
       console.error('Fetch providers error', err)
@@ -64,58 +189,101 @@ export default function PaymentProvidersPage() {
     setErrorMsg('')
 
     const provider = form.provider
-    let payloadCreds: any = {}
+    let payloadCreds: Record<string, any> = {}
 
     if (provider === 'gidi') {
       const creds = form.credentials as GidiCredentials
-      if (!creds?.baseUrl || !creds.credentialKey) {
-        setErrorMsg('Semua field kredensial harus diisi.')
+      const baseUrl = creds.baseUrl.trim()
+      const credentialKey = creds.credentialKey.trim()
+
+      if (!baseUrl || !credentialKey) {
+        setErrorMsg('Base URL dan Credential Key wajib diisi untuk Gidi.')
         return
       }
+
       payloadCreds = {
-        baseUrl: creds.baseUrl,
-        credentialKey: creds.credentialKey,
+        baseUrl,
+        credentialKey,
       }
-      if (creds.merchantId) payloadCreds.merchantId = creds.merchantId
-      if (creds.subMerchantId) payloadCreds.subMerchantId = creds.subMerchantId
+
+      const merchantOpt = optionalField(creds.merchantId)
+      const subMerchantOpt = optionalField(creds.subMerchantId)
+      if (merchantOpt) payloadCreds.merchantId = merchantOpt
+      if (subMerchantOpt) payloadCreds.subMerchantId = subMerchantOpt
+    } else if (provider === 'ing1') {
+      const creds = form.credentials as Ing1Credentials
+      const baseUrl = creds.baseUrl.trim()
+      const email = creds.email.trim()
+      const password = creds.password.trim()
+
+      if (!baseUrl || !email || !password) {
+        setErrorMsg('Base URL, Email, dan Password wajib diisi untuk ING1.')
+        return
+      }
+
+      payloadCreds = { baseUrl, email, password }
+
+      const productCode = optionalField(creds.productCode)
+      const callbackUrl = optionalField(creds.callbackUrl)
+      const permanentToken = optionalField(creds.permanentToken)
+      const merchantIng1 = optionalField(creds.merchantId)
+      const apiVersion = optionalField(creds.apiVersion)
+
+      if (productCode) payloadCreds.productCode = productCode
+      if (callbackUrl) payloadCreds.callbackUrl = callbackUrl
+      if (permanentToken) payloadCreds.permanentToken = permanentToken
+      if (merchantIng1) payloadCreds.merchantId = merchantIng1
+      if (apiVersion) payloadCreds.apiVersion = apiVersion
     } else {
       const creds = form.credentials as HilogateOyCredentials
-      if (!creds?.merchantId || !creds.secretKey) {
-        setErrorMsg('Semua field kredensial harus diisi.')
+      const merchantIdValue = creds.merchantId.trim()
+      const secretKeyValue = creds.secretKey.trim()
+      const envValue = allowedEnvs.includes(creds.env) ? creds.env : 'sandbox'
+
+      if (!merchantIdValue || !secretKeyValue) {
+        setErrorMsg('Merchant ID dan Secret Key wajib diisi.')
         return
       }
+
       payloadCreds = {
-        merchantId: creds.merchantId,
-        env: creds.env,
-        secretKey: creds.secretKey,
+        merchantId: merchantIdValue,
+        env: envValue,
+        secretKey: secretKeyValue,
       }
     }
 
-    try {
-            const payload = {
-        provider,
-        name: form.name,
-        credentials: payloadCreds,
-        schedule: form.schedule,
-      }
+    const payload = {
+      provider,
+      name: form.name?.trim?.() ?? '',
+      credentials: payloadCreds,
+      schedule: {
+        weekday: !!form.schedule.weekday,
+        weekend: !!form.schedule.weekend,
+      },
+    }
 
+    try {
       if (editId) {
         await api.patch(`/admin/merchants/${merchantId}/pg/${editId}`, payload)
-
       } else {
         await api.post(`/admin/merchants/${merchantId}/pg`, payload)
-
       }
       setShowForm(false)
       setEditId(null)
+      setForm(createEmptyForm(provider))
       fetchEntries()
     } catch (err: any) {
       setErrorMsg(err.response?.data.error || 'Gagal menyimpan, coba lagi.')
     }
   }
 
-  function startEdit(entry: ProviderEntry) {
-    setForm(entry)
+  function startEdit(entry: RawProviderEntry) {
+    setForm({
+      provider: entry.provider,
+      name: entry.name ?? '',
+      credentials: normalizeCredentialsForForm(entry.provider, entry.credentials),
+      schedule: parseSchedule(entry.schedule),
+    })
     setEditId(entry.id)
     setErrorMsg('')
     setShowForm(true)
@@ -145,7 +313,7 @@ export default function PaymentProvidersPage() {
           onClick={() => {
             setErrorMsg('')
             setEditId(null)
-            setForm({ provider: 'hilogate', credentials: { merchantId: '', env: 'sandbox', secretKey: '' }, schedule: { weekday: true, weekend: false }, name: '' })
+            setForm(createEmptyForm())
             setShowForm(true)
           }}
           disabled={!merchant}
@@ -160,8 +328,8 @@ export default function PaymentProvidersPage() {
             <tr>
               <th>Provider</th>
               <th>Name</th>
-              <th>Merchant ID / Base URL</th>
-              <th>Env</th>
+              <th>Primary Credential</th>
+              <th>Additional Info</th>
               <th>Weekday</th>
               <th>Weekend</th>
               {/* use client */}
@@ -172,8 +340,8 @@ export default function PaymentProvidersPage() {
               <tr key={e.id}>
                 <td className="cell-bold">{e.provider}</td>
                 <td className="cell-bold">{e.name}</td>
-                <td>{'merchantId' in e.credentials ? e.credentials.merchantId : ('baseUrl' in e.credentials ? e.credentials.baseUrl : '')}</td>
-                <td>{'env' in e.credentials ? e.credentials.env : ''}</td>
+                <td>{resolvePrimaryCredential(e)}</td>
+                <td>{resolveSecondaryInfo(e)}</td>
                 <td>{e.schedule.weekday ? '✔' : '–'}</td>
                 <td>{e.schedule.weekend ? '✔' : '–'}</td>
                 {/* use client */}
@@ -202,18 +370,18 @@ export default function PaymentProvidersPage() {
                 <select
                   value={form.provider}
                   onChange={e => {
-                    const provider = e.target.value as ProviderEntry['provider']
-                    const creds =
-                      provider === 'gidi'
-                        ? { baseUrl: '', credentialKey: '', merchantId: '', subMerchantId: '' }
-                        : { merchantId: '', env: 'sandbox', secretKey: '' }
-                    setForm(f => ({ ...f, provider, credentials: creds }))
+                    const provider = e.target.value as ProviderType
+                    setForm(prev => ({
+                      ...prev,
+                      provider,
+                      credentials: normalizeCredentialsForForm(provider),
+                    }))
                   }}
                 >
                   <option value="hilogate">Hilogate</option>
                   <option value="oy">OY</option>
-                   <option value="gidi">Gidi</option>
-
+                  <option value="gidi">Gidi</option>
+                  <option value="ing1">ING1 (Billers)</option>
                 </select>
               </div>
               <div className="form-group">
@@ -232,13 +400,14 @@ export default function PaymentProvidersPage() {
                           ...f,
                           credentials: {
                             ...(f.credentials as HilogateOyCredentials),
-                            env: e.target.value,
+                            env: e.target.value as HilogateEnv,
                           },
                         }))
                       }
                     >
                       <option value="sandbox">Sandbox</option>
                       <option value="production">Production</option>
+                      <option value="live">Live</option>
                     </select>
                   </div>
                   <div className="form-group">
@@ -274,6 +443,139 @@ export default function PaymentProvidersPage() {
                     />
                   </div>
                 </>
+              )}
+
+              {form.provider === 'ing1' && (
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Base URL</label>
+                    <input
+                      type="url"
+                      value={(form.credentials as Ing1Credentials)?.baseUrl || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            baseUrl: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      value={(form.credentials as Ing1Credentials)?.email || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            email: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      value={(form.credentials as Ing1Credentials)?.password || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            password: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Default Product Code (opsional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as Ing1Credentials)?.productCode || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            productCode: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Callback URL (opsional)</label>
+                    <input
+                      type="url"
+                      value={(form.credentials as Ing1Credentials)?.callbackUrl || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            callbackUrl: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Permanent Token (opsional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as Ing1Credentials)?.permanentToken || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            permanentToken: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Merchant ID Billers (opsional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as Ing1Credentials)?.merchantId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            merchantId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>API Version (opsional)</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as Ing1Credentials)?.apiVersion || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as Ing1Credentials),
+                            apiVersion: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               )}
 
               {form.provider === 'gidi' && (

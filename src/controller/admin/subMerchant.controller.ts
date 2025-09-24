@@ -11,7 +11,7 @@ const scheduleSchema = z.object({
 });
 const nameSchema = z.string().min(1)
 
-const providerSchema = z.enum(['hilogate', 'oy', 'netzme', '2c2p', 'gidi']);
+const providerSchema = z.enum(['hilogate', 'oy', 'netzme', '2c2p', 'gidi', 'ing1']);
 
 // GET /admin/merchant/:merchantId/pg
 export async function listSubMerchants(req: Request, res: Response) {
