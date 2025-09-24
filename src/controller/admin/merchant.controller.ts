@@ -888,7 +888,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     const subs = await prisma.sub_merchant.findMany({
       where: {
         ...(merchantId && merchantId !== 'all' ? { merchantId } : {}),
-        provider: { in: ['hilogate', 'oy', 'gidi'] },
+        provider: { in: ['hilogate', 'oy', 'gidi', 'ing1'] },
         ...(subMerchantId && subMerchantId !== 'all'
           ? { id: String(subMerchantId) }
           : {}),
@@ -1005,7 +1005,7 @@ export const getMerchantBalances = async (req: Request, res: Response) => {
       const subs = await prisma.sub_merchant.findMany({
         where: {
           ...(merchantId && merchantId !== 'all' ? { merchantId } : {}),
-          provider: { in: ['hilogate', 'oy', 'gidi'] },
+          provider: { in: ['hilogate', 'oy', 'gidi', 'ing1'] },
         },
         select: { id: true, name: true, provider: true, credentials: true },
       });
