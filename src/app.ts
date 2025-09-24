@@ -24,7 +24,7 @@ import usersRoutes from './route/users.routes';
 import settingsRoutes   from './route/settings.routes';
 import { loadWeekendOverrideDates } from './util/time'
 
-import { withdrawalCallback } from './controller/withdrawals.controller'
+import { withdrawalCallback, ing1WithdrawalCallback } from './controller/withdrawals.controller'
 import pivotCallbackRouter from './route/payment.callback.routes';
 
 import webRoutes from './route/web.routes';
@@ -107,6 +107,8 @@ app.post(
   }),
   withdrawalCallback           // ⛔ TANPA express.json()
 );
+
+app.get('/api/v1/withdrawals/callback/ing1', ing1WithdrawalCallback);
 
 app.post(
   '/api/v1/transaction/callback/gidi',
