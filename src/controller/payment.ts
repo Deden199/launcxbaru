@@ -18,6 +18,8 @@ import Decimal from 'decimal.js'
 import moment                    from 'moment-timezone'
 import { computeSettlement }     from '../service/feeSettlement'
 import { postWithRetry }                from '../utils/postWithRetry'
+import { cancelIng1Fallback } from '../service/ing1Fallback'
+import { parseIng1Date, parseIng1Number, processIng1Update } from '../service/ing1Status'
 
 import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
 import { verifyQrisMpmCallbackSignature } from '../service/gidiQrisIntegration'
@@ -380,6 +382,118 @@ const trxExpirationTime = full.expires_at?.value
   }
 }
 
+
+export const ing1TransactionCallback = async (req: Request, res: Response) => {
+  try {
+    const extractString = (input: any): string | null => {
+      if (input == null) return null;
+      if (Array.isArray(input)) return extractString(input[0]);
+      if (typeof input === 'string') {
+        const trimmed = input.trim();
+        return trimmed.length ? trimmed : null;
+      }
+      return String(input);
+    };
+
+    const clientReff =
+      extractString(req.query.client_reff) ||
+      extractString((req.query as any).clientReff) ||
+      extractString((req.query as any).client_ref);
+    if (!clientReff) throw new Error('Missing client_reff');
+
+    const billerReff =
+      extractString(req.query.reff) ||
+      extractString((req.query as any).reference) ||
+      extractString((req.query as any).reff_id);
+
+    const rcRaw = extractString(req.query.rc ?? (req.query as any).RC);
+    const rc = rcRaw != null && rcRaw !== '' ? Number(rcRaw) : null;
+    const statusText = extractString(req.query.status);
+
+    const grossAmount =
+      parseIng1Number(
+        (req.query as any).total ??
+          req.query.amount ??
+          (req.query as any).gross_amount ??
+          (req.query as any).grossAmount
+      ) ?? undefined;
+
+    const paymentReceivedTime =
+      parseIng1Date(
+        (req.query as any).paid_at ??
+          (req.query as any).payment_received_time ??
+          (req.query as any).paidAt
+      ) ?? undefined;
+
+    const settlementTime =
+      parseIng1Date(
+        (req.query as any).settlement_time ??
+          (req.query as any).settled_at ??
+          (req.query as any).settlementTime
+      ) ?? undefined;
+
+    const expirationTime =
+      parseIng1Date(
+        (req.query as any).expired_at ??
+          (req.query as any).expiration_time ??
+          (req.query as any).expirationTime
+      ) ?? undefined;
+
+    const rawPayload = {
+      ...Object.fromEntries(Object.entries(req.query).map(([key, value]) => [key, value])),
+      _meta: {
+        method: req.method,
+        originalUrl: req.originalUrl,
+      },
+    };
+
+    const existingCb = await prisma.transaction_callback.findFirst({
+      where: { referenceId: clientReff },
+    });
+
+    if (existingCb) {
+      await prisma.transaction_callback.update({
+        where: { id: existingCb.id },
+        data: {
+          requestBody: rawPayload,
+          updatedAt: wibTimestamp(),
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime: expirationTime,
+        },
+      });
+    } else {
+      await prisma.transaction_callback.create({
+        data: {
+          referenceId: clientReff,
+          requestBody: rawPayload,
+          paymentReceivedTime,
+          settlementTime,
+          trxExpirationTime: expirationTime,
+        },
+      });
+    }
+
+    cancelIng1Fallback(clientReff);
+
+    await processIng1Update({
+      orderId: clientReff,
+      rc,
+      statusText,
+      billerReff: billerReff ?? undefined,
+      clientReff,
+      grossAmount,
+      paymentReceivedTime,
+      settlementTime,
+      expirationTime,
+    });
+
+    return res.status(200).json(createSuccessResponse({ message: 'OK' }));
+  } catch (err: any) {
+    logger.error('[ING1 Callback] Error:', err);
+    return res.status(400).json(createErrorResponse(err.message ?? 'Unable to process callback'));
+  }
+};
 
 export const oyTransactionCallback = async (req: Request, res: Response) => {
   let rawBody = ''
@@ -803,6 +917,7 @@ export const getOrder = async (req: AuthRequest, res: Response) => {
 export default {
   createTransaction,
   transactionCallback,
+  ing1TransactionCallback,
   gidiTransactionCallback,
   checkPaymentStatus,
   createOrder,

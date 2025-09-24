@@ -39,8 +39,12 @@ import bankRoutes from './route/bank.routes'
 import { proxyOyQris } from './controller/qr.controller'
 
 // import disbursementRouter from './route/disbursement.routes';
-import paymentController, { transactionCallback } from './controller/payment';
-import { oyTransactionCallback, gidiTransactionCallback } from './controller/payment'
+import paymentController, {
+  transactionCallback,
+  oyTransactionCallback,
+  gidiTransactionCallback,
+  ing1TransactionCallback,
+} from './controller/payment'
 
 import merchantDashRoutes from './route/merchant/dashboard.routes';
 import clientWebRoutes from './route/client/web.routes';    // partner-client routes
@@ -114,6 +118,8 @@ app.post(
   express.json(),
   gidiTransactionCallback
 );
+
+app.get('/api/v1/transaction/callback/ing1', ing1TransactionCallback);
 
 app.post('/api/v1/transaction/callback/oy', oyTransactionCallback);
 

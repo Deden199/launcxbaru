@@ -25,7 +25,9 @@ import { IfpClient, IfpConfig } from './ifpClient';
 import { getActiveProviders } from './provider';
 import { generateDynamicQrisFinal, GidiConfig, GidiQrisResult } from './gidi.service';
 import { scheduleHilogateFallback } from './hilogateFallback';
+import { scheduleIng1Fallback } from './ing1Fallback';
 import { Ing1Client, Ing1Config } from './ing1Client';
+import { parseIng1Date, parseIng1Number, processIng1Update } from './ing1Status';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -184,6 +186,11 @@ export const createTransaction = async (
         providerPayload: (cashinResp.data ?? null) as Prisma.InputJsonValue,
         trxExpirationTime: expiration,
       },
+    });
+
+    scheduleIng1Fallback(refId, ingCfg, {
+      reff: cashinResp.reff ?? null,
+      clientReff: cashinResp.clientReff ?? null,
     });
 
     return {
@@ -797,22 +804,85 @@ export const transactionCallback = async (request: Request) => {
 /* ═════════════ 3. Check Payment Status (with inquiry) ═════════════ */
 export const checkPaymentStatus = async (req: Request) => {
   const refId = req.params.id || req.params.referenceId;
-  const order = await prisma.order.findUnique({ where: { id: refId } });
+  const order = await prisma.order.findUnique({
+    where: { id: refId },
+    select: {
+      id: true,
+      status: true,
+      userId: true,
+      channel: true,
+      merchantId: true,
+      subMerchantId: true,
+      pgRefId: true,
+      pgClientRef: true,
+    },
+  });
   if (order) {
     if (order.status === 'PENDING') {
       const pc = await prisma.partnerClient.findUnique({
         where: { id: order.userId },
         select: { forceSchedule: true },
       });
-      const providers = await getActiveProvidersForClient(order.userId, {
-        schedule: pc?.forceSchedule as any || undefined,
-      });
-      const prov = providers.find(p => p.name === order.channel) as any;
-      if (prov?.checkStatus) {
-        const newStat = await prov.checkStatus({ providerInvoice: order.id });
-        if (newStat !== order.status) {
-          await prisma.order.update({ where: { id: refId }, data: { status: newStat } });
-          order.status = newStat;
+
+      if (order.channel === 'ing1' && order.pgRefId) {
+        try {
+          let cfg: Ing1Config | null = null;
+          if (order.merchantId) {
+            const ingSubs = await getActiveProviders(order.merchantId, 'ing1', {
+              schedule: (pc?.forceSchedule as any) || undefined,
+            });
+            if (ingSubs.length) {
+              const matched = order.subMerchantId
+                ? ingSubs.find((s) => s.id === order.subMerchantId)
+                : null;
+              cfg = (matched ?? ingSubs[0]).config as Ing1Config;
+            }
+          }
+
+          if (cfg) {
+            const ingClient = new Ing1Client(cfg);
+            const resp = await ingClient.checkCashin({
+              reff: order.pgRefId,
+              clientReff: order.pgClientRef ?? order.id,
+            });
+            const data = resp.data ?? {};
+            await processIng1Update({
+              orderId: order.id,
+              rc: resp.rc,
+              statusText: (data.status as string) ?? resp.status,
+              billerReff: resp.reff ?? order.pgRefId,
+              clientReff: resp.clientReff ?? order.pgClientRef ?? order.id,
+              grossAmount:
+                parseIng1Number(data.total ?? data.amount ?? data.gross_amount ?? data.grossAmount) ?? undefined,
+              paymentReceivedTime:
+                parseIng1Date(data.paid_at ?? data.payment_received_time ?? data.paidAt) ?? undefined,
+              settlementTime:
+                parseIng1Date(data.settlement_time ?? data.settled_at ?? data.settlementTime) ?? undefined,
+              expirationTime:
+                parseIng1Date(data.expired_at ?? data.expiration_time ?? data.expirationTime) ?? undefined,
+            });
+            const refreshed = await prisma.order.findUnique({
+              where: { id: order.id },
+              select: { status: true },
+            });
+            if (refreshed) {
+              order.status = refreshed.status;
+            }
+          }
+        } catch (err: any) {
+          logger.error(`[checkPaymentStatus] ING1 requery failed for ${order.id}: ${err.message}`);
+        }
+      } else {
+        const providers = await getActiveProvidersForClient(order.userId, {
+          schedule: (pc?.forceSchedule as any) || undefined,
+        });
+        const prov = providers.find((p) => p.name === order.channel) as any;
+        if (prov?.checkStatus) {
+          const newStat = await prov.checkStatus({ providerInvoice: order.id });
+          if (newStat !== order.status) {
+            await prisma.order.update({ where: { id: refId }, data: { status: newStat } });
+            order.status = newStat;
+          }
         }
       }
     }
