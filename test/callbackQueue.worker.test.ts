@@ -57,7 +57,10 @@ test('callback jobs are retried after rate limiting', async (t) => {
   const originalDelete = prisma.callbackJob.delete
   const originalDeadLetterCreate = prisma.callbackJobDeadLetter.create
 
-  ;(prisma.callbackJob as any).findMany = async () => {
+  const findManyArgs: any[] = []
+
+  ;(prisma.callbackJob as any).findMany = async (args: any) => {
+    findManyArgs.push(args)
     if (job.delivered) {
       return []
     }
@@ -103,6 +106,11 @@ test('callback jobs are retried after rate limiting', async (t) => {
   assert.equal(deadLetterCalled, false)
   assert.equal(jobDeleted, false)
   assert.ok(job.lastError, 'lastError should be recorded after rate limit')
+  assert.deepEqual(
+    findManyArgs[findManyArgs.length - 1]?.where?.partnerClientId,
+    { not: null },
+    'findMany should filter out legacy rows without partnerClientId'
+  )
 
   await processCallbackJobs()
   assert.equal(postCallCount, 2)
@@ -111,6 +119,11 @@ test('callback jobs are retried after rate limiting', async (t) => {
   assert.equal(deadLetterCalled, false)
   assert.equal(jobDeleted, false)
   assert.equal(job.lastError, null)
+  assert.deepEqual(
+    findManyArgs[findManyArgs.length - 1]?.where?.partnerClientId,
+    { not: null },
+    'findMany should keep enforcing the partnerClientId filter'
+  )
 })
 
 test(
