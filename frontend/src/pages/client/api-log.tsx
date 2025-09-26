@@ -3,12 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import apiClient from '@/lib/apiClient'
 
+type LogOrigin = 'callback-job' | 'callback-dead-letter' | 'client-request'
+
 interface ApiLog {
   id: string
-  url: string
+  origin: LogOrigin
+  url: string | null
+  method: string | null
+  path: string | null
   statusCode: number | null
   errorMessage?: string | null
   responseBody?: string | null
+  payload?: string | null
   createdAt: string
   respondedAt?: string | null
 }
@@ -352,6 +358,17 @@ export default function ApiLogPage() {
   }
   const pretty = (s?: string) => { if(!s) return '-'; try{ return JSON.stringify(JSON.parse(s),null,2)}catch{return s} }
   const copy = async (t:string)=>{ try{ await navigator.clipboard.writeText(t) }catch{} }
+  const originLabel = (origin: LogOrigin) => {
+    if(origin === 'client-request') return 'Client REST'
+    if(origin === 'callback-dead-letter') return 'Callback DLQ'
+    return 'Callback Queue'
+  }
+
+  const originBadge = (origin: LogOrigin) => {
+    if(origin === 'client-request') return 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30'
+    if(origin === 'callback-dead-letter') return 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
+    return 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
+  }
 
   return (
     <div className="space-y-6">
@@ -411,11 +428,13 @@ export default function ApiLogPage() {
           <table className="min-w-full text-left text-sm text-neutral-200">
             <thead>
               <tr className="sticky top-0 z-10 bg-neutral-900/80 backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
-                <th className="px-4 py-3 font-medium text-neutral-300">Request URL</th>
+                <th className="px-4 py-3 font-medium text-neutral-300">Source</th>
+                <th className="px-4 py-3 font-medium text-neutral-300">Endpoint / URL</th>
                 <th className="px-4 py-3 font-medium text-neutral-300">Status</th>
                 <th className="px-4 py-3 font-medium text-neutral-300">Error</th>
+                <th className="px-4 py-3 font-medium text-neutral-300">Payload</th>
                 <th className="px-4 py-3 font-medium text-neutral-300">Response</th>
-                <th className="px-4 py-3 font-medium text-neutral-300 whitespace-nowrap">Requested At (WIB)</th>
+                <th className="px-4 py-3 font-medium text-neutral-300 whitespace-nowrap">Logged At (WIB)</th>
                 <th className="px-4 py-3 font-medium text-neutral-300 whitespace-nowrap">Responded At (WIB)</th>
               </tr>
             </thead>
@@ -423,30 +442,60 @@ export default function ApiLogPage() {
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={`sk-${i}`} className="animate-pulse">
+                    <td className="px-4 py-3"><div className="h-6 w-20 rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-56 rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-6 w-16 rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-40 rounded bg-neutral-800" /></td>
+                    <td className="px-4 py-3"><div className="h-20 w-full rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-20 w-full rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-neutral-800" /></td>
                     <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-neutral-800" /></td>
                   </tr>
                 ))
               ) : logs.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-neutral-400">No logs found</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-neutral-400">No logs found</td></tr>
               ) : (
                 logs.map((log) => (
                   <tr key={log.id} className="hover:bg-neutral-900/40">
+                    <td className="px-4 py-3 align-top">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${originBadge(log.origin)}`}>
+                        {originLabel(log.origin)}
+                      </span>
+                    </td>
                     <td className="max-w-[28rem] px-4 py-3 align-top">
-                      <div className="flex items-start gap-2">
-                        <a href={log.url} target="_blank" rel="noreferrer"
-                           className="truncate text-indigo-400 hover:text-indigo-300 hover:underline" title={log.url}>
-                          {log.url}
-                        </a>
-                        <button onClick={()=>navigator.clipboard.writeText(log.url)}
-                                className="rounded-lg px-2 py-0.5 text-xs text-neutral-400 ring-1 ring-neutral-700 hover:bg-neutral-800 hover:text-neutral-200">
-                          Copy
-                        </button>
-                      </div>
+                      {log.origin === 'client-request' ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center rounded-md bg-neutral-800 px-2 py-0.5 text-xs font-semibold uppercase text-neutral-200">
+                              {log.method ?? '-'}
+                            </span>
+                            <span className="truncate text-neutral-100" title={log.path ?? '-'}>{log.path ?? '-'}</span>
+                          </div>
+                          <div className="flex gap-2 text-xs text-neutral-500">
+                            <button
+                              onClick={()=>{ if(log.path) copy(`${log.method ?? 'GET'} ${log.path}`) }}
+                              className="rounded-lg px-2 py-0.5 text-[11px] text-neutral-400 ring-1 ring-neutral-700 hover:bg-neutral-800 hover:text-neutral-200"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          {log.url ? (
+                            <a href={log.url} target="_blank" rel="noreferrer"
+                               className="truncate text-indigo-400 hover:text-indigo-300 hover:underline" title={log.url}>
+                              {log.url}
+                            </a>
+                          ) : <span className="text-neutral-400">-</span>}
+                          {log.url && (
+                            <button onClick={()=>copy(log.url ?? '')}
+                                    className="rounded-lg px-2 py-0.5 text-xs text-neutral-400 ring-1 ring-neutral-700 hover:bg-neutral-800 hover:text-neutral-200">
+                              Copy
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 align-top">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${badgeForStatus(log.statusCode)}`}>
@@ -457,6 +506,20 @@ export default function ApiLogPage() {
                       <span className="block truncate text-neutral-300" title={log.errorMessage || '-'}>
                         {log.errorMessage || '-'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      {log.payload ? (
+                        <details className="group max-w-[26rem]">
+                          <summary className="cursor-pointer select-none text-neutral-300 hover:text-neutral-100">
+                            View payload
+                            <span className="ml-2 text-xs text-neutral-500 group-open:hidden">(expand)</span>
+                            <span className="ml-2 hidden text-xs text-neutral-500 group-open:inline">(collapse)</span>
+                          </summary>
+                          <div className="mt-2 max-h-60 overflow-auto rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-200">
+                            <pre className="whitespace-pre-wrap break-words">{pretty(log.payload)}</pre>
+                          </div>
+                        </details>
+                      ) : (<span className="text-neutral-500">-</span>)}
                     </td>
                     <td className="px-4 py-3 align-top">
                       {log.responseBody ? (

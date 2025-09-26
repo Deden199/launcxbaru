@@ -200,6 +200,7 @@ model PartnerClient {
   forceSchedule      String?
   callbackJobs       CallbackJob[]
   callbackJobDeadLetters CallbackJobDeadLetter[]
+  clientApiRequestLogs ClientApiRequestLog[]
 }
 
 model Order {
@@ -392,4 +393,20 @@ model HilogateCallbackWatcher {
   attemptCount Int      @default(0)
   processed    Boolean  @default(false)
   nextRetryAt  DateTime
+}
+
+model ClientApiRequestLog {
+  id              String         @id @default(auto()) @map("_id") @db.ObjectId
+  partnerClientId String
+  partnerClient   PartnerClient  @relation(fields: [partnerClientId], references: [id])
+  method          String
+  path            String
+  statusCode      Int
+  errorMessage    String?
+  payload         Json?
+  responseBody    String?
+  createdAt       DateTime       @default(now())
+
+  @@index([partnerClientId, createdAt])
+  @@map("client_api_request_log")
 }
