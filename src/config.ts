@@ -8,6 +8,9 @@ if (!jwtSecret) {
   throw new Error('JWT_SECRET environment variable is required');
 }
 
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 10_000;
+
 
 export const config = {
   api: {
@@ -20,6 +23,10 @@ export const config = {
     swaggerUrl:
       process.env.SWAGGER_URL || `http://localhost:${PORT}/api/v1`,
     port: PORT,
+    rateLimit: {
+      windowMs: RATE_LIMIT_WINDOW_MS,
+      max: RATE_LIMIT_MAX,
+    },
     // Callback URL for transaction notifications
     callbackUrl:
       process.env.CALLBACK_URL ||

@@ -8,6 +8,13 @@ See [docs/services](docs/services) for service-specific endpoints, dependencies,
 
 Set `FRONTEND_BASE_URL` to the publicly accessible URL of the frontend site. It is used when creating card payment sessions to build redirect links such as `/payment-success`, `/payment-failure`, and `/payment-expired`.
 
+Rate limiting for public traffic can be tuned with the following environment variables:
+
+- `RATE_LIMIT_WINDOW_MS` (default `60000`): Sliding time window in milliseconds for the global rate limiter.
+- `RATE_LIMIT_MAX` (default `10000`): Maximum number of requests allowed per client within the configured window.
+
+Ops teams can raise or lower these values per instance to match the expected throughput.
+
 ## Reconcile Partner Balances
 
 Run `npm run reconcile-balances` after setting database environment variables to recompute client balances.
