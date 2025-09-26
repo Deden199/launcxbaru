@@ -19,6 +19,7 @@ export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
       take,
       select: {
         id: true,
+        url: true,
         attempts: true,
         delivered: true,
         createdAt: true,
@@ -33,6 +34,7 @@ export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
       take,
       select: {
         id: true,
+        url: true,
         attempts: true,
         createdAt: true,
         statusCode: true,
@@ -47,23 +49,25 @@ export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
   const merged = [
     ...jobs.map(j => ({
       id: j.id,
+      url: j.url,
       status: j.delivered ? 'DELIVERED' : 'PENDING',
       attempts: j.attempts,
       createdAt: j.createdAt,
-      updatedAt: j.updatedAt,
-      statusCode: (j.lastError as any)?.statusCode ?? null,
+      respondedAt: j.delivered ? j.updatedAt : null,
+      statusCode: (j.lastError as any)?.statusCode ?? (j.delivered ? 200 : null),
       errorMessage: (j.lastError as any)?.message ?? null,
-      responseBody: j.responseBody ?? null,
+      responseBody: normaliseResponseBody(j.responseBody),
     })),
     ...deadLetters.map(d => ({
       id: d.id,
+      url: d.url,
       status: 'FAILED',
       attempts: d.attempts,
       createdAt: d.createdAt,
-      updatedAt: d.createdAt,
+      respondedAt: d.createdAt,
       statusCode: d.statusCode ?? null,
       errorMessage: d.errorMessage ?? null,
-      responseBody: d.responseBody ?? null,
+      responseBody: normaliseResponseBody(d.responseBody),
     })),
   ]
 
@@ -72,4 +76,14 @@ export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
   const total = totalJobs + totalDeadLetters
 
   return res.json({ rows, total })
+}
+
+function normaliseResponseBody(body: unknown) {
+  if (body == null) return null
+  if (typeof body === 'string') return body
+  try {
+    return JSON.stringify(body)
+  } catch {
+    return String(body)
+  }
 }
