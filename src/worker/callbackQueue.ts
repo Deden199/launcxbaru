@@ -26,7 +26,12 @@ export async function processCallbackJobs() {
       )
       await prisma.callbackJob.update({
         where: { id: job.id },
-        data: { delivered: true, attempts: job.attempts + 1, lastError: null },
+        data: {
+          delivered: true,
+          attempts: job.attempts + 1,
+          lastError: null,
+          responseBody: null,
+        },
       })
       logger.info(`[callbackQueue] delivered job ${job.id}`)
     } catch (err: any) {
@@ -46,7 +51,7 @@ export async function processCallbackJobs() {
             signature: job.signature,
             statusCode,
             errorMessage: err.message,
-            responseBody: err.response?.data,
+            responseBody: err.response?.data ?? null,
             attempts,
           },
         })
@@ -55,9 +60,19 @@ export async function processCallbackJobs() {
           `[callbackQueue] moved job ${job.id} to dead-letter queue: ${err.message}`
         )
       } else {
+        const lastError = {
+          statusCode: statusCode ?? null,
+          message: err?.message ?? 'Unknown error',
+          timestamp: new Date().toISOString(),
+        }
+
         await prisma.callbackJob.update({
           where: { id: job.id },
-          data: { attempts, lastError: err.message },
+          data: {
+            attempts,
+            lastError,
+            responseBody: err.response?.data ?? null,
+          },
         })
         logger.error(
           `[callbackQueue] delivery failed for job ${job.id}: ${err.message}`
