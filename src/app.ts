@@ -54,6 +54,7 @@ import withdrawalS2SRoutes from './route/withdrawals.s2s.routes';
 import apiKeyAuth from './middleware/apiKeyAuth';
 import { authMiddleware } from './middleware/auth';
 import { globalIpWhitelist } from './middleware/ipWhitelist';
+import { clientApiLogger } from './middleware/clientApiLogger';
 
 import { config } from './config';
 import logger from './logger';
@@ -192,7 +193,7 @@ app.use('/api/v1/admin/ip-whitelist', authMiddleware, adminIpWhitelistRoutes);
 app.use('/api/v1/admin/settlement', authMiddleware, adminSettlementRoutes);
 
 /* ========== 4. PARTNER-CLIENT ========== */
-app.use('/api/v1/client', clientWebRoutes);
+app.use('/api/v1/client', clientApiLogger, clientWebRoutes);
 
 /* ========== 5. MERCHANT DASHBOARD ========== */
 app.use('/api/v1/merchant/dashboard', authMiddleware, merchantDashRoutes);
