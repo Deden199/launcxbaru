@@ -80,8 +80,10 @@ export async function processCallbackJobs() {
     where: {
       delivered: false,
       // Guard against legacy rows that were created without a partnerClientId.
-      // If these appear in the database, delete them or backfill the missing
-      // partnerClientId manually to keep the queue healthy.
+      // If you ever spot these in production, remove them with a one-off
+      // `prisma.callbackJob.deleteMany({ where: { partnerClientId: null } })`
+      // or backfill the missing partnerClientId manually to keep the queue
+      // healthy.
       partnerClientId: { not: null },
       attempts: { lt: config.api.callbackQueue.maxAttempts },
     },

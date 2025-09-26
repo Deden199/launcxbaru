@@ -99,6 +99,16 @@ test('callback jobs are retried after rate limiting', async (t) => {
     ;(prisma.callbackJobDeadLetter as any).create = originalDeadLetterCreate
   })
 
+  const assertLegacyGuard = (message: string) => {
+    findManyArgs.forEach((args, index) => {
+      assert.deepEqual(
+        args?.where?.partnerClientId,
+        { not: null },
+        `${message} (call ${index + 1})`
+      )
+    })
+  }
+
   await processCallbackJobs()
   assert.equal(postCallCount, 1)
   assert.equal(job.delivered, false)
@@ -106,11 +116,7 @@ test('callback jobs are retried after rate limiting', async (t) => {
   assert.equal(deadLetterCalled, false)
   assert.equal(jobDeleted, false)
   assert.ok(job.lastError, 'lastError should be recorded after rate limit')
-  assert.deepEqual(
-    findManyArgs[findManyArgs.length - 1]?.where?.partnerClientId,
-    { not: null },
-    'findMany should filter out legacy rows without partnerClientId'
-  )
+  assertLegacyGuard('findMany should filter out legacy rows without partnerClientId')
 
   await processCallbackJobs()
   assert.equal(postCallCount, 2)
@@ -119,11 +125,7 @@ test('callback jobs are retried after rate limiting', async (t) => {
   assert.equal(deadLetterCalled, false)
   assert.equal(jobDeleted, false)
   assert.equal(job.lastError, null)
-  assert.deepEqual(
-    findManyArgs[findManyArgs.length - 1]?.where?.partnerClientId,
-    { not: null },
-    'findMany should keep enforcing the partnerClientId filter'
-  )
+  assertLegacyGuard('findMany should keep enforcing the partnerClientId filter')
 })
 
 test(
