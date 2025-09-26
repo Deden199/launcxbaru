@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { Search, X, Building2, UserPlus, KeyRound, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Search, X, Building2, UserPlus, KeyRound, Loader2, CheckCircle2, AlertCircle, Copy, Check } from 'lucide-react'
 
 interface Client {
   id: string
@@ -23,6 +23,11 @@ interface Client {
 type CreateResp = {
   client: Client
   defaultUser: { email: string; password: string }
+}
+
+type CredsState = {
+  client: Client
+  defaultUser?: { email: string; password: string }
 }
 
 export default function ApiClientsPage() {
@@ -47,7 +52,39 @@ export default function ApiClientsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState(search)
 
   // creds modal
-  const [creds, setCreds] = useState<CreateResp | null>(null)
+  const [creds, setCreds] = useState<CredsState | null>(null)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const copyTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const handleCopy = async (value: string, field: string) => {
+    try {
+      if (typeof navigator === 'undefined') {
+        throw new Error('Clipboard not supported')
+      }
+      const clipboard = navigator.clipboard
+      if (!clipboard || typeof clipboard.writeText !== 'function') {
+        throw new Error('Clipboard not supported')
+      }
+      await clipboard.writeText(value)
+      setCopiedField(field)
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopiedField(current => (current === field ? null : current))
+      }, 2000)
+    } catch {
+      setCopiedField(null)
+    }
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250)
@@ -99,6 +136,7 @@ export default function ApiClientsPage() {
       const res = await api.post<CreateResp>('/admin/clients', payload)
       setClients(cs => [res.data.client, ...cs])
       setCreds(res.data)
+      setCopiedField(null)
       setNewName('')
       setNewEmail('')
       setNewFeePercent(0.5)
@@ -229,21 +267,61 @@ export default function ApiClientsPage() {
         {creds && (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4">
             <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-5 shadow-2xl">
-              <div className="mb-3 flex items-center gap-2">
-                <KeyRound size={16} />
-                <h3 className="text-base font-semibold">Client Credentials</h3>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <KeyRound size={16} />
+                  <h3 className="text-base font-semibold">Client Credentials</h3>
+                </div>
+                <span className="text-xs text-neutral-400">{creds.client.name}</span>
               </div>
-              <p className="mb-1 text-sm">
-                <span className="text-neutral-400">Email:</span>{' '}
-                <code className="rounded bg-neutral-950 px-1.5 py-0.5 font-mono">{creds.defaultUser.email}</code>
-              </p>
-              <p className="mb-4 text-sm">
-                <span className="text-neutral-400">Password:</span>{' '}
-                <code className="rounded bg-neutral-950 px-1.5 py-0.5 font-mono">{creds.defaultUser.password}</code>
-              </p>
-              <div className="flex justify-end">
+              {creds.defaultUser && (
+                <div className="mb-4 space-y-2 text-sm">
+                  <div>
+                    <span className="text-neutral-400">Email:</span>{' '}
+                    <code className="rounded bg-neutral-950 px-1.5 py-0.5 font-mono">{creds.defaultUser.email}</code>
+                  </div>
+                  <div>
+                    <span className="text-neutral-400">Password:</span>{' '}
+                    <code className="rounded bg-neutral-950 px-1.5 py-0.5 font-mono">{creds.defaultUser.password}</code>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <span className="text-xs text-neutral-400">API Key</span>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 break-all rounded bg-neutral-950 px-1.5 py-0.5 text-xs font-mono">{creds.client.apiKey}</code>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(creds.client.apiKey, 'apiKey')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-2.5 py-1 text-xs font-medium hover:bg-neutral-800"
+                    >
+                      {copiedField === 'apiKey' ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedField === 'apiKey' ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs text-neutral-400">API Secret</span>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 break-all rounded bg-neutral-950 px-1.5 py-0.5 text-xs font-mono">{creds.client.apiSecret}</code>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(creds.client.apiSecret, 'apiSecret')}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-2.5 py-1 text-xs font-medium hover:bg-neutral-800"
+                    >
+                      {copiedField === 'apiSecret' ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedField === 'apiSecret' ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end">
                 <button
-                  onClick={() => setCreds(null)}
+                  onClick={() => {
+                    setCreds(null)
+                    setCopiedField(null)
+                  }}
                   className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm hover:bg-neutral-800"
                 >
                   Tutup
@@ -302,12 +380,24 @@ export default function ApiClientsPage() {
                   <tr key={c.id}>
                     <td className="px-3 py-2">{c.name}</td>
                     <td className="px-3 py-2">
-                      <a
-                        href={`/admin/clients/${c.id}`}
-                        className="rounded-lg border border-neutral-800 px-3 py-1 text-xs hover:bg-neutral-800"
-                      >
-                        Edit
-                      </a>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCreds({ client: c })
+                            setCopiedField(null)
+                          }}
+                          className="rounded-lg border border-neutral-800 px-3 py-1 text-xs hover:bg-neutral-800"
+                        >
+                          View Credentials
+                        </button>
+                        <a
+                          href={`/admin/clients/${c.id}`}
+                          className="rounded-lg border border-neutral-800 px-3 py-1 text-xs hover:bg-neutral-800"
+                        >
+                          Edit
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))}

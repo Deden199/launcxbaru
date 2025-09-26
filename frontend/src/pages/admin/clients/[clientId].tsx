@@ -1,11 +1,11 @@
 // frontend/src/pages/admin/clients/[clientId].tsx
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { Loader2, Users, UserCog, Save, AlertCircle } from 'lucide-react'
+import { Loader2, Users, UserCog, Save, AlertCircle, Copy, Check } from 'lucide-react'
 
 interface Client {
   id: string
@@ -51,6 +51,8 @@ export default function EditClientPage() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [error, setError] = useState('')
+  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const copyTimeoutRef = useRef<number | null>(null)
 
   // Load client data
   useEffect(() => {
@@ -82,6 +84,40 @@ export default function EditClientPage() {
     }
     run()
   }, [clientId])
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setCopiedField(null)
+  }, [client?.id])
+
+  const handleCopy = async (value: string, field: string) => {
+    try {
+      if (typeof navigator === 'undefined') {
+        throw new Error('Clipboard not supported')
+      }
+      const clipboard = navigator.clipboard
+      if (!clipboard || typeof clipboard.writeText !== 'function') {
+        throw new Error('Clipboard not supported')
+      }
+      await clipboard.writeText(value)
+      setCopiedField(field)
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopiedField(current => (current === field ? null : current))
+      }, 2000)
+    } catch {
+      setCopiedField(null)
+    }
+  }
 
   // Load all clients as options
   useEffect(() => {
@@ -175,6 +211,48 @@ export default function EditClientPage() {
         {/* Card */}
         <div className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
           <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2 space-y-4 rounded-xl border border-neutral-800 bg-neutral-950/50 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-neutral-200">Credentials</span>
+                <span className="text-xs text-neutral-500">Read only</span>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-neutral-400">API Key</label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    readOnly
+                    value={client.apiKey}
+                    className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm font-mono tracking-wide text-neutral-100 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(client.apiKey, 'apiKey')}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-neutral-800 px-4 text-xs font-semibold hover:bg-neutral-800"
+                  >
+                    {copiedField === 'apiKey' ? <Check size={14} /> : <Copy size={14} />}
+                    {copiedField === 'apiKey' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-neutral-400">API Secret</label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    readOnly
+                    value={client.apiSecret}
+                    className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm font-mono tracking-wide text-neutral-100 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(client.apiSecret, 'apiSecret')}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-neutral-800 px-4 text-xs font-semibold hover:bg-neutral-800"
+                  >
+                    {copiedField === 'apiSecret' ? <Check size={14} /> : <Copy size={14} />}
+                    {copiedField === 'apiSecret' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            </div>
             {/* Name */}
             <div className="space-y-1">
               <label className="text-sm text-neutral-300">Name</label>
