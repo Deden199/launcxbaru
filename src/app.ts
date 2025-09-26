@@ -67,6 +67,16 @@ const app = express();
 // cek readiness IFP sekali di startup (tidak melempar error)
 const IFP_ENABLED = ensureIfpReady();
 
+const rateLimitExemptPaths = new Set([
+  '/api/v1/transaction/callback',
+  '/api/v1/transactions/callback',
+  '/api/v1/transaction/callback/gidi',
+  '/api/v1/transaction/callback/ing1',
+  '/api/v1/transaction/callback/oy',
+  '/api/v1/withdrawals/callback',
+  '/api/v1/withdrawals/callback/ing1',
+]);
+
 loadWeekendOverrideDates().catch(err => console.error('[init]', err));
 
 app.disable('etag');
@@ -133,9 +143,10 @@ app.set('trust proxy', 1);
 app.use(globalIpWhitelist);
 app.use(helmet());
 app.use(rateLimit({
-  windowMs: 60_000,
-  max: Number(process.env.RATE_LIMIT_MAX ?? 1000),
-  message: 'Too many requests, try again later.'
+  windowMs: config.api.rateLimit.windowMs,
+  max: config.api.rateLimit.max,
+  message: 'Too many requests, try again later.',
+  skip: (req) => rateLimitExemptPaths.has(req.path),
 }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(requestLogger);
