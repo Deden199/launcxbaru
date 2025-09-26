@@ -79,6 +79,10 @@ export async function processCallbackJobs() {
   const jobs = await prisma.callbackJob.findMany({
     where: {
       delivered: false,
+      // Guard against legacy rows that were created without a partnerClientId.
+      // If these appear in the database, delete them or backfill the missing
+      // partnerClientId manually to keep the queue healthy.
+      partnerClientId: { not: null },
       attempts: { lt: config.api.callbackQueue.maxAttempts },
     },
     orderBy: { createdAt: 'asc' },
