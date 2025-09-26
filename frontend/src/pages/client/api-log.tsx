@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import apiClient from '@/lib/apiClient'
 
 interface ApiLog {
@@ -8,7 +8,7 @@ interface ApiLog {
   url: string
   statusCode: number | null
   errorMessage?: string | null
-  responseBody?: string | null
+  responseBody?: string | Record<string, unknown> | null
   createdAt: string
   respondedAt?: string | null
 }
@@ -306,6 +306,9 @@ export default function ApiLogPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [total, setTotal] = useState(0)
 
   // store as JKT wall time strings
   const [startStr, setStartStr] = useState('')
@@ -320,27 +323,70 @@ export default function ApiLogPage() {
   const dateFromISO = useMemo(()=>jktISOStringFromInput(startStr),[startStr])
   const dateToISO   = useMemo(()=>jktISOStringFromInput(endStr),[endStr])
 
-  const fetchLogs = async () => {
+  interface FetchOverride {
+    page?: number
+    limit?: number
+    dateFrom?: string | undefined
+    dateTo?: string | undefined
+    status?: StatusFilter
+  }
+
+  const fetchLogs = useCallback(async (override?: FetchOverride) => {
     setLoading(true); setError('')
     try {
-      const params: Record<string, any> = {}
-      if (dateFromISO) params.date_from = dateFromISO
-      if (dateToISO)   params.date_to   = dateToISO
-      if (statusFilter !== 'all') params.success = statusFilter === 'success'
-      const { data } = await apiClient.get<{ rows: ApiLog[] }>('/client/api-logs', { params })
+      const currentPage = override?.page ?? page
+      const currentLimit = override?.limit ?? pageSize
+      const currentFrom = override?.dateFrom ?? dateFromISO
+      const currentTo = override?.dateTo ?? dateToISO
+      const currentStatus = override?.status ?? statusFilter
+
+      const params: Record<string, any> = {
+        page: currentPage,
+        limit: currentLimit,
+      }
+      if (currentFrom) params.date_from = currentFrom
+      if (currentTo) params.date_to = currentTo
+      if (currentStatus !== 'all') params.success = currentStatus === 'success'
+
+      const { data } = await apiClient.get<{ rows: ApiLog[]; total: number }>('/client/api-logs', { params })
       setLogs(data.rows || [])
+      setTotal(data.total ?? 0)
     } catch (e) {
       console.error('Failed to fetch API logs', e)
       setError('Failed to load logs')
     } finally {
       setLoading(false)
     }
-  }
+  }, [dateFromISO, dateToISO, page, pageSize, statusFilter])
+
+  const initialised = useRef(false)
+  useEffect(()=>{
+    if(initialised.current) return
+    if(!startStr || !endStr) return
+    initialised.current = true
+    fetchLogs({
+      page: 1,
+      dateFrom: jktISOStringFromInput(startStr),
+      dateTo: jktISOStringFromInput(endStr),
+    })
+  },[startStr, endStr, fetchLogs])
+
+  const totalPages = useMemo(()=> total > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 0, [total, pageSize])
+  const startIndex = total === 0 ? 0 : Math.min((page-1)*pageSize + 1, total)
+  const endIndex = total === 0 ? 0 : Math.min(page*pageSize, total)
 
   const quick = (hours:number)=>{
     const now = new Date()
-    setEndStr(jktInputStringFromDate(now))
-    setStartStr(jktInputStringFromDate(new Date(now.getTime()-hours*3600*1000)))
+    const endS = jktInputStringFromDate(now)
+    const startS = jktInputStringFromDate(new Date(now.getTime()-hours*3600*1000))
+    setEndStr(endS)
+    setStartStr(startS)
+    setPage(1)
+    fetchLogs({
+      page: 1,
+      dateFrom: jktISOStringFromInput(startS),
+      dateTo: jktISOStringFromInput(endS),
+    })
   }
 
   const badgeForStatus = (code?: number | null) => {
@@ -350,7 +396,21 @@ export default function ApiLogPage() {
     if (code >= 200) return 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
     return 'bg-neutral-500/15 text-neutral-300 ring-1 ring-neutral-500/30'
   }
-  const pretty = (s?: string) => { if(!s) return '-'; try{ return JSON.stringify(JSON.parse(s),null,2)}catch{return s} }
+  const pretty = (value?: string | Record<string, unknown> | null) => {
+    if (value == null) return '-'
+    if (typeof value === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2)
+      } catch {
+        return value
+      }
+    }
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value)
+    }
+  }
   const copy = async (t:string)=>{ try{ await navigator.clipboard.writeText(t) }catch{} }
 
   return (
@@ -371,14 +431,28 @@ export default function ApiLogPage() {
           <RangeDateTimePicker
             startValue={startStr}
             endValue={endStr}
-            onApply={(s,e)=>{ setStartStr(s); setEndStr(e) }}
+            onApply={(s,e)=>{
+              setStartStr(s)
+              setEndStr(e)
+              setPage(1)
+              fetchLogs({
+                page: 1,
+                dateFrom: jktISOStringFromInput(s),
+                dateTo: jktISOStringFromInput(e),
+              })
+            }}
           />
         </div>
         <div className="col-span-2">
           <label className="mb-1 block text-xs text-neutral-400">Status</label>
           <select
             value={statusFilter}
-            onChange={(e)=>setStatusFilter(e.target.value as StatusFilter)}
+            onChange={(e)=>{
+              const next = e.target.value as StatusFilter
+              setStatusFilter(next)
+              setPage(1)
+              fetchLogs({ page: 1, status: next })
+            }}
             className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:ring-2 focus:ring-indigo-600"
           >
             <option value="all">All</option>
@@ -393,8 +467,25 @@ export default function ApiLogPage() {
             <button onClick={()=>quick(24)} className="rounded-lg px-2.5 py-1 text-xs text-neutral-300 ring-1 ring-neutral-700 hover:bg-neutral-800">Last 24h</button>
             <button onClick={()=>quick(24*7)} className="rounded-lg px-2.5 py-1 text-xs text-neutral-300 ring-1 ring-neutral-700 hover:bg-neutral-800">Last 7d</button>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={fetchLogs}
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1 text-xs text-neutral-400">
+              Rows/page
+              <select
+                value={pageSize}
+                onChange={(e)=>{
+                  const nextSize = Number(e.target.value)
+                  setPageSize(nextSize)
+                  setPage(1)
+                  fetchLogs({ page: 1, limit: nextSize })
+                }}
+                className="rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 outline-none focus:ring-1 focus:ring-indigo-600"
+              >
+                {[20, 50, 100].map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </label>
+            <button onClick={()=>{ setPage(1); fetchLogs({ page: 1 }) }}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500">
               Apply
             </button>
@@ -479,6 +570,49 @@ export default function ApiLogPage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 text-sm text-neutral-300 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          {total > 0 ? (
+            <span>
+              Showing <strong>{startIndex}</strong>
+              {' '}–{' '}
+              <strong>{endIndex}</strong> of <strong>{total}</strong> results
+            </span>
+          ) : (
+            <span>No results</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={()=>{
+              if(page <= 1) return
+              const next = page - 1
+              setPage(next)
+              fetchLogs({ page: next })
+            }}
+            disabled={page <= 1 || loading}
+            className="rounded-lg px-3 py-1.5 text-sm text-neutral-200 ring-1 ring-neutral-700 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Prev
+          </button>
+          <div className="px-2 text-xs text-neutral-400">
+            Page {totalPages ? page : 0} of {totalPages}
+          </div>
+          <button
+            onClick={()=>{
+              if(!totalPages || page >= totalPages) return
+              const next = page + 1
+              setPage(next)
+              fetchLogs({ page: next })
+            }}
+            disabled={!totalPages || page >= totalPages || loading}
+            className="rounded-lg px-3 py-1.5 text-sm text-neutral-200 ring-1 ring-neutral-700 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Next
+          </button>
         </div>
       </div>
 

@@ -4,8 +4,13 @@ import { ClientAuthRequest } from '../middleware/clientAuth'
 
 export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
   const { page = '1', limit = '50' } = req.query as Record<string, any>
-  const pageNum = Math.max(1, parseInt(String(page), 10))
-  const pageSize = Math.min(100, parseInt(String(limit), 10))
+
+  const parsedPage = Number.parseInt(String(page), 10)
+  const parsedLimit = Number.parseInt(String(limit), 10)
+
+  const pageNum = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
+  const pageSizeRaw = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50
+  const pageSize = Math.min(100, pageSizeRaw)
 
   const skip = (pageNum - 1) * pageSize
   const take = pageSize + skip
@@ -81,9 +86,6 @@ export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
 function normaliseResponseBody(body: unknown) {
   if (body == null) return null
   if (typeof body === 'string') return body
-  try {
-    return JSON.stringify(body)
-  } catch {
-    return String(body)
-  }
+  if (typeof body === 'object') return body as Record<string, unknown>
+  return String(body)
 }
