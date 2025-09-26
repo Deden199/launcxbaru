@@ -27,8 +27,12 @@ export async function postWithRetry<T = any>(
       return resp;
     } catch (err: any) {
       lastErr = err;
-            const status = err.response?.status;
-      if (status >= 400 && status < 500) {
+      const status = err.response?.status;
+      const isClientError = status >= 400 && status < 500;
+      const isTransientClientError =
+        status !== undefined && [408, 429].includes(status);
+
+      if (isClientError && !isTransientClientError) {
         logger.error(
           `[postWithRetry] client error ${status}: ${JSON.stringify(err.response?.data)}`
         );
@@ -40,12 +44,54 @@ export async function postWithRetry<T = any>(
         );
         throw err;
       }
-      const delay = intervalMs * Math.pow(2, attempt - 1);
+      let delay = intervalMs * Math.pow(2, attempt - 1);
+
+      if (isTransientClientError) {
+        const retryAfterHeader = err.response?.headers?.['retry-after'];
+        const retryAfterDelay = parseRetryAfter(retryAfterHeader);
+        if (retryAfterDelay !== null) {
+          delay = Math.max(delay, retryAfterDelay);
+        }
+      }
+
       logger.warn(
-        `[postWithRetry] attempt ${attempt} failed, retrying in ${delay}ms`
+        `[postWithRetry] attempt ${attempt} failed with status ${
+          status ?? 'unknown'
+        }, retrying in ${delay}ms`
       );
       await new Promise((res) => setTimeout(res, delay));
     }
   }
   throw lastErr;
+}
+
+function parseRetryAfter(value?: string | number | null): number | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    return parseRetryAfter(value[0] ?? null);
+  }
+
+  if (typeof value === 'number') {
+    return value >= 0 ? value * 1000 : null;
+  }
+
+  const trimmed = value.trim();
+  const seconds = Number(trimmed);
+  if (!Number.isNaN(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const date = Date.parse(trimmed);
+  if (!Number.isNaN(date)) {
+    const diff = date - Date.now();
+    if (diff > 0) {
+      return diff;
+    }
+    return 0;
+  }
+
+  return null;
 }

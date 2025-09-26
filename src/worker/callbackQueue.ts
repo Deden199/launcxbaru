@@ -37,7 +37,9 @@ export async function processCallbackJobs() {
     } catch (err: any) {
       const attempts = job.attempts + 1
       const statusCode = err?.response?.status
-      const isClientError = statusCode >= 400 && statusCode < 500
+      const isRateLimited = statusCode === 429
+      const isClientError =
+        statusCode >= 400 && statusCode < 500 && !isRateLimited
       const maxAttemptsReached =
         attempts >= config.api.callbackQueue.maxAttempts
 
