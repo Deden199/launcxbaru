@@ -6,11 +6,11 @@ import apiClient from '@/lib/apiClient'
 interface ApiLog {
   id: string
   url: string
-  statusCode: number
-  errorMessage?: string
-  responseBody?: string
+  statusCode: number | null
+  errorMessage?: string | null
+  responseBody?: string | null
   createdAt: string
-  respondedAt?: string
+  respondedAt?: string | null
 }
 
 type StatusFilter = 'all' | 'success' | 'failure'
@@ -327,8 +327,8 @@ export default function ApiLogPage() {
       if (dateFromISO) params.date_from = dateFromISO
       if (dateToISO)   params.date_to   = dateToISO
       if (statusFilter !== 'all') params.success = statusFilter === 'success'
-      const { data } = await apiClient.get<{ logs: ApiLog[] }>('/client/api-logs', { params })
-      setLogs(data.logs || [])
+      const { data } = await apiClient.get<{ rows: ApiLog[] }>('/client/api-logs', { params })
+      setLogs(data.rows || [])
     } catch (e) {
       console.error('Failed to fetch API logs', e)
       setError('Failed to load logs')
@@ -343,7 +343,8 @@ export default function ApiLogPage() {
     setStartStr(jktInputStringFromDate(new Date(now.getTime()-hours*3600*1000)))
   }
 
-  const badgeForStatus = (code: number) => {
+  const badgeForStatus = (code?: number | null) => {
+    if (code == null) return 'bg-neutral-500/15 text-neutral-300 ring-1 ring-neutral-500/30'
     if (code >= 500) return 'bg-red-500/15 text-red-300 ring-1 ring-red-500/30'
     if (code >= 400) return 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
     if (code >= 200) return 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
@@ -449,7 +450,7 @@ export default function ApiLogPage() {
                     </td>
                     <td className="px-4 py-3 align-top">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${badgeForStatus(log.statusCode)}`}>
-                        {log.statusCode}
+                        {log.statusCode ?? '-'}
                       </span>
                     </td>
                     <td className="max-w-[18rem] px-4 py-3 align-top">
