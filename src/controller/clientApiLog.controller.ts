@@ -20,8 +20,11 @@ interface NormalisedLog {
 
 export async function getClientApiLogs(req: ClientAuthRequest, res: Response) {
   const { page = '1', limit = '50', date_from, date_to, success } = req.query as Record<string, any>
-  const pageNum = Math.max(1, parseInt(String(page), 10))
-  const pageSize = Math.min(100, parseInt(String(limit), 10))
+  const parsedPage = Number.parseInt(String(page), 10)
+  const parsedLimit = Number.parseInt(String(limit), 10)
+
+  const pageNum = Number.isNaN(parsedPage) ? 1 : Math.max(1, parsedPage)
+  const pageSize = Number.isNaN(parsedLimit) ? 50 : Math.max(1, Math.min(100, parsedLimit))
 
   const skip = (pageNum - 1) * pageSize
   const take = pageSize + skip
