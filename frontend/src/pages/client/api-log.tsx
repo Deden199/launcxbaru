@@ -312,6 +312,9 @@ export default function ApiLogPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
 
   // store as JKT wall time strings
   const [startStr, setStartStr] = useState('')
@@ -326,14 +329,28 @@ export default function ApiLogPage() {
   const dateFromISO = useMemo(()=>jktISOStringFromInput(startStr),[startStr])
   const dateToISO   = useMemo(()=>jktISOStringFromInput(endStr),[endStr])
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (targetPage = page, targetPageSize = pageSize) => {
     setLoading(true); setError('')
     try {
       const params: Record<string, any> = {}
       if (dateFromISO) params.date_from = dateFromISO
       if (dateToISO)   params.date_to   = dateToISO
       if (statusFilter !== 'all') params.success = statusFilter === 'success'
-      const { data } = await apiClient.get<{ rows: ApiLog[] }>('/client/api-logs', { params })
+      params.page = targetPage
+      params.limit = targetPageSize
+      const { data } = await apiClient.get<{ rows: ApiLog[]; total: number }>('/client/api-logs', { params })
+      const nextTotal = data.total ?? 0
+      setTotal(nextTotal)
+      const maxPage = Math.max(1, Math.ceil(nextTotal / targetPageSize) || 1)
+      if (targetPage > maxPage) {
+        setPage(maxPage)
+        const { data: fallback } = await apiClient.get<{ rows: ApiLog[]; total: number }>('/client/api-logs', {
+          params: { ...params, page: maxPage },
+        })
+        setLogs(fallback.rows || [])
+        setTotal(fallback.total ?? nextTotal)
+        return
+      }
       setLogs(data.rows || [])
     } catch (e) {
       console.error('Failed to fetch API logs', e)
@@ -348,6 +365,42 @@ export default function ApiLogPage() {
     setEndStr(jktInputStringFromDate(now))
     setStartStr(jktInputStringFromDate(new Date(now.getTime()-hours*3600*1000)))
   }
+
+  useEffect(()=>{
+    setPage(1)
+  },[dateFromISO, dateToISO, statusFilter])
+
+  const totalPages = useMemo(()=>{
+    const pages = Math.ceil(total / pageSize)
+    return Math.max(1, pages || 1)
+  },[total, pageSize])
+
+  const startIndex = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const endIndex = total === 0 ? 0 : Math.min(total, page * pageSize)
+
+  const goToPage = (next:number)=>{
+    const safe = Math.min(totalPages, Math.max(1, next))
+    if (safe === page) return
+    setPage(safe)
+    fetchLogs(safe, pageSize)
+  }
+
+  const changePageSize = (nextSize:number)=>{
+    if (nextSize === pageSize) return
+    setPage(1)
+    setPageSize(nextSize)
+    fetchLogs(1, nextSize)
+  }
+
+  const handleApply = () => {
+    setPage(1)
+    fetchLogs(1, pageSize)
+  }
+
+  const canPrev = page > 1
+  const canNext = page < totalPages
+  const displayPage = total === 0 ? 0 : page
+  const displayTotalPages = total === 0 ? 0 : totalPages
 
   const badgeForStatus = (code?: number | null) => {
     if (code == null) return 'bg-neutral-500/15 text-neutral-300 ring-1 ring-neutral-500/30'
@@ -376,7 +429,7 @@ export default function ApiLogPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold text-neutral-100">API Logs</h1>
         <div className="flex items-center gap-2">
-          <button onClick={fetchLogs} className="rounded-xl bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 ring-1 ring-neutral-700 hover:bg-neutral-700">
+          <button onClick={()=>fetchLogs()} className="rounded-xl bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 ring-1 ring-neutral-700 hover:bg-neutral-700">
             Refresh
           </button>
         </div>
@@ -411,7 +464,7 @@ export default function ApiLogPage() {
             <button onClick={()=>quick(24*7)} className="rounded-lg px-2.5 py-1 text-xs text-neutral-300 ring-1 ring-neutral-700 hover:bg-neutral-800">Last 7d</button>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={fetchLogs}
+            <button onClick={handleApply}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500">
               Apply
             </button>
@@ -542,6 +595,50 @@ export default function ApiLogPage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-neutral-400">
+          {total === 0 ? 'No logs to display' : `Showing ${startIndex}–${endIndex} of ${total} logs`}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <label className="flex items-center gap-2 text-xs text-neutral-400">
+            <span>Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e)=>{
+                const next = Number.parseInt(e.target.value, 10)
+                changePageSize(Number.isNaN(next) ? pageSize : next)
+              }}
+              className="rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            >
+              {[10, 20, 50, 100].map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={()=>goToPage(page - 1)}
+              disabled={!canPrev}
+              className="rounded-lg px-3 py-1 text-xs font-medium text-neutral-200 ring-1 ring-neutral-700 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-neutral-400">
+              Page {displayPage} of {displayTotalPages}
+            </span>
+            <button
+              type="button"
+              onClick={()=>goToPage(page + 1)}
+              disabled={!canNext}
+              className="rounded-lg px-3 py-1 text-xs font-medium text-neutral-200 ring-1 ring-neutral-700 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
