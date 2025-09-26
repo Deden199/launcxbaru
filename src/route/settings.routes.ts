@@ -1,14 +1,11 @@
 // src/route/settings.routes.ts
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { getSettings, updateSettings } from '../controller/settings.controller';
 
-import { authMiddleware }      from '../middleware/auth';
+import { requireAdminAuth } from '../middleware/auth';
 
 const router = Router();
-router.use(authMiddleware, (req: Request, res: Response, next: NextFunction) => {
-  if ((req as any).userRole !== 'ADMIN') return res.status(403).end();
-  next();
-});
+router.use(...requireAdminAuth);
 // GET  /api/v1/settings
 router.get('/', getSettings);
 
