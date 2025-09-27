@@ -218,7 +218,7 @@ export async function getActiveProviders(
       }
 
       const { baseUrl, clientId, clientSecret, signatureKey, callbackUrl } = config.api.piro;
-      if (!baseUrl || !clientId || !clientSecret || !signatureKey) {
+      if (!baseUrl || !clientId || !signatureKey) {
         throw new Error('Piro environment credentials are not configured');
       }
 

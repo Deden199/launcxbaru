@@ -1,11 +1,13 @@
 import axios, { AxiosError, AxiosInstance } from 'axios'
 import crypto from 'crypto'
+import moment from 'moment-timezone'
+import { Buffer } from 'node:buffer'
 import logger from '../logger'
 
 export interface PiroConfig {
   baseUrl: string
   clientId: string
-  clientSecret: string
+  clientSecret?: string
   signatureKey: string
   merchantId: string
   storeId?: string
@@ -14,9 +16,31 @@ export interface PiroConfig {
   callbackUrl?: string
 }
 
-interface TokenCache {
-  token: string
-  expiresAt: number
+const JAKARTA_TIMEZONE = 'Asia/Jakarta'
+
+export interface PiroDailyCredential {
+  username: string
+  password: string
+  millis: number
+}
+
+export function jakartaDailyMillis(at: Date = new Date()): number {
+  return moment(at).tz(JAKARTA_TIMEZONE).startOf('day').valueOf()
+}
+
+export function piroDailyCredentials(at: Date = new Date()): PiroDailyCredential {
+  const millis = jakartaDailyMillis(at)
+  return {
+    username: `piro-${millis}`,
+    password: String(millis),
+    millis,
+  }
+}
+
+export function piroBasicAuthorization(at: Date = new Date()): string {
+  const { username, password } = piroDailyCredentials(at)
+  const token = Buffer.from(`${username}:${password}`, 'utf8').toString('base64')
+  return `Basic ${token}`
 }
 
 export interface PiroCustomerInfo {
@@ -165,12 +189,10 @@ const clean = <T extends Record<string, any>>(payload: T): T => {
 
 export class PiroClient {
   private http: AxiosInstance
-  private tokenCache: TokenCache | null = null
 
   constructor(private readonly config: PiroConfig) {
     if (!config.baseUrl) throw new Error('Piro baseUrl is required')
     if (!config.clientId) throw new Error('Piro clientId is required')
-    if (!config.clientSecret) throw new Error('Piro clientSecret is required')
     if (!config.signatureKey) throw new Error('Piro signatureKey is required')
     if (!config.merchantId) throw new Error('Piro merchantId is required')
 
@@ -190,42 +212,9 @@ export class PiroClient {
     return expected === signature
   }
 
-  clearCachedToken() {
-    this.tokenCache = null
-  }
-
-  private async ensureToken(): Promise<string> {
-    const now = Date.now()
-    if (this.tokenCache && this.tokenCache.expiresAt - 5000 > now) {
-      return this.tokenCache.token
-    }
-
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.config.clientId,
-      client_secret: this.config.clientSecret,
-    })
-
-    logger.debug('[Piro] ▶ Request token')
-    const res = await this.http.post('/oauth/token', body.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    })
-    const token = String(res.data?.access_token ?? res.data?.token ?? '')
-    if (!token) throw new Error('Piro token response missing access_token')
-
-    const expiresIn = Number(res.data?.expires_in ?? 3600)
-    this.tokenCache = {
-      token,
-      expiresAt: now + expiresIn * 1000,
-    }
-    logger.debug('[Piro] ◀ Token acquired')
-    return token
-  }
-
-  private async authorizedHeaders(): Promise<Record<string, string>> {
-    const token = await this.ensureToken()
+  private async authorizedHeaders(at: Date = new Date()): Promise<Record<string, string>> {
     return {
-      Authorization: `Bearer ${token}`,
+      Authorization: piroBasicAuthorization(at),
     }
   }
 
