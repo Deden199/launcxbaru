@@ -131,6 +131,9 @@ export async function getActiveProviders(
   // 2) filter schedule aktif
   const activeSubs = subs.filter((s) => {
     const sch = (s.schedule as any) || {};
+    if (sch.weekday == null && sch.weekend == null) {
+      return true;
+    }
     return !!sch[schedulePath];
   });
 

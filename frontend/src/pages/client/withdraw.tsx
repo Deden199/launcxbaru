@@ -8,9 +8,10 @@ import * as XLSX from 'xlsx'
 import { Plus, Clock, FileText, X, CheckCircle, ArrowUpDown } from 'lucide-react'
 import { oyCodeMap } from '../../utils/oyCodeMap'
 import { gidiChannelMap } from '../../utils/gidiChannelMap'
+import { resolvePiroBankMeta } from '../../utils/piroBankMap'
 
 type ClientOption = { id: string; name: string }
-type Provider = 'hilogate' | 'oy' | 'gidi' | string
+type Provider = 'hilogate' | 'oy' | 'gidi' | 'piro' | string
 
 interface Withdrawal {
   id: string
@@ -198,9 +199,28 @@ export default function WithdrawPage() {
   const validateAccount = async () => {
     setBusy(b => ({ ...b, validating: true })); setError('')
     try {
+      const provider = subs.find(s => s.id === selectedSub)?.provider || 'hilogate'
+      const bankObj = banks.find(b => b.code === form.bankCode)
+      const piroMeta = provider === 'piro'
+        ? resolvePiroBankMeta(bankObj?.name, form.bankCode)
+        : null
+
+      const body: Record<string, any> = {
+        bank_code: provider === 'piro' ? piroMeta?.bankCode ?? form.bankCode : form.bankCode,
+        account_number: form.accountNumber,
+        sourceProvider: provider,
+        subMerchantId: selectedSub,
+      }
+
+      if (provider === 'piro') {
+        body.bank_name = bankObj?.name ?? form.bankName
+        body.branch_code = piroMeta?.branchCode
+        body.internal_bank_code = piroMeta?.bankIdentifier
+      }
+
       const res = await apiClient.post(
         '/client/withdrawals/validate-account',
-        { bank_code: form.bankCode, account_number: form.accountNumber },
+        body,
         { validateStatus: () => true }
       )
       if (res.status === 200 && res.data.status === 'valid') {
@@ -210,8 +230,8 @@ export default function WithdrawPage() {
           ...f,
           accountName: holder,
           accountNameAlias: deriveAlias(holder),
-          bankName: bankObj?.name || '',
-          branchName: '',
+          bankName: res.data.bank_name || bankObj?.name || '',
+          branchName: res.data.branch_code || res.data.internal_bank_code || piroMeta?.branchCode || '',
         }))
         setIsValid(true)
       } else {
@@ -233,12 +253,15 @@ export default function WithdrawPage() {
     try {
       const provider = subs.find(s => s.id === selectedSub)?.provider || 'hilogate'
       const bankObj = banks.find(b => b.code === form.bankCode)
+      const piroMeta = provider === 'piro' ? resolvePiroBankMeta(bankObj?.name, form.bankCode) : null
       const payloadBankCode =
         provider === 'oy'
           ? oyCodeMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
           : provider === 'gidi'
-          ? gidiChannelMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
-          : form.bankCode
+            ? gidiChannelMap[bankObj?.name.toLowerCase() || ''] ?? form.bankCode
+            : provider === 'piro'
+              ? piroMeta?.bankCode ?? form.bankCode
+              : form.bankCode
 
       const body: any = {
         subMerchantId: selectedSub,
@@ -249,9 +272,13 @@ export default function WithdrawPage() {
         amount: +form.amount,
         otp: form.otp,
       }
-      if (provider === 'oy' || provider === 'gidi') {
-        body.bank_name = form.bankName
+      if (provider === 'oy' || provider === 'gidi' || provider === 'piro') {
+        body.bank_name = form.bankName || bankObj?.name
         body.account_name = form.accountName
+      }
+      if (provider === 'piro') {
+        body.branch_code = form.branchName || piroMeta?.branchCode
+        body.internal_bank_code = piroMeta?.bankIdentifier
       }
 
       const res = await apiClient.post('/client/withdrawals', body, { validateStatus: () => true })
