@@ -217,7 +217,8 @@ export async function getActiveProviders(
         throw new Error(`Invalid Piro credentials for sub_merchant ${s.id}`);
       }
 
-      const { baseUrl, clientId, clientSecret, signatureKey, callbackUrl } = config.api.piro;
+      const { baseUrl, clientId, clientSecret, signatureKey, callbackUrl, deviceId, latitude, longitude } =
+        config.api.piro;
       if (!baseUrl || !clientId || !signatureKey) {
         throw new Error('Piro environment credentials are not configured');
       }
@@ -243,6 +244,9 @@ export async function getActiveProviders(
           raw?.returnUrl ??
           raw?.return_url ??
           callbackUrl ?? config.api.callbackUrl,
+        deviceId: raw?.deviceId ?? raw?.device_id ?? deviceId,
+        latitude: String(raw?.latitude ?? raw?.lat ?? latitude ?? ''),
+        longitude: String(raw?.longitude ?? raw?.long ?? longitude ?? ''),
       };
 
       return {
