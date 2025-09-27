@@ -192,6 +192,11 @@ paymentRouter.post(
   '/transaction/callback/gidi',
   paymentController.gidiTransactionCallback,
 )
+
+paymentRouter.post(
+  '/transaction/callback/piro',
+  paymentController.piroTransactionCallback,
+)
 /**
  * @openapi
  * /transaction/callback/gidi:

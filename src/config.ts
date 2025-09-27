@@ -134,6 +134,13 @@ oy: {
       apiKey: process.env.PAYMENT_API_KEY || '',
       apiSecret: process.env.PAYMENT_API_SECRET || '',
     },
+    piro: {
+      baseUrl: process.env.PIRO_BASE_URL || '',
+      clientId: process.env.PIRO_CLIENT_ID || '',
+      clientSecret: process.env.PIRO_CLIENT_SECRET || '',
+      signatureKey: process.env.PIRO_SIGNATURE_KEY || '',
+      callbackUrl: process.env.PIRO_CALLBACK_URL || '',
+    },
   },
   aws: {
     region: process.env.AWS_REGION || 'ap-southeast-1',

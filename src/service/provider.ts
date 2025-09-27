@@ -8,12 +8,13 @@ import { OyClient, OyConfig } from '../service/oyClient';
 import { GidiConfig } from '../service/gidi.service';
 import { IfpClient, IfpConfig } from '../service/ifpClient';
 import { Ing1Client, Ing1Config } from '../service/ing1Client';
+import { PiroClient, PiroConfig } from '../service/piroClient';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
 interface RawSub {
   id: string;
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1';
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1' | 'piro';
   fee: number;
   credentials: unknown;
   schedule: unknown;
@@ -85,10 +86,17 @@ export async function getActiveProviders(
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<Ing1Config>[]>;
 
+// overload untuk Piro
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'piro',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<PiroConfig>[]>;
+
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1',
+  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1' | 'piro',
   opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
   Array<
@@ -97,6 +105,7 @@ export async function getActiveProviders(
     | ResultSub<GidiConfig>
     | ResultSub<IfpConfig>
     | ResultSub<Ing1Config>
+    | ResultSub<PiroConfig>
   >
 > {
   const isWeekend = opts.schedule
@@ -198,6 +207,45 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<Ing1Config>;
+    } else if (provider === 'piro') {
+      const raw = s.credentials as any;
+      const merchantId = raw?.merchantId ?? raw?.merchant_id;
+      if (!merchantId) {
+        throw new Error(`Invalid Piro credentials for sub_merchant ${s.id}`);
+      }
+
+      const { baseUrl, clientId, clientSecret, signatureKey, callbackUrl } = config.api.piro;
+      if (!baseUrl || !clientId || !clientSecret || !signatureKey) {
+        throw new Error('Piro environment credentials are not configured');
+      }
+
+      const cfg: PiroConfig = {
+        baseUrl,
+        clientId,
+        clientSecret,
+        signatureKey,
+        merchantId: String(merchantId),
+        storeId: raw?.storeId ?? raw?.store_id ?? undefined,
+        terminalId: raw?.terminalId ?? raw?.terminal_id ?? undefined,
+        channel:
+          raw?.channel ??
+          raw?.paymentChannel ??
+          raw?.payment_channel ??
+          raw?.defaultChannel ??
+          raw?.default_channel ??
+          undefined,
+        callbackUrl:
+          raw?.callbackUrl ??
+          raw?.callback_url ??
+          raw?.returnUrl ??
+          raw?.return_url ??
+          callbackUrl ?? config.api.callbackUrl,
+      };
+
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<PiroConfig>;
     } else {
       // gidi
       const raw = s.credentials as any;
@@ -244,6 +292,7 @@ export async function getActiveProvidersForClient(
   const gidiSubs = await getActiveProviders(merchantId, 'gidi', opts);
   const ifpSubs = await getActiveProviders(merchantId, 'ifp', opts);
   const ing1Subs = await getActiveProviders(merchantId, 'ing1', opts);
+  const piroSubs = await getActiveProviders(merchantId, 'piro', opts);
 
   return [
     /* ──── Hilogate ──── */
@@ -288,6 +337,54 @@ export async function getActiveProvidersForClient(
         return resp.checkout_url;
       },
     },
+
+    /* ──── Piro ──── */
+    ((): Provider => {
+      const pickConfig = (): PiroConfig => {
+        if (!piroSubs.length) throw new Error('No active Piro credentials');
+        return piroSubs[0].config as PiroConfig;
+      };
+
+      return {
+        name: 'piro',
+        supportsQR: true,
+        async generateCheckoutUrl({ orderId, amount }) {
+          const cfg = pickConfig();
+          const client = new PiroClient(cfg);
+          const resp = await client.createPayment({
+            orderId,
+            amount,
+            callbackUrl: cfg.callbackUrl,
+            channel: cfg.channel,
+          });
+          return resp.checkoutUrl ?? resp.qrContent ?? '';
+        },
+        async generateQR({ orderId, amount }) {
+          const cfg = pickConfig();
+          const client = new PiroClient(cfg);
+          const resp = await client.createPayment({
+            orderId,
+            amount,
+            callbackUrl: cfg.callbackUrl,
+            channel: cfg.channel,
+          });
+          const qr = resp.qrContent ?? resp.checkoutUrl ?? '';
+          if (!qr) throw new Error('Piro QR payload not available');
+          return qr;
+        },
+        async checkStatus({ reff, clientReff }) {
+          const cfg = pickConfig();
+          const client = new PiroClient(cfg);
+          const reference = reff || clientReff;
+          if (!reference) throw new Error('Missing reference for Piro inquiry');
+          const resp = await client.getPaymentStatus(reference);
+          return {
+            status: resp.status,
+            raw: resp.raw,
+          };
+        },
+      };
+    })(),
 
     /* ──── ING1 ──── */
     ((): Provider => {

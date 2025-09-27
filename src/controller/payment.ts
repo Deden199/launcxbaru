@@ -20,6 +20,9 @@ import { computeSettlement }     from '../service/feeSettlement'
 import { postWithRetry }                from '../utils/postWithRetry'
 import { cancelIng1Fallback } from '../service/ing1Fallback'
 import { parseIng1Date, parseIng1Number, processIng1Update } from '../service/ing1Status'
+import { cancelPiroFallback } from '../service/piroFallback'
+import { processPiroUpdate } from '../service/piroStatus'
+import { PiroClient } from '../service/piroClient'
 
 import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
 import { verifyQrisMpmCallbackSignature } from '../service/gidiQrisIntegration'
@@ -75,7 +78,8 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
       defaultProvider !== 'hilogate' &&
       defaultProvider !== 'oy' &&
       defaultProvider !== 'gidi' &&
-      defaultProvider !== 'ing1'
+      defaultProvider !== 'ing1' &&
+      defaultProvider !== 'piro'
     ) {
             return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
@@ -104,8 +108,12 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
    subs = await getActiveProviders(merchant.id, 'gidi', {
      schedule: (forceSchedule as any) || undefined,
    });
- } else {
+ } else if (defaultProvider === 'ing1') {
    subs = await getActiveProviders(merchant.id, 'ing1', {
+     schedule: (forceSchedule as any) || undefined,
+   });
+ } else {
+   subs = await getActiveProviders(merchant.id, 'piro', {
      schedule: (forceSchedule as any) || undefined,
    });
  }
@@ -827,6 +835,86 @@ export const gidiTransactionCallback = async (req: Request, res: Response) => {
     return res.status(400).json(createErrorResponse(err.message || 'Unknown error'));
   }
 };
+
+export const piroTransactionCallback = async (req: Request, res: Response) => {
+  let rawBody = ''
+  try {
+    rawBody = (req as any).rawBody?.toString('utf8') ?? JSON.stringify(req.body ?? {})
+    logger.debug('[Piro Callback] rawBody:', rawBody)
+
+    const signature =
+      req.header('x-signature') ||
+      req.header('X-Signature') ||
+      req.header('x-piro-signature') ||
+      req.header('X-Piro-Signature') ||
+      ''
+    const signatureKey = config.api.piro.signatureKey
+    if (!signatureKey) throw new Error('Missing Piro signature key configuration')
+
+    const expected = PiroClient.computeSignature(rawBody, signatureKey)
+    if (signature !== expected) throw new Error('Invalid Piro signature')
+
+    const payload = JSON.parse(rawBody) as Record<string, any>
+
+    const resolveString = (...keys: string[]): string | null => {
+      for (const key of keys) {
+        const value = payload[key]
+        if (value == null) continue
+        if (typeof value === 'string') {
+          const trimmed = value.trim()
+          if (trimmed) return trimmed
+        } else if (typeof value === 'number') {
+          return String(value)
+        }
+      }
+      return null
+    }
+
+    const parseNumber = (value: any): number | undefined => {
+      if (value == null || value === '') return undefined
+      const num = Number(value)
+      return Number.isFinite(num) ? num : undefined
+    }
+
+    const orderId =
+      resolveString('reference_id', 'referenceId', 'order_id', 'orderId', 'invoice_id', 'invoiceId')
+    if (!orderId) throw new Error('Missing referenceId')
+
+    cancelPiroFallback(orderId)
+
+    await processPiroUpdate({
+      orderId,
+      status: resolveString('status', 'payment_status') ?? '',
+      paymentId: resolveString('payment_id', 'paymentId', 'id'),
+      referenceId: resolveString('reference_id', 'referenceId', 'order_id', 'orderId'),
+      grossAmount: parseNumber(payload.amount ?? payload.gross_amount ?? payload.grossAmount),
+      netAmount: parseNumber(payload.net_amount ?? payload.netAmount),
+      feeAmount: parseNumber(payload.fee ?? payload.fee_amount ?? payload.feeAmount),
+      checkoutUrl:
+        resolveString('checkout_url', 'checkoutUrl', 'redirect_url', 'redirectUrl') ?? null,
+      qrContent:
+        resolveString('qr_content', 'qrContent', 'qr_string', 'qrString', 'qr_image_url', 'qrImageUrl') ??
+        null,
+      paymentReceivedTime:
+        resolveString('paid_at', 'paidAt', 'payment_time', 'paymentTime') ?? undefined,
+      settlementTime:
+        resolveString('settled_at', 'settledAt', 'settlement_time', 'settlementTime') ?? undefined,
+      expirationTime:
+        resolveString('expired_at', 'expiredAt', 'expiration_time', 'expirationTime') ?? undefined,
+      raw: payload,
+    })
+
+    return res.status(200).json(createSuccessResponse({ message: 'OK' }))
+  } catch (err: any) {
+    logger.error('[Piro Callback] Error:', err)
+    if (rawBody) {
+      logger.debug('[Piro Callback] rawBody on error:', rawBody)
+    }
+    return res
+      .status(400)
+      .json(createErrorResponse(err.message ?? 'Unable to process callback'))
+  }
+}
 /* ═════════════════ 3. Inquiry status ═════════════════ */
 export const checkPaymentStatus = async (req: AuthRequest, res: Response) => {
   try {
@@ -919,6 +1007,7 @@ export default {
   transactionCallback,
   ing1TransactionCallback,
   gidiTransactionCallback,
+  piroTransactionCallback,
   checkPaymentStatus,
   createOrder,
   retryOyCallback,        // ← tambahkan ini
