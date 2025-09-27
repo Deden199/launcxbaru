@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 
 process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test'
 
+import './helpers/testEnv'
+
 import { piroWithdrawalCallback } from '../src/controller/withdrawals.controller'
 import { prisma } from '../src/core/prisma'
 import { PiroClient } from '../src/service/piroClient'
