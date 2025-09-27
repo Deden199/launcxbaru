@@ -429,12 +429,14 @@ export async function getActiveProvidersForClient(
 
         const defaultClientId =
           genesisRaw?.clientId ||
+          config.api.genesis.clientId ||
           fallbackPiro?.clientId ||
           config.api.piro.clientId ||
           undefined;
 
         const defaultClientSecret =
           genesisRaw?.clientSecret ||
+          config.api.genesis.clientSecret ||
           fallbackPiro?.clientSecret ||
           config.api.piro.clientSecret ||
           config.api.genesis.secret ||

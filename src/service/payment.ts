@@ -177,12 +177,14 @@ export const createTransaction = async (
 
       const defaultClientId =
         genesisRaw?.clientId ||
+        config.api.genesis.clientId ||
         piroCfg?.clientId ||
         config.api.piro.clientId ||
         undefined;
 
       const defaultClientSecret =
         genesisRaw?.clientSecret ||
+        config.api.genesis.clientSecret ||
         piroCfg?.clientSecret ||
         config.api.piro.clientSecret ||
         config.api.genesis.secret ||

@@ -149,6 +149,8 @@ oy: {
       baseUrl: process.env.GENESIS_BASE_URL || '',
       secret: process.env.GENESIS_SECRET || 'abc',
       callbackUrl: process.env.GENESIS_CALLBACK_URL || '',
+      clientId: process.env.GENESIS_CLIENT_ID || '',
+      clientSecret: process.env.GENESIS_CLIENT_SECRET || '',
     },
   },
   aws: {
