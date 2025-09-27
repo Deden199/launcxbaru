@@ -21,8 +21,10 @@ import { postWithRetry }                from '../utils/postWithRetry'
 import { cancelIng1Fallback } from '../service/ing1Fallback'
 import { parseIng1Date, parseIng1Number, processIng1Update } from '../service/ing1Status'
 import { cancelPiroFallback } from '../service/piroFallback'
+import { cancelGenesisFallback } from '../service/genesisFallback'
 import { processPiroUpdate } from '../service/piroStatus'
-import { PiroClient } from '../service/piroClient'
+import { PiroClient, PiroConfig } from '../service/piroClient'
+import { GenesisClient } from '../service/genesisClient'
 
 import { isJakartaWeekend, wibTimestamp, wibTimestampString } from '../util/time'
 import { verifyQrisMpmCallbackSignature } from '../service/gidiQrisIntegration'
@@ -848,12 +850,6 @@ export const piroTransactionCallback = async (req: Request, res: Response) => {
       req.header('x-piro-signature') ||
       req.header('X-Piro-Signature') ||
       ''
-    const signatureKey = config.api.piro.signatureKey
-    if (!signatureKey) throw new Error('Missing Piro signature key configuration')
-
-    const expected = PiroClient.callbackSignature(rawBody, signatureKey)
-    if (signature !== expected) throw new Error('Invalid Piro signature')
-
     const payload = JSON.parse(rawBody) as Record<string, any>
 
     const resolveString = (...keys: string[]): string | null => {
@@ -880,14 +876,80 @@ export const piroTransactionCallback = async (req: Request, res: Response) => {
       resolveString('reference_id', 'referenceId', 'order_id', 'orderId', 'invoice_id', 'invoiceId')
     if (!orderId) throw new Error('Missing referenceId')
 
-    cancelPiroFallback(orderId)
+    if (config.api.genesis.enabled) {
+      const orderRecord = await prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          merchantId: true,
+          subMerchantId: true,
+          userId: true,
+        },
+      })
+
+      if (!orderRecord?.merchantId) {
+        throw new Error('Unable to resolve Genesis credentials for callback')
+      }
+
+      let schedule: 'weekday' | 'weekend' | undefined
+      if (orderRecord.userId) {
+        const partner = await prisma.partnerClient.findUnique({
+          where: { id: orderRecord.userId },
+          select: { forceSchedule: true },
+        })
+        schedule = (partner?.forceSchedule as any) || undefined
+      }
+
+      const subs = await getActiveProviders(orderRecord.merchantId, 'piro', {
+        schedule,
+      })
+      if (!subs.length) {
+        throw new Error('Genesis callback received but no active credentials found')
+      }
+
+      const picked = orderRecord.subMerchantId
+        ? subs.find((s) => s.id === orderRecord.subMerchantId) ?? subs[0]
+        : subs[0]
+      const cfg = picked.config as PiroConfig
+      const clientSecret =
+        cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || ''
+      if (!clientSecret) {
+        throw new Error('Missing Genesis client secret for callback verification')
+      }
+      const clientId =
+        (payload.clientId as string | undefined) ||
+        (payload.client_id as string | undefined) ||
+        cfg.clientId ||
+        ''
+      if (!clientId) {
+        throw new Error('Missing Genesis client ID for callback verification')
+      }
+
+      const expected = GenesisClient.callbackSignature(payload, clientSecret, clientId)
+      if (signature !== expected) throw new Error('Invalid Genesis signature')
+      cancelGenesisFallback(orderId)
+    } else {
+      const signatureKey = config.api.piro.signatureKey
+      if (!signatureKey) throw new Error('Missing Piro signature key configuration')
+
+      const expected = PiroClient.callbackSignature(rawBody, signatureKey)
+      if (signature !== expected) throw new Error('Invalid Piro signature')
+      cancelPiroFallback(orderId)
+    }
 
     await processPiroUpdate({
       orderId,
-      status: resolveString('status', 'payment_status') ?? '',
-      paymentId: resolveString('payment_id', 'paymentId', 'id'),
+      status: resolveString('status', 'payment_status', 'paymentStatus') ?? '',
+      paymentId: resolveString('payment_id', 'paymentId', 'id', 'TX', 'tx'),
       referenceId: resolveString('reference_id', 'referenceId', 'order_id', 'orderId'),
-      grossAmount: parseNumber(payload.amount ?? payload.gross_amount ?? payload.grossAmount),
+      grossAmount:
+        parseNumber(
+          payload.amount ??
+            payload.gross_amount ??
+            payload.grossAmount ??
+            payload.amountSend ??
+            payload.amount_send,
+        ) ??
+        parseNumber(payload.attachment?.amount?.value),
       netAmount: parseNumber(payload.net_amount ?? payload.netAmount),
       feeAmount: parseNumber(payload.fee ?? payload.fee_amount ?? payload.feeAmount),
       checkoutUrl:
@@ -896,7 +958,9 @@ export const piroTransactionCallback = async (req: Request, res: Response) => {
         resolveString('qr_content', 'qrContent', 'qr_string', 'qrString', 'qr_image_url', 'qrImageUrl') ??
         null,
       paymentReceivedTime:
-        resolveString('paid_at', 'paidAt', 'payment_time', 'paymentTime') ?? undefined,
+        resolveString('paid_at', 'paidAt', 'payment_time', 'paymentTime') ??
+        (payload.attachment?.paidTime as string | undefined) ??
+        undefined,
       settlementTime:
         resolveString('settled_at', 'settledAt', 'settlement_time', 'settlementTime') ?? undefined,
       expirationTime:

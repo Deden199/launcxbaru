@@ -29,7 +29,9 @@ import { scheduleIng1Fallback } from './ing1Fallback';
 import { Ing1Client, Ing1Config } from './ing1Client';
 import { parseIng1Date, parseIng1Number, processIng1Update } from './ing1Status';
 import { PiroClient, PiroConfig } from './piroClient';
+import { GenesisClient, GenesisClientConfig } from './genesisClient';
 import { schedulePiroFallback } from './piroFallback';
+import { scheduleGenesisFallback } from './genesisFallback';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -128,7 +130,15 @@ export const createTransaction = async (
     if (!piroSubs.length) throw new Error('No active Piro credentials');
 
     const piroCfg = piroSubs[0].config as PiroConfig;
-    const piroClient = new PiroClient(piroCfg);
+    const useGenesis = config.api.genesis.enabled;
+
+    const host = pickRandomHost();
+    const fallbackCheckoutUrl = `${host}/order/${refId}`;
+
+    const baseCallback =
+      (useGenesis ? config.api.genesis.callbackUrl : undefined) ||
+      piroCfg.callbackUrl ||
+      config.api.callbackUrl;
 
     const customerInfo: { name?: string; email?: string; phone?: string } = {};
     if (request.customerFullName) customerInfo.name = request.customerFullName;
@@ -136,20 +146,76 @@ export const createTransaction = async (
     if (request.customerEmail) customerInfo.email = request.customerEmail;
     if (request.customerPhone) customerInfo.phone = request.customerPhone;
 
-    const paymentResp = await piroClient.createPayment({
-      orderId: refId,
-      amount,
-      description: request.transactionDescription || `Payment ${refId}`,
-      callbackUrl: piroCfg.callbackUrl || config.api.callbackUrl,
-      channel: piroCfg.channel,
-      customer: Object.keys(customerInfo).length ? customerInfo : undefined,
-    });
+    let checkoutUrl = fallbackCheckoutUrl;
+    let qrPayload: string | null = null;
+    let paymentId: string | null = null;
+    let referenceId: string | null = null;
+    let expiredAt: string | undefined;
+    let providerPayload: any;
 
-    const providerPayload = paymentResp.raw ?? {
-      paymentId: paymentResp.paymentId,
-      referenceId: paymentResp.referenceId,
-      status: paymentResp.status,
-    };
+    if (useGenesis) {
+      const genesisCfg: GenesisClientConfig = {
+        baseUrl: config.api.genesis.baseUrl || piroCfg.baseUrl || '',
+        secret: config.api.genesis.secret || piroCfg.signatureKey || '',
+        callbackUrl: baseCallback,
+        defaultClientId: piroCfg.clientId || undefined,
+        defaultClientSecret:
+          piroCfg.clientSecret || piroCfg.signatureKey || config.api.genesis.secret || undefined,
+      };
+
+      const genesisClient = new GenesisClient(genesisCfg);
+      const genesisResp = await genesisClient.generateQris({
+        orderId: refId,
+        amount,
+        clientId: genesisCfg.defaultClientId,
+        clientSecret: genesisCfg.defaultClientSecret,
+      });
+
+      providerPayload = genesisResp.raw ?? {
+        tx: genesisResp.tx,
+        orderId: genesisResp.orderId,
+        clientId: genesisResp.clientId,
+      };
+
+      checkoutUrl = fallbackCheckoutUrl;
+      qrPayload = genesisResp.qrisData || null;
+      paymentId = genesisResp.tx || null;
+      referenceId = genesisResp.orderId || refId;
+
+      scheduleGenesisFallback(refId, genesisCfg, {
+        clientId: genesisResp.clientId || genesisCfg.defaultClientId || '',
+        clientSecret: genesisCfg.defaultClientSecret || config.api.genesis.secret,
+        referenceId: referenceId || refId,
+        paymentId: paymentId || undefined,
+      });
+    } else {
+      const piroClient = new PiroClient(piroCfg);
+      const paymentResp = await piroClient.createPayment({
+        orderId: refId,
+        amount,
+        description: request.transactionDescription || `Payment ${refId}`,
+        callbackUrl: baseCallback,
+        channel: piroCfg.channel,
+        customer: Object.keys(customerInfo).length ? customerInfo : undefined,
+      });
+
+      providerPayload = paymentResp.raw ?? {
+        paymentId: paymentResp.paymentId,
+        referenceId: paymentResp.referenceId,
+        status: paymentResp.status,
+      };
+
+      checkoutUrl = paymentResp.checkoutUrl || fallbackCheckoutUrl;
+      qrPayload = paymentResp.qrContent || null;
+      paymentId = paymentResp.paymentId || null;
+      referenceId = paymentResp.referenceId || null;
+      expiredAt = paymentResp.expiredAt ?? undefined;
+
+      schedulePiroFallback(refId, piroCfg, {
+        paymentId: paymentResp.paymentId,
+        referenceId: paymentResp.referenceId,
+      });
+    }
 
     await prisma.transaction_response.create({
       data: {
@@ -159,14 +225,9 @@ export const createTransaction = async (
       },
     });
 
-    const host = pickRandomHost();
-    const fallbackCheckoutUrl = `${host}/order/${refId}`;
-    const checkoutUrl = paymentResp.checkoutUrl || fallbackCheckoutUrl;
-    const qrPayload = paymentResp.qrContent || null;
-
-    const expirationDate = paymentResp.expiredAt
+    const expirationDate = expiredAt
       ? (() => {
-          const ts = Date.parse(paymentResp.expiredAt);
+          const ts = Date.parse(expiredAt);
           return Number.isNaN(ts) ? undefined : new Date(ts);
         })()
       : undefined;
@@ -186,16 +247,11 @@ export const createTransaction = async (
         checkoutUrl,
         fee3rdParty: 0,
         settlementAmount: null,
-        pgRefId: paymentResp.paymentId || null,
-        pgClientRef: paymentResp.referenceId || null,
+        pgRefId: paymentId,
+        pgClientRef: referenceId,
         providerPayload: providerPayload as any,
         trxExpirationTime: expirationDate ?? null,
       },
-    });
-
-    schedulePiroFallback(refId, piroCfg, {
-      paymentId: paymentResp.paymentId,
-      referenceId: paymentResp.referenceId,
     });
 
     return {
@@ -204,7 +260,7 @@ export const createTransaction = async (
       qrPayload: qrPayload ?? undefined,
       playerId: pid,
       totalAmount: amount,
-      expiredTs: paymentResp.expiredAt ?? undefined,
+      expiredTs: expiredAt,
     };
   }
 
