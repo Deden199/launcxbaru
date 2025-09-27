@@ -28,6 +28,8 @@ import { scheduleHilogateFallback } from './hilogateFallback';
 import { scheduleIng1Fallback } from './ing1Fallback';
 import { Ing1Client, Ing1Config } from './ing1Client';
 import { parseIng1Date, parseIng1Number, processIng1Update } from './ing1Status';
+import { PiroClient, PiroConfig } from './piroClient';
+import { schedulePiroFallback } from './piroFallback';
 
 // ─── Internal checkout page hosts ──────────────────────────────────
 const checkoutHosts = [
@@ -103,6 +105,109 @@ export const createTransaction = async (
   const amount = Number(request.price);
   const pid    = request.playerId ?? buyerId;
 
+  if (mName === 'piro') {
+    const merchantRec = await prisma.merchant.findFirst({ where: { name: 'piro' } });
+    if (!merchantRec) throw new Error('Internal Piro merchant not found');
+
+    const trx = await prisma.transaction_request.create({
+      data: {
+        merchantId: merchantRec.id,
+        subMerchantId: request.subMerchantId,
+        buyerId: request.buyer,
+        playerId: pid,
+        amount,
+        status: 'PENDING',
+        settlementAmount: amount,
+      },
+    });
+    const refId = trx.id;
+
+    const piroSubs = await getActiveProviders(merchantRec.id, 'piro', {
+      schedule: (forceSchedule as any) || undefined,
+    });
+    if (!piroSubs.length) throw new Error('No active Piro credentials');
+
+    const piroCfg = piroSubs[0].config as PiroConfig;
+    const piroClient = new PiroClient(piroCfg);
+
+    const customerInfo: { name?: string; email?: string; phone?: string } = {};
+    if (request.customerFullName) customerInfo.name = request.customerFullName;
+    else if (pid) customerInfo.name = pid;
+    if (request.customerEmail) customerInfo.email = request.customerEmail;
+    if (request.customerPhone) customerInfo.phone = request.customerPhone;
+
+    const paymentResp = await piroClient.createPayment({
+      orderId: refId,
+      amount,
+      description: request.transactionDescription || `Payment ${refId}`,
+      callbackUrl: piroCfg.callbackUrl || config.api.callbackUrl,
+      channel: piroCfg.channel,
+      customer: Object.keys(customerInfo).length ? customerInfo : undefined,
+    });
+
+    const providerPayload = paymentResp.raw ?? {
+      paymentId: paymentResp.paymentId,
+      referenceId: paymentResp.referenceId,
+      status: paymentResp.status,
+    };
+
+    await prisma.transaction_response.create({
+      data: {
+        referenceId: refId,
+        responseBody: providerPayload as any,
+        playerId: pid,
+      },
+    });
+
+    const host = pickRandomHost();
+    const fallbackCheckoutUrl = `${host}/order/${refId}`;
+    const checkoutUrl = paymentResp.checkoutUrl || fallbackCheckoutUrl;
+    const qrPayload = paymentResp.qrContent || null;
+
+    const expirationDate = paymentResp.expiredAt
+      ? (() => {
+          const ts = Date.parse(paymentResp.expiredAt);
+          return Number.isNaN(ts) ? undefined : new Date(ts);
+        })()
+      : undefined;
+
+    await prisma.order.create({
+      data: {
+        id: refId,
+        userId: request.buyer,
+        merchantId: merchantRec.id,
+        subMerchant: { connect: { id: request.subMerchantId } },
+        partnerClient: { connect: { id: request.buyer } },
+        playerId: pid,
+        amount,
+        channel: 'piro',
+        status: 'PENDING',
+        qrPayload,
+        checkoutUrl,
+        fee3rdParty: 0,
+        settlementAmount: null,
+        pgRefId: paymentResp.paymentId || null,
+        pgClientRef: paymentResp.referenceId || null,
+        providerPayload: providerPayload as any,
+        trxExpirationTime: expirationDate ?? null,
+      },
+    });
+
+    schedulePiroFallback(refId, piroCfg, {
+      paymentId: paymentResp.paymentId,
+      referenceId: paymentResp.referenceId,
+    });
+
+    return {
+      orderId: refId,
+      checkoutUrl,
+      qrPayload: qrPayload ?? undefined,
+      playerId: pid,
+      totalAmount: amount,
+      expiredTs: paymentResp.expiredAt ?? undefined,
+    };
+  }
+
   if (mName === 'ing1') {
     const merchantRec = await prisma.merchant.findFirst({ where: { name: 'ing1' } });
     if (!merchantRec) throw new Error('Internal ING1 merchant not found');
@@ -136,7 +241,7 @@ export const createTransaction = async (
     await prisma.transaction_response.create({
       data: {
         referenceId: refId,
-        responseBody: cashinResp.raw as Prisma.InputJsonValue,
+        responseBody: cashinResp.raw as any,
         playerId: pid,
       },
     });
@@ -183,7 +288,7 @@ export const createTransaction = async (
         settlementAmount: null,
         pgRefId: cashinResp.reff ?? null,
         pgClientRef: cashinResp.clientReff ?? null,
-        providerPayload: (cashinResp.data ?? null) as Prisma.InputJsonValue,
+        providerPayload: (cashinResp.data ?? null) as any,
         trxExpirationTime: expiration,
       },
     });
@@ -346,7 +451,7 @@ const qrResp = await oyClient.createQRISTransaction({
   await prisma.transaction_response.create({
     data: {
       referenceId: refId,
-      responseBody: qrResp as unknown as Prisma.InputJsonValue,
+      responseBody: qrResp as unknown as any,
       playerId: pid,
     },
   })
@@ -443,7 +548,7 @@ if (mName === 'ifp') {
   await prisma.transaction_response.create({
     data: {
       referenceId: refId,
-      responseBody: qrResp as unknown as Prisma.InputJsonValue,
+      responseBody: qrResp as unknown as any,
       playerId: pid,
     },
   });
