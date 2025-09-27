@@ -5,6 +5,8 @@ process.env.PIRO_BASE_URL = process.env.PIRO_BASE_URL ?? 'https://api.piro.test'
 process.env.PIRO_CLIENT_ID = process.env.PIRO_CLIENT_ID ?? 'test-client'
 process.env.PIRO_CLIENT_SECRET = process.env.PIRO_CLIENT_SECRET ?? 'test-secret'
 process.env.PIRO_SIGNATURE_KEY = process.env.PIRO_SIGNATURE_KEY ?? 'piro-signature'
+process.env.GENESIS_CLIENT_ID = process.env.GENESIS_CLIENT_ID ?? 'test-genesis-client'
+process.env.GENESIS_CLIENT_SECRET = process.env.GENESIS_CLIENT_SECRET ?? 'test-genesis-secret'
 
 const originalRequire = Module.prototype.require
 if (!(globalThis as any).__piroPrismaPatched) {

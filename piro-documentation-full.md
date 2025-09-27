@@ -4,6 +4,17 @@ This document merges **Genesis Project API Documentation (v0.0.2, June 2025)** a
 
 ---
 
+## Environment Configuration
+
+Set the following environment variables when deploying Genesis support so the service can authenticate without falling back to Piro credentials:
+
+- `GENESIS_CLIENT_ID`
+- `GENESIS_CLIENT_SECRET`
+
+These values are provided alongside the Genesis secret and callback configuration for each environment.
+
+---
+
 # 1. Document Versions & History
 
 ## Genesis Project
