@@ -76,19 +76,21 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
     const defaultProvider = (client.defaultProvider ?? 'hilogate').toLowerCase()
    const forceSchedule = client.forceSchedule ?? null
 
-   if (
+    if (
       defaultProvider !== 'hilogate' &&
       defaultProvider !== 'oy' &&
       defaultProvider !== 'gidi' &&
       defaultProvider !== 'ing1' &&
-      defaultProvider !== 'piro'
+      defaultProvider !== 'piro' &&
+      defaultProvider !== 'genesis'
     ) {
             return res.status(400).json(createErrorResponse('Invalid defaultProvider'))
     }
 
         // Fetch internal merchant for the selected provider
+    const merchantNameForLookup = defaultProvider === 'genesis' ? 'piro' : defaultProvider
     const merchant = await prisma.merchant.findFirst({
-      where: { name: defaultProvider },
+      where: { name: merchantNameForLookup },
     })
     if (!merchant) {
       return res
@@ -114,6 +116,15 @@ export const createTransaction = async (req: ApiKeyRequest, res: Response) => {
    subs = await getActiveProviders(merchant.id, 'ing1', {
      schedule: (forceSchedule as any) || undefined,
    });
+ } else if (defaultProvider === 'genesis') {
+   subs = await getActiveProviders(merchant.id, 'genesis', {
+     schedule: (forceSchedule as any) || undefined,
+   });
+   if (!subs.length) {
+     subs = await getActiveProviders(merchant.id, 'piro', {
+       schedule: (forceSchedule as any) || undefined,
+     });
+   }
  } else {
    subs = await getActiveProviders(merchant.id, 'piro', {
      schedule: (forceSchedule as any) || undefined,
@@ -899,26 +910,45 @@ export const piroTransactionCallback = async (req: Request, res: Response) => {
         schedule = (partner?.forceSchedule as any) || undefined
       }
 
-      const subs = await getActiveProviders(orderRecord.merchantId, 'piro', {
+      const genesisSubs = await getActiveProviders(orderRecord.merchantId, 'genesis', {
         schedule,
       })
-      if (!subs.length) {
+      const piroSubs = await getActiveProviders(orderRecord.merchantId, 'piro', {
+        schedule,
+      })
+
+      if (!genesisSubs.length && !piroSubs.length) {
         throw new Error('Genesis callback received but no active credentials found')
       }
 
-      const picked = orderRecord.subMerchantId
-        ? subs.find((s) => s.id === orderRecord.subMerchantId) ?? subs[0]
-        : subs[0]
-      const cfg = picked.config as PiroConfig
+      const pickSub = <T>(subs: { id: string; config: T }[]): { id: string; config: T } | undefined =>
+        orderRecord.subMerchantId
+          ? subs.find((s) => s.id === orderRecord.subMerchantId) ?? subs[0]
+          : subs[0]
+
+      const pickedGenesis = genesisSubs.length ? pickSub(genesisSubs) : undefined
+      const pickedPiro = piroSubs.length ? pickSub(piroSubs) : undefined
+
+      const genesisCfg = pickedGenesis?.config as
+        | { clientId?: string; clientSecret?: string; secret?: string }
+        | undefined
+      const piroCfg = pickedPiro?.config as PiroConfig | undefined
+
       const clientSecret =
-        cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || ''
+        genesisCfg?.clientSecret ||
+        genesisCfg?.secret ||
+        piroCfg?.clientSecret ||
+        piroCfg?.signatureKey ||
+        config.api.genesis.secret ||
+        ''
       if (!clientSecret) {
         throw new Error('Missing Genesis client secret for callback verification')
       }
       const clientId =
         (payload.clientId as string | undefined) ||
         (payload.client_id as string | undefined) ||
-        cfg.clientId ||
+        genesisCfg?.clientId ||
+        piroCfg?.clientId ||
         ''
       if (!clientId) {
         throw new Error('Missing Genesis client ID for callback verification')

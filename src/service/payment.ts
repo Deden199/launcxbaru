@@ -107,7 +107,7 @@ export const createTransaction = async (
   const amount = Number(request.price);
   const pid    = request.playerId ?? buyerId;
 
-  if (mName === 'piro') {
+  if (mName === 'piro' || mName === 'genesis') {
     const merchantRec = await prisma.merchant.findFirst({ where: { name: 'piro' } });
     if (!merchantRec) throw new Error('Internal Piro merchant not found');
 
@@ -127,17 +127,88 @@ export const createTransaction = async (
     const piroSubs = await getActiveProviders(merchantRec.id, 'piro', {
       schedule: (forceSchedule as any) || undefined,
     });
-    if (!piroSubs.length) throw new Error('No active Piro credentials');
-
-    const piroCfg = piroSubs[0].config as PiroConfig;
+    const genesisSubs = await getActiveProviders(merchantRec.id, 'genesis', {
+      schedule: (forceSchedule as any) || undefined,
+    });
     const useGenesis = config.api.genesis.enabled;
 
     const host = pickRandomHost();
     const fallbackCheckoutUrl = `${host}/order/${refId}`;
 
+    const resolvePiroConfig = (): PiroConfig => {
+      if (!piroSubs.length) throw new Error('No active Piro credentials');
+      return piroSubs[0].config as PiroConfig;
+    };
+
+    const resolveGenesisConfig = (): GenesisClientConfig => {
+      const genesisRaw = genesisSubs[0]?.config as
+        | {
+            baseUrl?: string;
+            secret?: string;
+            callbackUrl?: string;
+            clientId?: string;
+            clientSecret?: string;
+          }
+        | undefined;
+      const piroCfg = piroSubs[0]?.config as PiroConfig | undefined;
+
+      const baseUrl =
+        genesisRaw?.baseUrl ||
+        config.api.genesis.baseUrl ||
+        piroCfg?.baseUrl ||
+        config.api.piro.baseUrl ||
+        '';
+      const secret =
+        genesisRaw?.secret ||
+        config.api.genesis.secret ||
+        piroCfg?.signatureKey ||
+        config.api.piro.signatureKey ||
+        '';
+
+      if (!baseUrl || !secret) {
+        throw new Error('Genesis credentials are not configured');
+      }
+
+      const callbackUrl =
+        genesisRaw?.callbackUrl ||
+        config.api.genesis.callbackUrl ||
+        piroCfg?.callbackUrl ||
+        config.api.callbackUrl;
+
+      const defaultClientId =
+        genesisRaw?.clientId ||
+        piroCfg?.clientId ||
+        config.api.piro.clientId ||
+        undefined;
+
+      const defaultClientSecret =
+        genesisRaw?.clientSecret ||
+        piroCfg?.clientSecret ||
+        config.api.piro.clientSecret ||
+        config.api.genesis.secret ||
+        piroCfg?.signatureKey ||
+        secret ||
+        undefined;
+
+      return {
+        baseUrl,
+        secret,
+        callbackUrl,
+        defaultClientId,
+        defaultClientSecret,
+      };
+    };
+
+    const genesisCfg = useGenesis ? resolveGenesisConfig() : null;
+    const piroCfg = piroSubs[0]?.config as PiroConfig | undefined;
+
+    if (!piroCfg && !genesisCfg) {
+      throw new Error('No active Piro credentials');
+    }
+
     const baseCallback =
-      (useGenesis ? config.api.genesis.callbackUrl : undefined) ||
-      piroCfg.callbackUrl ||
+      genesisCfg?.callbackUrl ||
+      piroCfg?.callbackUrl ||
       config.api.callbackUrl;
 
     const customerInfo: { name?: string; email?: string; phone?: string } = {};
@@ -153,16 +224,7 @@ export const createTransaction = async (
     let expiredAt: string | undefined;
     let providerPayload: any;
 
-    if (useGenesis) {
-      const genesisCfg: GenesisClientConfig = {
-        baseUrl: config.api.genesis.baseUrl || piroCfg.baseUrl || '',
-        secret: config.api.genesis.secret || piroCfg.signatureKey || '',
-        callbackUrl: baseCallback,
-        defaultClientId: piroCfg.clientId || undefined,
-        defaultClientSecret:
-          piroCfg.clientSecret || piroCfg.signatureKey || config.api.genesis.secret || undefined,
-      };
-
+    if (useGenesis && genesisCfg) {
       const genesisClient = new GenesisClient(genesisCfg);
       const genesisResp = await genesisClient.generateQris({
         orderId: refId,
@@ -184,18 +246,19 @@ export const createTransaction = async (
 
       scheduleGenesisFallback(refId, genesisCfg, {
         clientId: genesisResp.clientId || genesisCfg.defaultClientId || '',
-        clientSecret: genesisCfg.defaultClientSecret || config.api.genesis.secret,
+        clientSecret: genesisCfg.defaultClientSecret || genesisCfg.secret,
         referenceId: referenceId || refId,
         paymentId: paymentId || undefined,
       });
     } else {
-      const piroClient = new PiroClient(piroCfg);
+      const cfg = piroCfg ?? resolvePiroConfig();
+      const piroClient = new PiroClient(cfg);
       const paymentResp = await piroClient.createPayment({
         orderId: refId,
         amount,
         description: request.transactionDescription || `Payment ${refId}`,
         callbackUrl: baseCallback,
-        channel: piroCfg.channel,
+        channel: cfg.channel,
         customer: Object.keys(customerInfo).length ? customerInfo : undefined,
       });
 
@@ -211,7 +274,7 @@ export const createTransaction = async (
       referenceId = paymentResp.referenceId || null;
       expiredAt = paymentResp.expiredAt ?? undefined;
 
-      schedulePiroFallback(refId, piroCfg, {
+      schedulePiroFallback(refId, cfg, {
         paymentId: paymentResp.paymentId,
         referenceId: paymentResp.referenceId,
       });
@@ -241,7 +304,7 @@ export const createTransaction = async (
         partnerClient: { connect: { id: request.buyer } },
         playerId: pid,
         amount,
-        channel: 'piro',
+        channel: mName === 'genesis' ? 'genesis' : 'piro',
         status: 'PENDING',
         qrPayload,
         checkoutUrl,

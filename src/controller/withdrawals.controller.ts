@@ -39,6 +39,10 @@ const mapPiroDisbursement = (status: string | null | undefined): DisbursementSta
   return DisbursementStatus.PENDING
 }
 
+const PIRO_VARIANTS = ['piro', 'genesis'] as const
+const isPiroVariant = (provider?: string | null): provider is 'piro' | 'genesis' =>
+  provider === 'piro' || provider === 'genesis'
+
 
 
 export const listSubMerchants = async (req: ClientAuthRequest, res: Response) => {
@@ -874,7 +878,7 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
   } = req.body as {
     account_number: string
     bank_code: string
-    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro' | 'genesis'
     amount?: number
     branch_code?: string
     internal_bank_code?: string
@@ -883,7 +887,7 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
   }
 
   try {
-    if (sourceProvider === 'piro') {
+    if (isPiroVariant(sourceProvider)) {
       const merchant = await prisma.merchant.findFirst({
         where: { name: 'piro' },
       })
@@ -1030,7 +1034,7 @@ export async function validateAccountS2S(req: ApiKeyRequest, res: Response) {
   } = req.body as {
     account_number: string
     bank_code: string
-    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro' | 'genesis'
     amount?: number
     branch_code?: string
     internal_bank_code?: string
@@ -1138,7 +1142,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     internal_bank_code,
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro' | 'genesis'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -1226,7 +1230,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
         credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
       gidiClient = new GidiClient(providerCfg)
-    } else if (sourceProvider === 'piro') {
+    } else if (isPiroVariant(sourceProvider)) {
       const merchant = await prisma.merchant.findFirst({ where: { name: 'piro' } })
       if (!merchant) throw new Error('Internal Piro merchant not found')
 
@@ -1289,7 +1293,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
-    } else if (sourceProvider === 'piro') {
+    } else if (isPiroVariant(sourceProvider)) {
       if (!piroClient || !piroCfg) {
         throw new Error('Missing Piro client configuration')
       }
@@ -1430,7 +1434,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
         }
         resp = await oyClient!.disburse(disburseReq)
-      } else if (sourceProvider === 'piro') {
+      } else if (isPiroVariant(sourceProvider)) {
         if (!piroClient || !piroCfg) throw new Error('Missing Piro client configuration')
         resp = await piroClient.createWithdrawal({
           referenceId: wr.refId,
@@ -1531,7 +1535,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
                 : resp.status.code === '000'
                   ? DisbursementStatus.COMPLETED
                   : DisbursementStatus.FAILED)
-            : sourceProvider === 'piro'
+            : isPiroVariant(sourceProvider)
               ? mapPiroDisbursement(resp.status)
               : mapIng1ToDisbursement(
                   resp.rc,
@@ -1545,7 +1549,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           paymentGatewayId:
             sourceProvider === 'ing1'
               ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
-              : sourceProvider === 'piro'
+              : isPiroVariant(sourceProvider)
                 ? resp.withdrawalId ?? resp.referenceId ?? null
                 : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
@@ -1557,7 +1561,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
                   (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
                 return feeRaw != null ? { pgFee: feeRaw } : {}
               })()
-            : sourceProvider === 'piro'
+            : isPiroVariant(sourceProvider)
               ? (() => {
                   const updates: any = {}
                   if (resp.feeAmount != null) {
@@ -1586,7 +1590,7 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
         })
         return res.status(400).json({
           error:
-            sourceProvider === 'piro'
+            isPiroVariant(sourceProvider)
               ? resp.message || 'Withdrawal failed'
               : 'Withdrawal failed',
           status: resp.status,
@@ -1638,7 +1642,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     internal_bank_code,
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro' | 'genesis'
     account_number: string
     bank_code: string
     account_name_alias?: string
@@ -1707,7 +1711,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
         credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
       gidiClient = new GidiClient(providerCfg)
-    } else if (sourceProvider === 'piro') {
+    } else if (isPiroVariant(sourceProvider)) {
       const merchant = await prisma.merchant.findFirst({ where: { name: 'piro' } })
       if (!merchant) throw new Error('Internal Piro merchant not found')
 
@@ -1769,7 +1773,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
-    } else if (sourceProvider === 'piro') {
+    } else if (isPiroVariant(sourceProvider)) {
       if (!piroClient || !piroCfg) {
         throw new Error('Missing Piro client configuration')
       }
@@ -1901,7 +1905,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           email: 'client@launcx.com',
         }
         resp = await oyClient!.disburse(disburseReq)
-      } else if (sourceProvider === 'piro') {
+      } else if (isPiroVariant(sourceProvider)) {
         if (!piroClient || !piroCfg) throw new Error('Missing Piro client configuration')
         resp = await piroClient.createWithdrawal({
           referenceId: wr.refId,
@@ -2002,7 +2006,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
                 : resp.status.code === '000'
                   ? DisbursementStatus.COMPLETED
                   : DisbursementStatus.FAILED
-              : sourceProvider === 'piro'
+              : isPiroVariant(sourceProvider)
                 ? mapPiroDisbursement(resp.status)
                 : mapIng1ToDisbursement(
                     resp.rc,
@@ -2015,7 +2019,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           paymentGatewayId:
             sourceProvider === 'ing1'
               ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
-              : sourceProvider === 'piro'
+              : isPiroVariant(sourceProvider)
                 ? resp.withdrawalId ?? resp.referenceId ?? null
                 : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess:
@@ -2028,7 +2032,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
                   (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
                 return feeRaw != null ? { pgFee: feeRaw } : {}
               })()
-            : sourceProvider === 'piro'
+            : isPiroVariant(sourceProvider)
               ? (() => {
                   const updates: any = {}
                   if (resp.feeAmount != null) {
@@ -2057,7 +2061,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
         })
         return res.status(400).json({
           error:
-            sourceProvider === 'piro'
+            isPiroVariant(sourceProvider)
               ? resp.message || 'Withdrawal failed'
               : 'Withdrawal failed',
           status: resp.status,

@@ -13,12 +13,22 @@ import { GenesisClient, GenesisClientConfig } from '../service/genesisClient';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
+type ProviderKey = 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1' | 'piro' | 'genesis';
+
 interface RawSub {
   id: string;
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1' | 'piro';
+  provider: ProviderKey;
   fee: number;
   credentials: unknown;
   schedule: unknown;
+}
+
+interface GenesisSubCredential {
+  baseUrl?: string;
+  secret?: string;
+  callbackUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
 }
 
 export interface ResultSub<C> {
@@ -94,10 +104,17 @@ export async function getActiveProviders(
   opts?: { schedule?: 'weekday' | 'weekend' }
 ): Promise<ResultSub<PiroConfig>[]>;
 
+// overload untuk Genesis
+export async function getActiveProviders(
+  merchantId: string,
+  provider: 'genesis',
+  opts?: { schedule?: 'weekday' | 'weekend' }
+): Promise<ResultSub<GenesisSubCredential>[]>;
+
 // implementasi
 export async function getActiveProviders(
   merchantId: string,
-  provider: 'hilogate' | 'oy' | 'gidi' | 'ifp' | 'ing1' | 'piro',
+  provider: ProviderKey,
   opts: { schedule?: 'weekday' | 'weekend' } = {}
 ): Promise<
   Array<
@@ -107,6 +124,7 @@ export async function getActiveProviders(
     | ResultSub<IfpConfig>
     | ResultSub<Ing1Config>
     | ResultSub<PiroConfig>
+    | ResultSub<GenesisSubCredential>
   >
 > {
   const isWeekend = opts.schedule
@@ -254,6 +272,34 @@ export async function getActiveProviders(
         ...common,
         config: cfg,
       } as ResultSub<PiroConfig>;
+    } else if (provider === 'genesis') {
+      const raw = s.credentials as any;
+      const cfg: GenesisSubCredential = {
+        baseUrl: raw?.baseUrl ?? raw?.base_url ?? undefined,
+        secret: raw?.secret ?? raw?.secretKey ?? raw?.secret_key ?? undefined,
+        callbackUrl:
+          raw?.callbackUrl ??
+          raw?.callback_url ??
+          raw?.callbackURL ??
+          undefined,
+        clientId:
+          raw?.clientId ??
+          raw?.client_id ??
+          raw?.clientID ??
+          raw?.defaultClientId ??
+          undefined,
+        clientSecret:
+          raw?.clientSecret ??
+          raw?.client_secret ??
+          raw?.clientSecretKey ??
+          raw?.defaultClientSecret ??
+          undefined,
+      };
+
+      return {
+        ...common,
+        config: cfg,
+      } as ResultSub<GenesisSubCredential>;
     } else {
       // gidi
       const raw = s.credentials as any;
@@ -301,6 +347,7 @@ export async function getActiveProvidersForClient(
   const ifpSubs = await getActiveProviders(merchantId, 'ifp', opts);
   const ing1Subs = await getActiveProviders(merchantId, 'ing1', opts);
   const piroSubs = await getActiveProviders(merchantId, 'piro', opts);
+  const genesisSubs = await getActiveProviders(merchantId, 'genesis', opts);
 
   return [
     /* ──── Hilogate ──── */
@@ -348,25 +395,68 @@ export async function getActiveProvidersForClient(
 
     /* ──── Piro ──── */
     ((): Provider => {
-      const pickConfig = (): PiroConfig => {
+      const ensurePiroConfig = (): PiroConfig => {
         if (!piroSubs.length) throw new Error('No active Piro credentials');
         return piroSubs[0].config as PiroConfig;
+      };
+
+      const ensureGenesisConfig = (): GenesisClientConfig => {
+        const genesisRaw = genesisSubs[0]?.config as GenesisSubCredential | undefined;
+        const fallbackPiro = piroSubs[0]?.config as PiroConfig | undefined;
+
+        const baseUrl =
+          genesisRaw?.baseUrl ||
+          config.api.genesis.baseUrl ||
+          fallbackPiro?.baseUrl ||
+          config.api.piro.baseUrl ||
+          '';
+        const secret =
+          genesisRaw?.secret ||
+          config.api.genesis.secret ||
+          fallbackPiro?.signatureKey ||
+          config.api.piro.signatureKey ||
+          '';
+
+        if (!baseUrl || !secret) {
+          throw new Error('Genesis credentials are not configured');
+        }
+
+        const callbackUrl =
+          genesisRaw?.callbackUrl ||
+          config.api.genesis.callbackUrl ||
+          fallbackPiro?.callbackUrl ||
+          config.api.callbackUrl;
+
+        const defaultClientId =
+          genesisRaw?.clientId ||
+          fallbackPiro?.clientId ||
+          config.api.piro.clientId ||
+          undefined;
+
+        const defaultClientSecret =
+          genesisRaw?.clientSecret ||
+          fallbackPiro?.clientSecret ||
+          config.api.piro.clientSecret ||
+          config.api.genesis.secret ||
+          fallbackPiro?.signatureKey ||
+          secret ||
+          undefined;
+
+        return {
+          baseUrl,
+          secret,
+          callbackUrl,
+          defaultClientId,
+          defaultClientSecret,
+        };
       };
 
       return {
         name: 'piro',
         supportsQR: true,
         async generateCheckoutUrl({ orderId, amount }) {
-          const cfg = pickConfig();
           if (config.api.genesis.enabled) {
-            const genesisCfg: GenesisClientConfig = {
-              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
-              secret: config.api.genesis.secret || cfg.signatureKey || '',
-              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
-              defaultClientId: cfg.clientId || undefined,
-              defaultClientSecret:
-                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
-            };
+            const genesisCfg = ensureGenesisConfig();
             const client = new GenesisClient(genesisCfg);
             const resp = await client.generateQris({
               orderId,
@@ -377,6 +467,7 @@ export async function getActiveProvidersForClient(
             return resp.qrisData ?? '';
           }
 
+          const cfg = ensurePiroConfig();
           const client = new PiroClient(cfg);
           const resp = await client.createPayment({
             orderId,
@@ -387,16 +478,8 @@ export async function getActiveProvidersForClient(
           return resp.checkoutUrl ?? resp.qrContent ?? '';
         },
         async generateQR({ orderId, amount }) {
-          const cfg = pickConfig();
           if (config.api.genesis.enabled) {
-            const genesisCfg: GenesisClientConfig = {
-              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
-              secret: config.api.genesis.secret || cfg.signatureKey || '',
-              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
-              defaultClientId: cfg.clientId || undefined,
-              defaultClientSecret:
-                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
-            };
+            const genesisCfg = ensureGenesisConfig();
             const client = new GenesisClient(genesisCfg);
             const resp = await client.generateQris({
               orderId,
@@ -409,6 +492,7 @@ export async function getActiveProvidersForClient(
             return qr;
           }
 
+          const cfg = ensurePiroConfig();
           const client = new PiroClient(cfg);
           const resp = await client.createPayment({
             orderId,
@@ -421,16 +505,8 @@ export async function getActiveProvidersForClient(
           return qr;
         },
         async checkStatus({ reff, clientReff }) {
-          const cfg = pickConfig();
           if (config.api.genesis.enabled) {
-            const genesisCfg: GenesisClientConfig = {
-              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
-              secret: config.api.genesis.secret || cfg.signatureKey || '',
-              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
-              defaultClientId: cfg.clientId || undefined,
-              defaultClientSecret:
-                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
-            };
+            const genesisCfg = ensureGenesisConfig();
             const client = new GenesisClient(genesisCfg);
             const reference = reff || clientReff;
             if (!reference) throw new Error('Missing reference for Genesis inquiry');
@@ -445,6 +521,7 @@ export async function getActiveProvidersForClient(
             };
           }
 
+          const cfg = ensurePiroConfig();
           const client = new PiroClient(cfg);
           const reference = reff || clientReff;
           if (!reference) throw new Error('Missing reference for Piro inquiry');
