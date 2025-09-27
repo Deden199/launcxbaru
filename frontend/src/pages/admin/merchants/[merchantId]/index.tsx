@@ -826,283 +826,289 @@ export function PaymentProvidersPageView({
 
       <style jsx>{`
         :root {
-          --bg-light: #f0f4f8;
-          --bg-white:rgb(37, 27, 150);
-          --primary: #0d9488;
-          --primary-hover: #0f766e;
-          --danger: #e11d48;
-          --danger-hover: #be123c;
-          --text-main: #1f2937;
-          --text-muted: #4b5563;
-          --border: #d1d5db;
+          --page-bg: #0a0a0a;
+          --surface: #171717;
+          --surface-subtle: #262626;
+          --surface-hover: #1f1f1f;
+          --surface-elevated: #1c1c1c;
+          --text-primary: #f4f4f5;
+          --text-secondary: #a3a3a3;
+          --border: #262626;
+          --border-strong: #404040;
+          --accent: #38bdf8;
+          --accent-strong: #0ea5e9;
+          --danger: #f87171;
+          --danger-strong: #ef4444;
+        }
+        :global(body) {
+          background: var(--page-bg);
+          color: var(--text-primary);
         }
         .container {
-          max-width: 900px;
-          margin: 2rem auto;
-          padding: 1rem;
-          background: var(--bg-light);
-          border-radius: 12px;
-          font-family: 'Segoe UI', sans-serif;
-          color: var(--text-main);
+          width: min(960px, 100%);
+          max-width: 960px;
+          margin: 0 auto;
+          padding: 2.5rem 1.5rem 3rem;
+          min-height: 100vh;
+          background: var(--page-bg);
+          color: var(--text-primary);
+          font-family: 'Inter', 'Segoe UI', sans-serif;
         }
         .header {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 1rem;
         }
         .title {
-          font-size: 1.6rem;
+          font-size: 1.5rem;
           margin: 0;
+          font-weight: 600;
         }
         .add-btn {
-          background: var(--primary);
-          color: var(--bg-white);
-          border: none;
-          padding: 0.7rem 1.3rem;
-          border-radius: 10px;
+          background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+          color: var(--text-primary);
+          border: 1px solid var(--accent-strong);
+          padding: 0.65rem 1.2rem;
+          border-radius: 0.75rem;
           cursor: pointer;
-          font-size: 1rem;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-          transition: background 0.3s, transform 0.2s;
+          font-size: 0.95rem;
+          font-weight: 600;
+          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
         }
         .add-btn:disabled {
-          opacity: 0.6;
+          opacity: 0.5;
           cursor: not-allowed;
+          box-shadow: none;
         }
-        .add-btn:hover:not(:disabled) {
-          background: var(--primary-hover);
-          transform: translateY(-2px);
+        .add-btn:not(:disabled):hover {
+          transform: translateY(-1px);
+          box-shadow: 0 12px 24px -12px rgba(56, 189, 248, 0.6);
+        }
+        .add-btn:focus-visible {
+          outline: 2px solid var(--accent-strong);
+          outline-offset: 3px;
         }
         .table-wrapper {
-          margin-top: 1.5rem;
+          margin-top: 1.75rem;
           overflow-x: auto;
-          background: var(--bg-white);
-          border-radius: 10px;
-          box-shadow: 0 4px 12px rgba(21, 56, 171, 0.08);
+          background: var(--surface);
+          border-radius: 1rem;
+          border: 1px solid var(--border);
+          box-shadow: 0 30px 60px -45px rgba(15, 15, 15, 0.9);
         }
         .providers {
           width: 100%;
           border-collapse: collapse;
+          min-width: 720px;
         }
-
-
         .providers th,
         .providers td {
-          padding: 0.875rem 1.25rem;
+          padding: 0.85rem 1.25rem;
           border-bottom: 1px solid var(--border);
+          text-align: left;
+          color: var(--text-primary);
         }
         .providers th {
-          background: var(--bg-light);
+          background: var(--surface-subtle);
           font-weight: 600;
+          color: var(--text-secondary);
           position: sticky;
           top: 0;
-          color: var(--text-muted);
+          z-index: 1;
         }
-        .providers tr:nth-child(even) {
-          background: #fafafa;
+        .providers tbody tr {
+          background: transparent;
+          transition: background 0.15s ease, transform 0.15s ease;
         }
-        .providers tr:hover {
-          background: #fff;
+        .providers tbody tr:nth-child(even) {
+          background: rgba(38, 38, 38, 0.5);
+        }
+        .providers tbody tr:hover {
+          background: var(--surface-hover);
+        }
+        .providers tbody tr:focus-within {
+          background: var(--surface-hover);
+          outline: 1px solid var(--accent-strong);
         }
         .cell-bold {
-          font-weight: 500;
-        }
-        .delete-btn {
-          background: var(--danger);
-          color: var(--bg-white);
-          border: none;
-          padding: 0.5rem 0.9rem;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: background 0.3s;
-        }
-        .delete-btn:hover {
-          background: var(--danger-hover);
-        }
-                  .edit-btn {
-          background: var(--danger);
-          color: var(--bg-white);
-          border: none;
-          padding: 0.5rem 0.9rem;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: background 0.3s;
-        }
-        .edit-btn:hover {
-          background: var(--danger-hover);
+          font-weight: 600;
         }
         .no-data {
           text-align: center;
-          padding: 2rem;
-          color: var(--text-muted);
+          padding: 2.5rem 1rem;
+          color: var(--text-secondary);
+          font-size: 0.95rem;
         }
-.overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.6);  /* overlay gelap */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-export default function PaymentProvidersPage() {
-  return <PaymentProvidersPageView />
-}
-
-.modal {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 1.5rem;                  /* sedikit dipadatkan */
-  width: 380px;
-  max-width: 100%;                  /* aman di layar kecil */
-  max-height: 90vh;                /* batasi tinggi supaya nggak melewati viewport */
-  overflow-y: auto;                /* scroll kalau isinya melebihi tinggi */
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25); /* sedikit lebih halus supaya tidak terlalu “berat” */
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  z-index: 1001;
-  display: flex;
-  flex-direction: column;
-  gap: 0; /* gap diatur di dalam form, bukan di container utama */
-}
-
-/* Jika ingin header / footer tetap terlihat, bisa bungkus isi yang scrollable: */
-.modal .content {
-  overflow-y: auto;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-/* Form di dalam modal */
-.modal form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem; /* sedikit rapatkan antar field */
-  margin: 0;    /* pastikan nggak ada margin ekstra */
-}
-
-/* Opsional: kecilkan spacing di layar sempit */
-@media (max-height: 600px) {
-  .modal {
-    padding: 1rem;
-    max-height: 85vh;
-  }
-  .modal form {
-    gap: 0.5rem;
-  }
-}
-
-/* Berikan latar dan border untuk tiap form‐group */
-.form-group {
-  background: var(--bg-white);
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-/* Buat input/select lebih kontras */
-.form-group input,
-.form-group select {
-  background: #f9fafb;
-  border: 1px solid var(--border);
-  padding: 0.6rem;
-  border-radius: 6px;
-  width: 100%;
-  font-size: 1rem;
-  color: var(--text-main);
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-}
-.form-grid .form-group {
-  margin-bottom: 0;
-}
-
+        .overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(10, 10, 10, 0.75);
+          backdrop-filter: blur(6px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 2rem 1rem;
+          animation: fadeIn 0.15s ease forwards;
+        }
+        .modal {
+          width: min(720px, 100%);
+          max-height: 90vh;
+          overflow-y: auto;
+          background: var(--surface-elevated);
+          border-radius: 1rem;
+          border: 1px solid var(--border-strong);
+          padding: 1.75rem;
+          box-shadow: 0 30px 70px -45px rgba(0, 0, 0, 0.9);
+          animation: slideDown 0.2s ease forwards;
+        }
         .modal-title {
-          margin: 0 0 1rem;
-          font-size: 1.3rem;
-          color: var(--text-main);
+          margin: 0 0 1.25rem;
+          font-size: 1.25rem;
+          font-weight: 600;
+          color: var(--text-primary);
         }
         .error-banner {
-          background: #fee2e2;
-          color: #991b1b;
-          padding: 0.75rem;
-          border-radius: 6px;
+          background: rgba(248, 113, 113, 0.12);
+          border: 1px solid rgba(248, 113, 113, 0.5);
+          color: #fecaca;
+          padding: 0.75rem 1rem;
+          border-radius: 0.75rem;
           margin-bottom: 1rem;
           text-align: center;
         }
-        .form-group {
-          margin-bottom: 1.2rem;
+        form {
           display: flex;
           flex-direction: column;
+          gap: 1rem;
+        }
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+          background: var(--surface-subtle);
+          padding: 0.85rem 1rem;
+          border-radius: 0.75rem;
+          border: 1px solid var(--border);
         }
         .form-group label {
-          font-size: 0.95rem;
-          margin-bottom: 0.5rem;
-          color: var(--text-muted);
+          font-size: 0.85rem;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--text-secondary);
         }
         .form-group input,
         .form-group select {
-          padding: 0.7rem;
+          padding: 0.65rem 0.75rem;
+          border-radius: 0.65rem;
           border: 1px solid var(--border);
-          border-radius: 8px;
-          font-size: 1rem;
-          color: var(--text-main);
+          background: var(--surface);
+          color: var(--text-primary);
+          font-size: 0.95rem;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .form-group input::placeholder,
+        .form-group select::placeholder {
+          color: var(--text-secondary);
+        }
+        .form-group input:focus-visible,
+        .form-group select:focus-visible {
+          outline: none;
+          border-color: var(--accent-strong);
+          box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.25);
+        }
+        .form-grid {
+          display: grid;
+          gap: 1rem;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
         }
         .checkbox-group {
           display: flex;
-          gap: 1rem;
-          margin-bottom: 1.5rem;
+          gap: 1.5rem;
+          padding: 0.5rem 0;
         }
         .checkbox-group label {
-          font-size: 0.95rem;
-          color: var(--text-muted);
-          display: flex;
+          display: inline-flex;
           align-items: center;
+          gap: 0.5rem;
+          color: var(--text-secondary);
+          font-size: 0.95rem;
+        }
+        .checkbox-group input[type='checkbox'] {
+          width: 1.05rem;
+          height: 1.05rem;
+          accent-color: var(--accent-strong);
         }
         .modal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 1rem;
+          gap: 0.75rem;
+          margin-top: 0.25rem;
+        }
+        .save-btn,
+        .cancel-btn {
+          border-radius: 0.75rem;
+          padding: 0.65rem 1.2rem;
+          font-weight: 600;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
         }
         .save-btn {
-          background: var(--primary);
-          color: var(--bg-white);
-          border: none;
-          padding: 0.7rem 1.3rem;
-          border-radius: 10px;
-          cursor: pointer;
-          transition: background 0.3s;
+          background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+          color: var(--text-primary);
+          border-color: rgba(14, 165, 233, 0.7);
         }
         .save-btn:hover {
-          background: var(--primary-hover);
+          transform: translateY(-1px);
+          box-shadow: 0 18px 32px -20px rgba(14, 165, 233, 0.8);
+        }
+        .save-btn:focus-visible {
+          outline: 2px solid var(--accent-strong);
+          outline-offset: 3px;
         }
         .cancel-btn {
-          background: var(--border);
-          color: var(--text-main);
-          padding: 0.7rem 1.3rem;
-          border: none;
-          border-radius: 10px;
-          cursor: pointer;
-          transition: background 0.3s;
+          background: var(--surface);
+          color: var(--text-secondary);
+          border-color: var(--border);
         }
         .cancel-btn:hover {
-          background: #e5e7eb;
+          background: var(--surface-hover);
+          color: var(--text-primary);
+        }
+        .cancel-btn:focus-visible {
+          outline: 2px solid var(--border-strong);
+          outline-offset: 3px;
+        }
+        @media (max-width: 640px) {
+          .container {
+            padding: 2rem 1rem 3rem;
+          }
+          .header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .add-btn {
+            width: 100%;
+            text-align: center;
+          }
+          .providers {
+            min-width: 100%;
+          }
+          .modal {
+            padding: 1.5rem;
+          }
         }
         @keyframes fadeIn {
-          from { opacity: 0 }
-          to { opacity: 1 }
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
         @keyframes slideDown {
-          from { transform: translateY(-10px) }
-          to { transform: translateY(0) }
+          from { transform: translateY(-8px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
       `}</style>
+
     </div>
   )
 }
