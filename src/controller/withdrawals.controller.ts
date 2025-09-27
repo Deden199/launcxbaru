@@ -12,6 +12,7 @@ import logger from '../logger'
 import { DisbursementStatus } from '@prisma/client'
 import { getActiveProviders } from '../service/provider';
 import {OyClient,OyConfig}          from '../service/oyClient'    // sesuaikan path
+import { PiroClient, PiroConfig } from '../service/piroClient'
 import { authenticator } from 'otplib'
 import { parseDateSafely } from '../util/time'
 import { mapIng1Status, parseIng1Date, parseIng1Number } from '../service/ing1Status'
@@ -24,6 +25,17 @@ const mapIng1ToDisbursement = (
   if (normalized === 'PAID') return DisbursementStatus.COMPLETED
   if (normalized === 'PENDING') return DisbursementStatus.PENDING
   return DisbursementStatus.FAILED
+}
+
+const mapPiroDisbursement = (status: string | null | undefined): DisbursementStatus => {
+  const up = (status ?? '').toUpperCase()
+  if (['SUCCESS', 'COMPLETED', 'PAID', 'DONE', 'SETTLED'].includes(up)) {
+    return DisbursementStatus.COMPLETED
+  }
+  if (['FAILED', 'REJECTED', 'ERROR', 'CANCELLED', 'CANCELED', 'VOID'].includes(up)) {
+    return DisbursementStatus.FAILED
+  }
+  return DisbursementStatus.PENDING
 }
 
 
@@ -570,7 +582,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
       logger.warn(`Failed to parse last_updated_date: ${data.last_updated_date}`)
     }
 
-    const { count } = await retry(() =>
+    const updateResult = await retry(() =>
       (isAdmin
         ? prisma.adminWithdraw.updateMany({
             where: {
@@ -588,6 +600,7 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
 
           }))
     )
+    const count = (updateResult as { count?: number }).count ?? 0
 
     // 7) Balance adjustments based on status transition
     if (!isAdmin && count > 0 && oldStatus !== newStatus) {
@@ -612,6 +625,137 @@ export const withdrawalCallback = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[withdrawalCallback] error:', err)
     return res.status(500).json({ error: err.message })
+  }
+}
+
+export const piroWithdrawalCallback = async (req: Request, res: Response) => {
+  try {
+    const raw = (() => {
+      const buf = (req as any).rawBody
+      if (typeof buf === 'string') return buf
+      if (Buffer.isBuffer(buf)) return buf.toString('utf8')
+      return JSON.stringify(req.body ?? {})
+    })()
+
+    const signature = (req.header('x-piro-signature') || req.header('X-Piro-Signature') || '').trim()
+    if (!signature) {
+      return res.status(400).json({ error: 'Missing signature' })
+    }
+
+    const expected = PiroClient.computeSignature(raw, config.api.piro.signatureKey)
+    if (expected !== signature) {
+      return res.status(400).json({ error: 'Invalid signature' })
+    }
+
+    let body: any
+    try {
+      body = JSON.parse(raw || '{}')
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid JSON payload' })
+    }
+
+    const data = body.data ?? body
+    const reference =
+      data.client_reference ??
+      data.clientReference ??
+      data.referenceId ??
+      data.reference_id ??
+      data.clientRef ??
+      data.client_ref ??
+      data.refId ??
+      data.ref_id
+
+    if (!reference) {
+      return res.status(400).json({ error: 'Missing reference' })
+    }
+
+    const wr = await prisma.withdrawRequest.findUnique({
+      where: { refId: reference },
+      select: { status: true, partnerClientId: true, amount: true },
+    })
+
+    if (!wr) {
+      return res.status(404).json({ error: 'Withdrawal not found' })
+    }
+
+    const statusRaw = data.status ?? data.disbursementStatus ?? data.transactionStatus
+    const newStatus = mapPiroDisbursement(statusRaw)
+    const updateData: any = {
+      status: newStatus,
+    }
+
+    const gatewayId =
+      data.disbursementId ?? data.disbursement_id ?? data.withdrawalId ?? data.withdrawal_id ?? data.id
+    if (gatewayId) {
+      updateData.paymentGatewayId = String(gatewayId)
+    }
+
+    const feeCandidate =
+      data.feeAmount ?? data.fee_amount ?? data.fee ?? data.adminFee ?? data.pg_fee ?? data.total_fee
+    const feeNumber = typeof feeCandidate === 'number' ? feeCandidate : Number(feeCandidate)
+    if (!Number.isNaN(feeNumber) && feeNumber != null) {
+      updateData.pgFee = feeNumber
+    }
+
+    if (data.accountName || data.account_name) {
+      updateData.accountName = data.accountName ?? data.account_name
+    }
+
+    if (data.bankName || data.bank_name) {
+      updateData.bankName = data.bankName ?? data.bank_name
+    }
+
+    if (data.branchName || data.branch_name || data.branchCode || data.branch_code) {
+      updateData.branchName =
+        data.branchName ?? data.branch_name ?? data.branchCode ?? data.branch_code ?? ''
+    }
+
+    const completedAt =
+      parseDateSafely(
+        data.completedAt ??
+          data.completed_at ??
+          data.settlementTime ??
+          data.settlement_time ??
+          data.settledAt ??
+          data.settled_at,
+      ) ?? null
+    if (completedAt) {
+      updateData.completedAt = completedAt
+    }
+
+    const updateResult = await retry(() =>
+      prisma.withdrawRequest.updateMany({
+        where: {
+          refId: reference,
+          status: { in: [DisbursementStatus.PENDING, DisbursementStatus.FAILED] },
+        },
+        data: updateData,
+      })
+    )
+    const count = (updateResult as { count?: number }).count ?? 0
+
+    if (count > 0 && wr.status !== newStatus) {
+      if (wr.status === DisbursementStatus.FAILED && newStatus === DisbursementStatus.COMPLETED) {
+        await retry(() =>
+          prisma.partnerClient.update({
+            where: { id: wr.partnerClientId },
+            data: { balance: { decrement: wr.amount } },
+          })
+        )
+      } else if (wr.status === DisbursementStatus.PENDING && newStatus === DisbursementStatus.FAILED) {
+        await retry(() =>
+          prisma.partnerClient.update({
+            where: { id: wr.partnerClientId },
+            data: { balance: { increment: wr.amount } },
+          })
+        )
+      }
+    }
+
+    return res.json({ ok: true })
+  } catch (err: any) {
+    logger.error('[piroWithdrawalCallback] error', err)
+    return res.status(500).json({ error: err.message || 'Internal server error' })
   }
 }
 
@@ -703,14 +847,72 @@ export async function validateAccount(req: ClientAuthRequest, res: Response) {
     bank_code,
     sourceProvider = 'hilogate',
     amount,
+    branch_code,
+    internal_bank_code,
+    bank_name,
+    subMerchantId,
   } = req.body as {
     account_number: string
     bank_code: string
-    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
     amount?: number
+    branch_code?: string
+    internal_bank_code?: string
+    bank_name?: string
+    subMerchantId?: string
   }
 
   try {
+    if (sourceProvider === 'piro') {
+      const merchant = await prisma.merchant.findFirst({
+        where: { name: 'piro' },
+      })
+      if (!merchant) {
+        return res.status(500).json({ error: 'Internal Piro merchant not found' })
+      }
+
+      const subs = await getActiveProviders(merchant.id, 'piro', {})
+      if (subs.length === 0) {
+        return res.status(500).json({ error: 'No active Piro credentials today' })
+      }
+
+      const picked = subMerchantId
+        ? subs.find((s) => s.id === subMerchantId) ?? subs[0]
+        : subs[0]
+      const cfg = picked.config as PiroConfig
+      const client = new PiroClient(cfg)
+
+      const validation = await client.validateBankAccount({
+        accountNumber: account_number,
+        bankCode: bank_code,
+        branchCode: branch_code,
+        bankIdentifier: internal_bank_code,
+        bankName: bank_name,
+      })
+
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.message || 'Account inquiry failed',
+          status: 'invalid',
+          code: validation.responseCode,
+          bank_name: validation.bankName ?? bank_name ?? null,
+          bank_code: validation.bankCode ?? bank_code,
+        })
+      }
+
+      return res.json({
+        account_number: validation.accountNumber,
+        account_holder: validation.accountName ?? '',
+        bank_code: validation.bankCode ?? bank_code,
+        bank_name: validation.bankName ?? bank_name ?? null,
+        branch_code: validation.branchCode ?? branch_code ?? null,
+        internal_bank_code: validation.bankIdentifier ?? internal_bank_code ?? null,
+        status: 'valid',
+        code: validation.responseCode ?? null,
+        message: validation.message ?? '',
+      })
+    }
+
     if (sourceProvider === 'ing1') {
       const merchant = await prisma.merchant.findFirst({
         where: { name: 'ing1' },
@@ -801,11 +1003,19 @@ export async function validateAccountS2S(req: ApiKeyRequest, res: Response) {
     bank_code,
     sourceProvider = 'hilogate',
     amount,
+    branch_code,
+    internal_bank_code,
+    bank_name,
+    subMerchantId,
   } = req.body as {
     account_number: string
     bank_code: string
-    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    sourceProvider?: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
     amount?: number
+    branch_code?: string
+    internal_bank_code?: string
+    bank_name?: string
+    subMerchantId?: string
   }
 
   try {
@@ -901,15 +1111,23 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     bank_code,
     account_name_alias,
     amount,
-    otp 
-   } = req.body as {
+    otp,
+    account_name,
+    bank_name,
+    branch_code,
+    internal_bank_code,
+  } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
     account_number: string
     bank_code: string
     account_name_alias?: string
     amount: number
     otp?: string
+    account_name?: string
+    bank_name?: string
+    branch_code?: string
+    internal_bank_code?: string
 
   }
 
@@ -961,6 +1179,8 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     let gidiClient: GidiClient | null = null
     let ingClient: Ing1Client | null = null
     let ingCfg: Ing1Config | null = null
+    let piroClient: PiroClient | null = null
+    let piroCfg: PiroConfig | null = null
 
     if (sourceProvider === 'hilogate') {
       const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
@@ -986,6 +1206,19 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
         credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
       gidiClient = new GidiClient(providerCfg)
+    } else if (sourceProvider === 'piro') {
+      const merchant = await prisma.merchant.findFirst({ where: { name: 'piro' } })
+      if (!merchant) throw new Error('Internal Piro merchant not found')
+
+      const subs = await getActiveProviders(merchant.id, 'piro', {})
+      if (!subs.length) throw new Error('No active Piro credentials today')
+
+      const picked = subs.find((s) => s.id === subMerchantId) ?? subs[0]
+      if (!picked) throw new Error('Active Piro credentials not found for sub-merchant')
+
+      piroCfg = picked.config as PiroConfig
+      providerCfg = piroCfg
+      piroClient = new PiroClient(piroCfg)
     } else {
       const raw = sub.credentials as unknown as Ing1Config
       ingCfg = {
@@ -1008,7 +1241,10 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
     let acctHolder: string
     let alias: string
     let bankName: string
-    if (sourceProvider === 'hilogate') {
+      let branchName = ''
+      let bankIdentifier: string | undefined
+
+      if (sourceProvider === 'hilogate') {
       const valid = await hilogateClient!.validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
         return res.status(400).json({ error: 'Akun bank tidak valid' })
@@ -1033,6 +1269,30 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
+    } else if (sourceProvider === 'piro') {
+      if (!piroClient || !piroCfg) {
+        throw new Error('Missing Piro client configuration')
+      }
+      const validation = await piroClient.validateBankAccount({
+        accountNumber: account_number,
+        bankCode: bank_code,
+        branchCode: branch_code,
+        bankIdentifier: internal_bank_code,
+        bankName: bank_name,
+      })
+
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.message || 'Akun bank tidak valid',
+          code: validation.responseCode,
+        })
+      }
+
+      acctHolder = validation.accountName ?? account_name ?? ''
+      alias = account_name_alias || acctHolder
+      bankName = validation.bankName ?? bank_name ?? ''
+      branchName = validation.branchCode ?? branch_code ?? ''
+      bankIdentifier = validation.bankIdentifier ?? internal_bank_code ?? undefined
     } else {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
@@ -1094,7 +1354,8 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           accountNameAlias: alias,
           accountNumber:    account_number,
           bankCode:         bank_code,
-          bankName
+          bankName,
+          branchName
         }
       })
 
@@ -1149,6 +1410,24 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
 
         }
         resp = await oyClient!.disburse(disburseReq)
+      } else if (sourceProvider === 'piro') {
+        if (!piroClient || !piroCfg) throw new Error('Missing Piro client configuration')
+        resp = await piroClient.createWithdrawal({
+          referenceId: wr.refId,
+          amount: wr.netAmount ?? amount,
+          bankCode: bank_code,
+          accountNumber: account_number,
+          accountName: wr.accountName,
+          accountAlias: wr.accountNameAlias,
+          branchCode: branchName || branch_code,
+          bankIdentifier: bankIdentifier,
+          description: `Withdraw Rp ${wr.netAmount}`,
+          callbackUrl: piroCfg.callbackUrl ?? config.api.piro.callbackUrl,
+          metadata: {
+            subMerchantId,
+            partnerClientId,
+          },
+        })
       } else {
         if (!ingClient || !ingCfg) throw new Error('Missing ING1 client configuration')
         const inquiryAmount = wr.netAmount ?? amount
@@ -1232,7 +1511,12 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
                 : resp.status.code === '000'
                   ? DisbursementStatus.COMPLETED
                   : DisbursementStatus.FAILED)
-            : mapIng1ToDisbursement(resp.rc, typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status)
+            : sourceProvider === 'piro'
+              ? mapPiroDisbursement(resp.status)
+              : mapIng1ToDisbursement(
+                  resp.rc,
+                  typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status,
+                )
 
       // Update withdrawal record
       await prisma.withdrawRequest.update({
@@ -1241,7 +1525,9 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           paymentGatewayId:
             sourceProvider === 'ing1'
               ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
-              : resp.trx_id || resp.trxId || resp.transactionId,
+              : sourceProvider === 'piro'
+                ? resp.withdrawalId ?? resp.referenceId ?? null
+                : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess: sourceProvider === 'hilogate' ? (resp.is_transfer_process ?? false) : true,
           status: newStatus,
           ...(sourceProvider === 'ing1'
@@ -1251,7 +1537,25 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
                   (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
                 return feeRaw != null ? { pgFee: feeRaw } : {}
               })()
-            : {}),
+            : sourceProvider === 'piro'
+              ? (() => {
+                  const updates: any = {}
+                  if (resp.feeAmount != null) {
+                    updates.pgFee = resp.feeAmount
+                  }
+                  if (resp.accountName) {
+                    updates.accountName = resp.accountName
+                  }
+                  if (resp.bankName) {
+                    updates.bankName = resp.bankName
+                  }
+                  const branchCandidate = resp.branchName ?? branchName ?? branch_code ?? null
+                  if (branchCandidate) {
+                    updates.branchName = branchCandidate
+                  }
+                  return updates
+                })()
+              : {}),
         }
       })
 
@@ -1260,8 +1564,15 @@ export const requestWithdraw = async (req: ClientAuthRequest, res: Response) => 
           where: { id: partnerClientId },
           data: { balance: { increment: amount } }
         })
-        return res.status(400).json({ error: 'Withdrawal failed', status: resp.status })
-      }   
+        return res.status(400).json({
+          error:
+            sourceProvider === 'piro'
+              ? resp.message || 'Withdrawal failed'
+              : 'Withdrawal failed',
+          status: resp.status,
+          code: resp.responseCode,
+        })
+      }
 
       return res.status(201).json({ id: wr.id, refId: wr.refId, status: newStatus })
     } catch (err: any) {
@@ -1301,13 +1612,21 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     bank_code,
     account_name_alias,
     amount,
+    account_name,
+    bank_name,
+    branch_code,
+    internal_bank_code,
   } = req.body as {
     subMerchantId: string
-    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1'
+    sourceProvider: 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
     account_number: string
     bank_code: string
     account_name_alias?: string
     amount: number
+    account_name?: string
+    bank_name?: string
+    branch_code?: string
+    internal_bank_code?: string
   }
 
   if (req.isParent) {
@@ -1341,6 +1660,8 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     let gidiClient: GidiClient | null = null
     let ingClient: Ing1Client | null = null
     let ingCfg: Ing1Config | null = null
+    let piroClient: PiroClient | null = null
+    let piroCfg: PiroConfig | null = null
 
     if (sourceProvider === 'hilogate') {
       const raw = sub.credentials as { merchantId: string; secretKey: string; env?: string }
@@ -1366,6 +1687,19 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
         credentialKey: raw.credentialKey,
       } as GidiDisbursementConfig
       gidiClient = new GidiClient(providerCfg)
+    } else if (sourceProvider === 'piro') {
+      const merchant = await prisma.merchant.findFirst({ where: { name: 'piro' } })
+      if (!merchant) throw new Error('Internal Piro merchant not found')
+
+      const subs = await getActiveProviders(merchant.id, 'piro', {})
+      if (!subs.length) throw new Error('No active Piro credentials today')
+
+      const picked = subs.find((s) => s.id === subMerchantId) ?? subs[0]
+      if (!picked) throw new Error('Active Piro credentials not found for sub-merchant')
+
+      piroCfg = picked.config as PiroConfig
+      providerCfg = piroCfg
+      piroClient = new PiroClient(piroCfg)
     } else {
       const raw = sub.credentials as unknown as Ing1Config
       ingCfg = {
@@ -1387,6 +1721,9 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
     let acctHolder: string
     let alias: string
     let bankName: string
+    let branchName = ''
+    let bankIdentifier: string | undefined
+
     if (sourceProvider === 'hilogate') {
       const valid = await hilogateClient!.validateAccount(account_number, bank_code)
       if (valid.status !== 'valid') {
@@ -1412,6 +1749,30 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
       bankName = req.body.bank_name
+    } else if (sourceProvider === 'piro') {
+      if (!piroClient || !piroCfg) {
+        throw new Error('Missing Piro client configuration')
+      }
+      const validation = await piroClient.validateBankAccount({
+        accountNumber: account_number,
+        bankCode: bank_code,
+        branchCode: branch_code,
+        bankIdentifier: internal_bank_code,
+        bankName: bank_name,
+      })
+
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.message || 'Akun bank tidak valid',
+          code: validation.responseCode,
+        })
+      }
+
+      acctHolder = validation.accountName ?? account_name ?? ''
+      alias = account_name_alias || acctHolder
+      bankName = validation.bankName ?? bank_name ?? ''
+      branchName = validation.branchCode ?? branch_code ?? ''
+      bankIdentifier = validation.bankIdentifier ?? internal_bank_code ?? undefined
     } else {
       acctHolder = req.body.account_name || ''
       alias = account_name_alias || acctHolder
@@ -1467,6 +1828,7 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           accountNumber: account_number,
           bankCode: bank_code,
           bankName,
+          branchName,
         },
       })
 
@@ -1519,6 +1881,24 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           email: 'client@launcx.com',
         }
         resp = await oyClient!.disburse(disburseReq)
+      } else if (sourceProvider === 'piro') {
+        if (!piroClient || !piroCfg) throw new Error('Missing Piro client configuration')
+        resp = await piroClient.createWithdrawal({
+          referenceId: wr.refId,
+          amount: wr.netAmount ?? amount,
+          bankCode: bank_code,
+          accountNumber: account_number,
+          accountName: wr.accountName,
+          accountAlias: wr.accountNameAlias,
+          branchCode: branchName || branch_code,
+          bankIdentifier: bankIdentifier,
+          description: `Withdraw Rp ${wr.netAmount}`,
+          callbackUrl: piroCfg.callbackUrl ?? config.api.piro.callbackUrl,
+          metadata: {
+            subMerchantId,
+            partnerClientId,
+          },
+        })
       } else {
         if (!ingClient || !ingCfg) throw new Error('Missing ING1 client configuration')
         const inquiryAmount = wr.netAmount ?? amount
@@ -1602,7 +1982,12 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
                 : resp.status.code === '000'
                   ? DisbursementStatus.COMPLETED
                   : DisbursementStatus.FAILED
-              : mapIng1ToDisbursement(resp.rc, typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status)
+              : sourceProvider === 'piro'
+                ? mapPiroDisbursement(resp.status)
+                : mapIng1ToDisbursement(
+                    resp.rc,
+                    typeof resp?.raw?.status === 'string' ? resp.raw.status : resp.status,
+                  )
 
       await prisma.withdrawRequest.update({
         where: { refId: wr.refId },
@@ -1610,7 +1995,9 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           paymentGatewayId:
             sourceProvider === 'ing1'
               ? resp.reff ?? resp.raw?.reff ?? ingInquiry?.reff ?? null
-              : resp.trx_id || resp.trxId || resp.transactionId,
+              : sourceProvider === 'piro'
+                ? resp.withdrawalId ?? resp.referenceId ?? null
+                : resp.trx_id || resp.trxId || resp.transactionId,
           isTransferProcess:
             sourceProvider === 'hilogate' ? resp.is_transfer_process ?? false : true,
           status: newStatus,
@@ -1621,7 +2008,25 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
                   (typeof ingInquiry?.fee === 'number' ? ingInquiry.fee : null)
                 return feeRaw != null ? { pgFee: feeRaw } : {}
               })()
-            : {}),
+            : sourceProvider === 'piro'
+              ? (() => {
+                  const updates: any = {}
+                  if (resp.feeAmount != null) {
+                    updates.pgFee = resp.feeAmount
+                  }
+                  if (resp.accountName) {
+                    updates.accountName = resp.accountName
+                  }
+                  if (resp.bankName) {
+                    updates.bankName = resp.bankName
+                  }
+                  const branchCandidate = resp.branchName ?? branchName ?? branch_code ?? null
+                  if (branchCandidate) {
+                    updates.branchName = branchCandidate
+                  }
+                  return updates
+                })()
+              : {}),
         },
       })
 
@@ -1630,7 +2035,14 @@ export const requestWithdrawS2S = async (req: ApiKeyRequest, res: Response) => {
           where: { id: partnerClientId },
           data: { balance: { increment: amount } },
         })
-        return res.status(400).json({ error: 'Withdrawal failed', status: resp.status })
+        return res.status(400).json({
+          error:
+            sourceProvider === 'piro'
+              ? resp.message || 'Withdrawal failed'
+              : 'Withdrawal failed',
+          status: resp.status,
+          code: resp.responseCode,
+        })
       }
 
       return res.status(201).json({ id: wr.id, refId: wr.refId, status: newStatus })

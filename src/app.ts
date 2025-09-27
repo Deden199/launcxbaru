@@ -24,7 +24,7 @@ import usersRoutes from './route/users.routes';
 import settingsRoutes   from './route/settings.routes';
 import { loadWeekendOverrideDates } from './util/time'
 
-import { withdrawalCallback, ing1WithdrawalCallback } from './controller/withdrawals.controller'
+import { withdrawalCallback, ing1WithdrawalCallback, piroWithdrawalCallback } from './controller/withdrawals.controller'
 import pivotCallbackRouter from './route/payment.callback.routes';
 
 import webRoutes from './route/web.routes';
@@ -75,6 +75,7 @@ const rateLimitExemptPaths = new Set([
   '/api/v1/transaction/callback/ing1',
   '/api/v1/transaction/callback/oy',
   '/api/v1/withdrawals/callback',
+  '/api/v1/withdrawals/callback/piro',
   '/api/v1/withdrawals/callback/ing1',
 ]);
 
@@ -117,6 +118,18 @@ app.post(
     },
   }),
   withdrawalCallback           // ⛔ TANPA express.json()
+);
+
+app.post(
+  '/api/v1/withdrawals/callback/piro',
+  express.raw({
+    type: '*/*',
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf.toString('utf8')
+    },
+  }),
+  piroWithdrawalCallback,
 );
 
 app.get('/api/v1/withdrawals/callback/ing1', ing1WithdrawalCallback);

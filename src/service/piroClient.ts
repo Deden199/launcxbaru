@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios'
+import axios, { AxiosError, AxiosInstance } from 'axios'
 import crypto from 'crypto'
 import logger from '../logger'
 
@@ -59,6 +59,74 @@ export interface PiroStatusResult {
   paidAt?: Date | null
   expiredAt?: Date | null
   settledAt?: Date | null
+  raw: any
+}
+
+export interface PiroValidateAccountRequest {
+  accountNumber: string
+  bankCode: string
+  /**
+   * Optional branch code required for certain banks (derived from Piro docs).
+   */
+  branchCode?: string
+  /**
+   * Additional bank identifier (often the internal code that Piro expects).
+   */
+  bankIdentifier?: string
+  /** Friendly bank name used when the API response omits the label. */
+  bankName?: string
+}
+
+export interface PiroValidateAccountResult {
+  isValid: boolean
+  accountNumber: string
+  accountName?: string
+  bankCode?: string
+  bankName?: string
+  branchCode?: string
+  bankIdentifier?: string
+  responseCode?: string
+  message?: string
+  raw: any
+}
+
+export interface PiroWithdrawalRequest {
+  referenceId: string
+  amount: number
+  bankCode: string
+  accountNumber: string
+  accountName: string
+  accountAlias?: string
+  branchCode?: string
+  bankIdentifier?: string
+  description?: string
+  callbackUrl?: string
+  metadata?: Record<string, any>
+}
+
+export interface PiroWithdrawalResult {
+  success: boolean
+  status: string
+  withdrawalId?: string
+  referenceId?: string
+  accountName?: string
+  bankName?: string
+  branchName?: string
+  feeAmount?: number
+  message?: string
+  responseCode?: string
+  raw: any
+}
+
+export interface PiroWithdrawalStatusResult {
+  status: string
+  withdrawalId?: string
+  referenceId?: string
+  accountName?: string
+  bankName?: string
+  branchName?: string
+  feeAmount?: number
+  completedAt?: Date | null
   raw: any
 }
 
@@ -256,6 +324,233 @@ export class PiroClient {
       paidAt,
       expiredAt,
       settledAt,
+      raw: res.data,
+    }
+  }
+
+  private unwrapData(res: any): any {
+    return res?.data?.data ?? res?.data ?? res
+  }
+
+  private extractError(error: any): { raw: any; message?: string; code?: string } {
+    if (!error) return { raw: error }
+    if (error instanceof Error && !(error as AxiosError).isAxiosError) {
+      return { raw: error, message: error.message }
+    }
+
+    const axiosErr = error as AxiosError<any>
+    const payload = axiosErr.response?.data ?? axiosErr.toJSON?.() ?? axiosErr
+    const message =
+      payload?.message ??
+      payload?.error ??
+      payload?.errorMessage ??
+      axiosErr.message
+    const code =
+      payload?.code ?? payload?.errorCode ?? payload?.error_code ?? payload?.statusCode
+
+    return {
+      raw: payload,
+      message: typeof message === 'string' ? message : undefined,
+      code: typeof code === 'string' || typeof code === 'number' ? String(code) : undefined,
+    }
+  }
+
+  async validateBankAccount(payload: PiroValidateAccountRequest): Promise<PiroValidateAccountResult> {
+    const headers = await this.authorizedHeaders()
+    const body = clean({
+      merchantId: this.config.merchantId,
+      referenceId: `acct-${Date.now()}`,
+      accountNumber: payload.accountNumber,
+      bankCode: payload.bankCode,
+      branchCode: payload.branchCode,
+      bankIdentifier: payload.bankIdentifier,
+    })
+
+    try {
+      logger.info('[Piro] ▶ validateBankAccount', { body })
+      const res = await this.http.post('/v1/disbursements/account-validation', body, { headers })
+      logger.info('[Piro] ◀ validateBankAccount', { data: res.data })
+      const data = this.unwrapData(res)
+      const result = data?.result ?? data
+
+      const status = String(result?.status ?? data?.status ?? '').toUpperCase()
+      const responseCode =
+        result?.code ??
+        result?.responseCode ??
+        result?.response_code ??
+        data?.code ??
+        data?.responseCode ??
+        data?.response_code
+
+      const errorCode =
+        result?.errorCode ??
+        result?.error_code ??
+        data?.errorCode ??
+        data?.error_code ??
+        null
+
+      const message =
+        result?.message ??
+        data?.message ??
+        res.data?.message ??
+        null
+
+      const success =
+        !errorCode && !['FAILED', 'INVALID', 'ERROR', 'REJECTED'].includes(status)
+
+      const bankName =
+        result?.bankName ??
+        result?.bank_name ??
+        data?.bankName ??
+        data?.bank_name ??
+        payload.bankName
+
+      return {
+        isValid: success,
+        accountNumber:
+          result?.accountNumber ?? result?.account_number ?? data?.accountNumber ?? payload.accountNumber,
+        accountName: result?.accountName ?? result?.account_name ?? data?.accountName ?? undefined,
+        bankCode: result?.bankCode ?? result?.bank_code ?? data?.bankCode ?? payload.bankCode,
+        bankName,
+        branchCode: result?.branchCode ?? result?.branch_code ?? payload.branchCode,
+        bankIdentifier:
+          result?.bankIdentifier ??
+          result?.bank_identifier ??
+          data?.bankIdentifier ??
+          data?.bank_identifier ??
+          payload.bankIdentifier,
+        responseCode:
+          responseCode != null && responseCode !== '' ? String(responseCode) : undefined,
+        message: typeof message === 'string' ? message : undefined,
+        raw: res.data,
+      }
+    } catch (err) {
+      const { raw, message, code } = this.extractError(err)
+      return {
+        isValid: false,
+        accountNumber: payload.accountNumber,
+        bankCode: payload.bankCode,
+        bankName: payload.bankName,
+        branchCode: payload.branchCode,
+        bankIdentifier: payload.bankIdentifier,
+        responseCode: code,
+        message,
+        raw,
+      }
+    }
+  }
+
+  async createWithdrawal(payload: PiroWithdrawalRequest): Promise<PiroWithdrawalResult> {
+    const headers = await this.authorizedHeaders()
+    const body = clean({
+      merchantId: this.config.merchantId,
+      storeId: this.config.storeId,
+      terminalId: this.config.terminalId,
+      channel: this.config.channel,
+      callbackUrl: payload.callbackUrl ?? this.config.callbackUrl,
+      referenceId: payload.referenceId,
+      amount: payload.amount,
+      accountNumber: payload.accountNumber,
+      accountName: payload.accountName,
+      accountAlias: payload.accountAlias,
+      bankCode: payload.bankCode,
+      branchCode: payload.branchCode,
+      bankIdentifier: payload.bankIdentifier,
+      description: payload.description,
+      metadata: payload.metadata,
+    })
+
+    try {
+      logger.info('[Piro] ▶ createWithdrawal', { body })
+      const res = await this.http.post('/v1/disbursements', body, { headers })
+      logger.info('[Piro] ◀ createWithdrawal', { data: res.data })
+      const data = this.unwrapData(res)
+      const result = data?.disbursement ?? data
+
+      const status = String(result?.status ?? data?.status ?? '').toUpperCase()
+      const success = ['SUCCESS', 'COMPLETED', 'PAID'].includes(status)
+      const responseCode =
+        result?.code ??
+        result?.responseCode ??
+        result?.response_code ??
+        data?.code ??
+        data?.responseCode ??
+        data?.response_code
+
+      const fee = result?.fee ?? result?.feeAmount ?? result?.fee_amount ?? data?.fee
+
+      return {
+        success,
+        status,
+        withdrawalId:
+          result?.disbursementId ??
+          result?.withdrawalId ??
+          result?.id ??
+          data?.disbursementId ??
+          data?.withdrawalId ??
+          undefined,
+        referenceId:
+          result?.referenceId ??
+          result?.reference_id ??
+          data?.referenceId ??
+          payload.referenceId,
+        accountName: result?.accountName ?? data?.accountName,
+        bankName: result?.bankName ?? data?.bankName,
+        branchName: result?.branchName ?? data?.branchName,
+        feeAmount: typeof fee === 'number' ? fee : parseNumber(fee),
+        message: result?.message ?? data?.message ?? res.data?.message,
+        responseCode: responseCode != null ? String(responseCode) : undefined,
+        raw: res.data,
+      }
+    } catch (err) {
+      const { raw, message, code } = this.extractError(err)
+      return {
+        success: false,
+        status: 'FAILED',
+        referenceId: payload.referenceId,
+        message,
+        responseCode: code,
+        raw,
+      }
+    }
+  }
+
+  async getWithdrawalStatus(reference: string): Promise<PiroWithdrawalStatusResult> {
+    const headers = await this.authorizedHeaders()
+    const url = `/v1/disbursements/${encodeURIComponent(reference)}`
+    logger.info('[Piro] ▶ getWithdrawalStatus', { reference })
+    const res = await this.http.get(url, { headers })
+    logger.info('[Piro] ◀ getWithdrawalStatus', { data: res.data })
+
+    const data = this.unwrapData(res)
+    const result = data?.disbursement ?? data
+
+    const status = String(result?.status ?? data?.status ?? '').toUpperCase()
+    const fee = result?.fee ?? result?.feeAmount ?? result?.fee_amount ?? data?.fee
+    const completed =
+      parseDate(result?.completedAt ?? result?.completed_at ?? data?.completedAt ?? data?.completed_at) ??
+      parseDate(result?.settledAt ?? result?.settled_at) ??
+      null
+
+    return {
+      status,
+      withdrawalId:
+        result?.disbursementId ??
+        result?.withdrawalId ??
+        result?.id ??
+        data?.disbursementId ??
+        data?.withdrawalId ??
+        undefined,
+      referenceId:
+        result?.referenceId ??
+        result?.reference_id ??
+        data?.referenceId ??
+        reference,
+      accountName: result?.accountName ?? data?.accountName,
+      bankName: result?.bankName ?? data?.bankName,
+      branchName: result?.branchName ?? data?.branchName,
+      feeAmount: typeof fee === 'number' ? fee : parseNumber(fee),
+      completedAt: completed,
       raw: res.data,
     }
   }
