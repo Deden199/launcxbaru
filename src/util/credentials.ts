@@ -40,12 +40,21 @@ const piroCredSchema = z.object({
   callbackUrl: z.string().trim().url().optional(),
 })
 
+const genesisCredSchema = z.object({
+  baseUrl: z.string().trim().url().optional(),
+  secret: z.string().trim().min(1).optional(),
+  callbackUrl: z.string().trim().url().optional(),
+  clientId: z.string().trim().min(1).optional(),
+  clientSecret: z.string().trim().min(1).optional(),
+})
+
 /** Tipe hasil normalisasi per provider (tidak di‐flatten berlebihan) */
 export type NormalizedHilogate = z.infer<typeof hilogateCredSchema>
 export type NormalizedOy = z.infer<typeof oyCredSchema>
 export type NormalizedGidi = z.infer<typeof gidiCredSchema>
 export type NormalizedIng1 = z.infer<typeof ing1CredSchema>
 export type NormalizedPiro = z.infer<typeof piroCredSchema>
+export type NormalizedGenesis = z.infer<typeof genesisCredSchema>
 
 export type NormalizedCred =
   | ({ provider: 'hilogate' } & NormalizedHilogate)
@@ -53,6 +62,7 @@ export type NormalizedCred =
   | ({ provider: 'gidi' } & NormalizedGidi)
   | ({ provider: 'ing1' } & NormalizedIng1)
   | ({ provider: 'piro' } & NormalizedPiro)
+  | ({ provider: 'genesis' } & NormalizedGenesis)
   | ({ provider: string; extra: any })
 
 /** Ambil dan parse raw credential sesuai provider */
@@ -201,6 +211,44 @@ export function parseRawCredential(provider: string, input: any): any {
         callbackUrl: pickOptional(callbackUrl, callback_url, callbackURL),
       }
     }
+    case 'genesis': {
+      const {
+        baseUrl,
+        base_url,
+        secret,
+        secretKey,
+        secret_key,
+        callbackUrl,
+        callback_url,
+        callbackURL,
+        clientId,
+        client_id,
+        clientID,
+        clientSecret,
+        client_secret,
+        clientSecretKey,
+      } = input
+
+      const pickOptional = (...vals: any[]) => {
+        for (const val of vals) {
+          if (typeof val === 'string') {
+            const trimmed = val.trim()
+            if (trimmed.length > 0) {
+              return trimmed
+            }
+          }
+        }
+        return undefined
+      }
+
+      return {
+        baseUrl: pickOptional(baseUrl, base_url),
+        secret: pickOptional(secret, secretKey, secret_key),
+        callbackUrl: pickOptional(callbackUrl, callback_url, callbackURL),
+        clientId: pickOptional(clientId, client_id, clientID),
+        clientSecret: pickOptional(clientSecret, client_secret, clientSecretKey),
+      }
+    }
     default:
       return input
   }
@@ -227,6 +275,10 @@ export function normalizeCredentials(provider: string, raw: any): NormalizedCred
     }
     case 'piro': {
       const parsed = piroCredSchema.parse(raw)
+      return { provider, ...parsed }
+    }
+    case 'genesis': {
+      const parsed = genesisCredSchema.parse(raw)
       return { provider, ...parsed }
     }
     default:
