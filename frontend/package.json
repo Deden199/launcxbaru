@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsx --test src/utils/dashboard.test.ts src/utils/piroBankMap.test.ts src/pages/admin/merchants/[merchantId]/index.test.tsx"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",
@@ -36,12 +37,15 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.10",
+    "@testing-library/react": "^16.3.0",
     "@types/node": "^20.19.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.21",
+    "jsdom": "^27.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.20.6",
     "typescript": "^5.8.3"
   }
 }
