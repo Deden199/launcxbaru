@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 
-type ProviderType = 'hilogate' | 'oy' | 'gidi' | 'ing1'
+type ProviderType = 'hilogate' | 'oy' | 'gidi' | 'ing1' | 'piro'
 
 type HilogateEnv = 'sandbox' | 'production' | 'live'
 
@@ -30,6 +30,14 @@ type Ing1Credentials = {
   apiVersion: string
 }
 
+type PiroCredentials = {
+  merchantId: string
+  storeId: string
+  terminalId: string
+  channel: string
+  callbackUrl?: string
+}
+
 type ScheduleSetting = {
   weekday: boolean
   weekend: boolean
@@ -46,8 +54,24 @@ type RawProviderEntry = {
 type ProviderForm = {
   provider: ProviderType
   name: string
-  credentials: HilogateOyCredentials | GidiCredentials | Ing1Credentials
+  credentials: HilogateOyCredentials | GidiCredentials | Ing1Credentials | PiroCredentials
   schedule: ScheduleSetting
+}
+
+type UseRouterLike = () => { query?: { merchantId?: string } }
+
+type ApiClient = {
+  get: typeof api.get
+  post: typeof api.post
+  patch: typeof api.patch
+  delete: typeof api.delete
+}
+
+export type PaymentProvidersPageProps = {
+  apiClient?: ApiClient
+  useRouterImpl?: UseRouterLike
+  initialForm?: ProviderForm
+  initialShowForm?: boolean
 }
 
 const allowedEnvs: HilogateEnv[] = ['sandbox', 'production', 'live']
@@ -69,7 +93,7 @@ const ensureEnv = (value: string): HilogateEnv =>
 function normalizeCredentialsForForm(
   provider: ProviderType,
   raw?: any
-): HilogateOyCredentials | GidiCredentials | Ing1Credentials {
+): HilogateOyCredentials | GidiCredentials | Ing1Credentials | PiroCredentials {
   const source = (raw ?? {}) as Record<string, unknown>
 
   if (provider === 'gidi') {
@@ -91,6 +115,16 @@ function normalizeCredentialsForForm(
       permanentToken: pickTrimmed(source.permanentToken, source.permanent_token, source.token),
       merchantId: pickTrimmed(source.merchantId, source.merchant_id),
       apiVersion: pickTrimmed(source.apiVersion, source.api_version, source.version),
+    }
+  }
+
+  if (provider === 'piro') {
+    return {
+      merchantId: pickTrimmed(source.merchantId, source.merchant_id),
+      storeId: pickTrimmed(source.storeId, source.store_id),
+      terminalId: pickTrimmed(source.terminalId, source.terminal_id),
+      channel: pickTrimmed(source.channel),
+      callbackUrl: optionalField(pickTrimmed(source.callbackUrl, source.callback_url)),
     }
   }
 
@@ -135,6 +169,10 @@ const resolvePrimaryCredential = (entry: RawProviderEntry) => {
     return displayOrDash(creds.baseUrl ?? creds.base_url)
   }
 
+  if (entry.provider === 'piro') {
+    return displayOrDash(creds.merchantId ?? creds.merchant_id)
+  }
+
   return '–'
 }
 
@@ -153,22 +191,38 @@ const resolveSecondaryInfo = (entry: RawProviderEntry) => {
     return displayOrDash(creds.email)
   }
 
+  if (entry.provider === 'piro') {
+    const store = trimString(creds.storeId ?? creds.store_id)
+    const terminal = trimString(creds.terminalId ?? creds.terminal_id)
+    const channel = trimString(creds.channel)
+    const parts: string[] = []
+    if (store) parts.push(`Store: ${store}`)
+    if (terminal) parts.push(`Terminal: ${terminal}`)
+    if (channel) parts.push(`Channel: ${channel}`)
+    return parts.length ? parts.join(' • ') : '–'
+  }
+
   return '–'
 }
 
-export default function PaymentProvidersPage() {
-  const router = useRouter()
+export function PaymentProvidersPageView({
+  apiClient = api,
+  useRouterImpl = useRouter,
+  initialForm,
+  initialShowForm,
+}: PaymentProvidersPageProps = {}) {
+  const router = useRouterImpl()
   const { merchantId } = router.query as { merchantId?: string }
   const [editId, setEditId] = useState<string | null>(null)
   const [merchant, setMerchant] = useState<{ name: string } | null>(null)
   const [entries, setEntries] = useState<RawProviderEntry[]>([])
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(initialShowForm ?? false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [form, setForm] = useState<ProviderForm>(() => createEmptyForm())
+  const [form, setForm] = useState<ProviderForm>(() => initialForm ?? createEmptyForm())
 
   useEffect(() => {
     if (merchantId) {
-      api.get<{ name: string }>(`/admin/merchants/${merchantId}`)
+      apiClient.get<{ name: string }>(`/admin/merchants/${merchantId}`)
         .then(res => setMerchant(res.data))
         .catch(() => console.error('Gagal mengambil data merchant'))
       fetchEntries()
@@ -177,7 +231,7 @@ export default function PaymentProvidersPage() {
 
   async function fetchEntries() {
     try {
-      const res = await api.get<RawProviderEntry[]>(`/admin/merchants/${merchantId}/pg`)
+      const res = await apiClient.get<RawProviderEntry[]>(`/admin/merchants/${merchantId}/pg`)
       setEntries(res.data)
     } catch (err) {
       console.error('Fetch providers error', err)
@@ -210,6 +264,27 @@ export default function PaymentProvidersPage() {
       const subMerchantOpt = optionalField(creds.subMerchantId)
       if (merchantOpt) payloadCreds.merchantId = merchantOpt
       if (subMerchantOpt) payloadCreds.subMerchantId = subMerchantOpt
+    } else if (provider === 'piro') {
+      const creds = form.credentials as PiroCredentials
+      const merchantIdValue = creds.merchantId.trim()
+      const storeIdValue = creds.storeId.trim()
+      const terminalIdValue = creds.terminalId.trim()
+      const channelValue = creds.channel.trim()
+
+      if (!merchantIdValue || !storeIdValue || !terminalIdValue || !channelValue) {
+        setErrorMsg('Merchant ID, Store ID, Terminal ID, dan Channel wajib diisi untuk Piro.')
+        return
+      }
+
+      payloadCreds = {
+        merchantId: merchantIdValue,
+        storeId: storeIdValue,
+        terminalId: terminalIdValue,
+        channel: channelValue,
+      }
+
+      const callbackUrl = optionalField(creds.callbackUrl)
+      if (callbackUrl) payloadCreds.callbackUrl = callbackUrl
     } else if (provider === 'ing1') {
       const creds = form.credentials as Ing1Credentials
       const baseUrl = creds.baseUrl.trim()
@@ -264,9 +339,9 @@ export default function PaymentProvidersPage() {
 
     try {
       if (editId) {
-        await api.patch(`/admin/merchants/${merchantId}/pg/${editId}`, payload)
+        await apiClient.patch(`/admin/merchants/${merchantId}/pg/${editId}`, payload)
       } else {
-        await api.post(`/admin/merchants/${merchantId}/pg`, payload)
+        await apiClient.post(`/admin/merchants/${merchantId}/pg`, payload)
       }
       setShowForm(false)
       setEditId(null)
@@ -294,7 +369,7 @@ export default function PaymentProvidersPage() {
     if (!confirm('Yakin ingin menghapus koneksi ini?')) return
 
     try {
-      await api.delete(`/admin/merchants/${merchantId}/pg/${subId}`)
+      await apiClient.delete(`/admin/merchants/${merchantId}/pg/${subId}`)
       fetchEntries()
     } catch (err) {
       console.error('Delete provider error', err)
@@ -382,6 +457,7 @@ export default function PaymentProvidersPage() {
                   <option value="oy">OY</option>
                   <option value="gidi">Gidi</option>
                   <option value="ing1">ING1 (Billers)</option>
+                  <option value="piro">Piro</option>
                 </select>
               </div>
               <div className="form-group">
@@ -443,6 +519,91 @@ export default function PaymentProvidersPage() {
                     />
                   </div>
                 </>
+              )}
+
+              {form.provider === 'piro' && (
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Merchant ID</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as PiroCredentials)?.merchantId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as PiroCredentials),
+                            merchantId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Store ID</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as PiroCredentials)?.storeId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as PiroCredentials),
+                            storeId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Terminal ID</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as PiroCredentials)?.terminalId || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as PiroCredentials),
+                            terminalId: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Channel</label>
+                    <input
+                      type="text"
+                      value={(form.credentials as PiroCredentials)?.channel || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as PiroCredentials),
+                            channel: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Callback URL (opsional)</label>
+                    <input
+                      type="url"
+                      value={(form.credentials as PiroCredentials)?.callbackUrl || ''}
+                      onChange={e =>
+                        setForm(f => ({
+                          ...f,
+                          credentials: {
+                            ...(f.credentials as PiroCredentials),
+                            callbackUrl: e.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               )}
 
               {form.provider === 'ing1' && (
@@ -783,6 +944,10 @@ export default function PaymentProvidersPage() {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+}
+
+export default function PaymentProvidersPage() {
+  return <PaymentProvidersPageView />
 }
 
 .modal {
