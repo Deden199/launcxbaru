@@ -144,6 +144,12 @@ oy: {
       latitude: process.env.PIRO_LATITUDE || '',
       longitude: process.env.PIRO_LONGITUDE || '',
     },
+    genesis: {
+      enabled: /^true$/i.test(process.env.GENESIS_ENABLED || ''),
+      baseUrl: process.env.GENESIS_BASE_URL || '',
+      secret: process.env.GENESIS_SECRET || 'abc',
+      callbackUrl: process.env.GENESIS_CALLBACK_URL || '',
+    },
   },
   aws: {
     region: process.env.AWS_REGION || 'ap-southeast-1',

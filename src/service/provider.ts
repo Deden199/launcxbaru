@@ -9,6 +9,7 @@ import { GidiConfig } from '../service/gidi.service';
 import { IfpClient, IfpConfig } from '../service/ifpClient';
 import { Ing1Client, Ing1Config } from '../service/ing1Client';
 import { PiroClient, PiroConfig } from '../service/piroClient';
+import { GenesisClient, GenesisClientConfig } from '../service/genesisClient';
 import { isJakartaWeekend } from '../util/time';
 
 /* ═════════════════════════ Helpers ═════════════════════════ */
@@ -357,6 +358,25 @@ export async function getActiveProvidersForClient(
         supportsQR: true,
         async generateCheckoutUrl({ orderId, amount }) {
           const cfg = pickConfig();
+          if (config.api.genesis.enabled) {
+            const genesisCfg: GenesisClientConfig = {
+              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
+              secret: config.api.genesis.secret || cfg.signatureKey || '',
+              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
+              defaultClientId: cfg.clientId || undefined,
+              defaultClientSecret:
+                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
+            };
+            const client = new GenesisClient(genesisCfg);
+            const resp = await client.generateQris({
+              orderId,
+              amount,
+              clientId: genesisCfg.defaultClientId,
+              clientSecret: genesisCfg.defaultClientSecret,
+            });
+            return resp.qrisData ?? '';
+          }
+
           const client = new PiroClient(cfg);
           const resp = await client.createPayment({
             orderId,
@@ -368,6 +388,27 @@ export async function getActiveProvidersForClient(
         },
         async generateQR({ orderId, amount }) {
           const cfg = pickConfig();
+          if (config.api.genesis.enabled) {
+            const genesisCfg: GenesisClientConfig = {
+              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
+              secret: config.api.genesis.secret || cfg.signatureKey || '',
+              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
+              defaultClientId: cfg.clientId || undefined,
+              defaultClientSecret:
+                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
+            };
+            const client = new GenesisClient(genesisCfg);
+            const resp = await client.generateQris({
+              orderId,
+              amount,
+              clientId: genesisCfg.defaultClientId,
+              clientSecret: genesisCfg.defaultClientSecret,
+            });
+            const qr = resp.qrisData ?? '';
+            if (!qr) throw new Error('Genesis QR payload not available');
+            return qr;
+          }
+
           const client = new PiroClient(cfg);
           const resp = await client.createPayment({
             orderId,
@@ -381,6 +422,29 @@ export async function getActiveProvidersForClient(
         },
         async checkStatus({ reff, clientReff }) {
           const cfg = pickConfig();
+          if (config.api.genesis.enabled) {
+            const genesisCfg: GenesisClientConfig = {
+              baseUrl: config.api.genesis.baseUrl || cfg.baseUrl || '',
+              secret: config.api.genesis.secret || cfg.signatureKey || '',
+              callbackUrl: config.api.genesis.callbackUrl || cfg.callbackUrl || config.api.callbackUrl,
+              defaultClientId: cfg.clientId || undefined,
+              defaultClientSecret:
+                cfg.clientSecret || cfg.signatureKey || config.api.genesis.secret || undefined,
+            };
+            const client = new GenesisClient(genesisCfg);
+            const reference = reff || clientReff;
+            if (!reference) throw new Error('Missing reference for Genesis inquiry');
+            const resp = await client.queryQris({
+              orderId: reference,
+              clientId: genesisCfg.defaultClientId,
+              clientSecret: genesisCfg.defaultClientSecret,
+            });
+            return {
+              status: resp.status,
+              raw: resp.raw,
+            };
+          }
+
           const client = new PiroClient(cfg);
           const reference = reff || clientReff;
           if (!reference) throw new Error('Missing reference for Piro inquiry');

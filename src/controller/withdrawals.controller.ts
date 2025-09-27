@@ -13,6 +13,7 @@ import { DisbursementStatus } from '@prisma/client'
 import { getActiveProviders } from '../service/provider';
 import {OyClient,OyConfig}          from '../service/oyClient'    // sesuaikan path
 import { PiroClient, PiroConfig } from '../service/piroClient'
+import { GenesisClient } from '../service/genesisClient'
 import { authenticator } from 'otplib'
 import { parseDateSafely } from '../util/time'
 import { mapIng1Status, parseIng1Date, parseIng1Number } from '../service/ing1Status'
@@ -642,16 +643,35 @@ export const piroWithdrawalCallback = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing signature' })
     }
 
-    const expected = PiroClient.callbackSignature(raw, config.api.piro.signatureKey)
-    if (expected !== signature) {
-      return res.status(400).json({ error: 'Invalid signature' })
-    }
-
     let body: any
     try {
       body = JSON.parse(raw || '{}')
     } catch (err) {
       return res.status(400).json({ error: 'Invalid JSON payload' })
+    }
+
+    let expected: string
+    if (config.api.genesis.enabled) {
+      const secret = config.api.genesis.secret || config.api.piro.signatureKey
+      if (!secret) {
+        return res.status(400).json({ error: 'Missing Genesis signature secret' })
+      }
+      const clientId =
+        body.clientId || body.client_id || body.data?.clientId || body.data?.client_id || ''
+      if (!clientId) {
+        return res.status(400).json({ error: 'Missing Genesis client ID' })
+      }
+      expected = GenesisClient.callbackSignature(body.data ?? body, secret, clientId)
+    } else {
+      const signatureKey = config.api.piro.signatureKey
+      if (!signatureKey) {
+        return res.status(400).json({ error: 'Missing Piro signature key configuration' })
+      }
+      expected = PiroClient.callbackSignature(raw, signatureKey)
+    }
+
+    if (expected !== signature) {
+      return res.status(400).json({ error: 'Invalid signature' })
     }
 
     const data = body.data ?? body
