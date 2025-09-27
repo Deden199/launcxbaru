@@ -851,7 +851,7 @@ export const piroTransactionCallback = async (req: Request, res: Response) => {
     const signatureKey = config.api.piro.signatureKey
     if (!signatureKey) throw new Error('Missing Piro signature key configuration')
 
-    const expected = PiroClient.computeSignature(rawBody, signatureKey)
+    const expected = PiroClient.callbackSignature(rawBody, signatureKey)
     if (signature !== expected) throw new Error('Invalid Piro signature')
 
     const payload = JSON.parse(rawBody) as Record<string, any>

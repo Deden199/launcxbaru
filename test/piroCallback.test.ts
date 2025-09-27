@@ -3,9 +3,10 @@ import assert from 'node:assert/strict'
 
 import './helpers/testEnv'
 
+import crypto from 'crypto'
+
 import { piroTransactionCallback } from '../src/controller/payment'
 import { prisma } from '../src/core/prisma'
-import { PiroClient } from '../src/service/piroClient'
 
 const signatureKey = process.env.PIRO_SIGNATURE_KEY || 'piro-signature'
 
@@ -52,7 +53,7 @@ test('piroTransactionCallback processes valid payload', { concurrency: false }, 
     amount: 12500,
   }
   const raw = JSON.stringify(payload)
-  const signature = PiroClient.computeSignature(raw, signatureKey)
+  const signature = crypto.createHash('md5').update(raw + signatureKey, 'utf8').digest('hex')
 
   let orderFindCount = 0
   let capturedUpdate: any = null

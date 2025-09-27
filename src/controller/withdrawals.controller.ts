@@ -642,7 +642,7 @@ export const piroWithdrawalCallback = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing signature' })
     }
 
-    const expected = PiroClient.computeSignature(raw, config.api.piro.signatureKey)
+    const expected = PiroClient.callbackSignature(raw, config.api.piro.signatureKey)
     if (expected !== signature) {
       return res.status(400).json({ error: 'Invalid signature' })
     }

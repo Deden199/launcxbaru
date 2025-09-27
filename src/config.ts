@@ -140,6 +140,9 @@ oy: {
       clientSecret: process.env.PIRO_CLIENT_SECRET || '',
       signatureKey: process.env.PIRO_SIGNATURE_KEY || '',
       callbackUrl: process.env.PIRO_CALLBACK_URL || '',
+      deviceId: process.env.PIRO_DEVICE_ID || 'web',
+      latitude: process.env.PIRO_LATITUDE || '',
+      longitude: process.env.PIRO_LONGITUDE || '',
     },
   },
   aws: {

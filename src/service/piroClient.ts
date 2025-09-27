@@ -14,6 +14,9 @@ export interface PiroConfig {
   terminalId?: string
   channel?: string
   callbackUrl?: string
+  deviceId?: string
+  latitude?: string
+  longitude?: string
 }
 
 const JAKARTA_TIMEZONE = 'Asia/Jakarta'
@@ -203,23 +206,178 @@ export class PiroClient {
     })
   }
 
-  static computeSignature(payload: string, key: string): string {
-    return crypto.createHmac('sha256', key).update(payload, 'utf8').digest('hex')
+  private static normalizeSignatureParts(parts: any[]): string[] {
+    return parts
+      .flatMap((part) => (Array.isArray(part) ? part : [part]))
+      .filter((part) => part !== null && part !== undefined)
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (typeof part === 'number') return Number.isFinite(part) ? String(part) : ''
+        if (typeof part === 'boolean') return part ? 'true' : 'false'
+        if (part instanceof Date) return part.toISOString()
+        return String(part)
+      })
+  }
+
+  private static md5(parts: string[]): string {
+    return crypto.createHash('md5').update(parts.join(''), 'utf8').digest('hex')
+  }
+
+  static computeSignature(
+    ...parts: Array<string | number | boolean | Date | null | undefined | Array<string | number | boolean | Date | null | undefined>>
+  ): string {
+    return PiroClient.md5(PiroClient.normalizeSignatureParts(parts))
+  }
+
+  static genesisRegistrationSignature(input: {
+    email: string
+    username: string
+    password: string
+    callbackClient: string
+    salt?: string
+  }): string {
+    const salt = input.salt ?? 'abc'
+    return PiroClient.computeSignature(
+      input.email,
+      input.username,
+      input.password,
+      input.callbackClient,
+      salt,
+    )
+  }
+
+  static registrationSignature(input: {
+    email: string
+    username: string
+    password: string
+    callbackClient: string
+    millis: string | number
+  }): string {
+    return PiroClient.computeSignature(
+      input.email,
+      input.username,
+      input.password,
+      input.callbackClient,
+      input.millis,
+    )
+  }
+
+  static qrisSignature(input: {
+    clientId: string
+    value: string | number
+    orderId: string
+    clientSecret: string
+  }): string {
+    return PiroClient.computeSignature(
+      input.clientId,
+      input.value,
+      input.orderId,
+      input.clientSecret,
+    )
+  }
+
+  static interbankTransferSignature(input: {
+    clientId: string
+    deviceId: string
+    latitude: string | number
+    longitude: string | number
+    value: string | number
+    beneficiaryAccountNo: string
+    clientSecret: string
+  }): string {
+    return PiroClient.computeSignature(
+      input.clientId,
+      input.deviceId,
+      input.latitude,
+      input.longitude,
+      input.value,
+      input.beneficiaryAccountNo,
+      input.clientSecret,
+    )
+  }
+
+  static balanceInquirySignature(input: {
+    clientId: string
+    deviceId: string
+    latitude: string | number
+    longitude: string | number
+    clientSecret: string
+  }): string {
+    return PiroClient.computeSignature(
+      input.clientId,
+      input.deviceId,
+      input.latitude,
+      input.longitude,
+      input.clientSecret,
+    )
+  }
+
+  static callbackSignature(rawBody: string, signatureKey: string): string {
+    return PiroClient.computeSignature(rawBody, signatureKey)
+  }
+
+  static formatAmount(value: number | string): string {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value.toFixed(2) : String(value)
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (!trimmed) return '0.00'
+      const num = Number(trimmed)
+      if (Number.isFinite(num)) return num.toFixed(2)
+      return trimmed
+    }
+    return '0.00'
   }
 
   verifySignature(rawBody: string, signature: string): boolean {
-    const expected = PiroClient.computeSignature(rawBody, this.config.signatureKey)
+    const expected = PiroClient.callbackSignature(rawBody, this.config.signatureKey)
     return expected === signature
   }
 
-  private async authorizedHeaders(at: Date = new Date()): Promise<Record<string, string>> {
-    return {
+  private async authorizedHeaders(
+    at: Date = new Date(),
+    overrides: {
+      signature?: string
+      clientId?: string
+      deviceId?: string
+      latitude?: string
+      longitude?: string
+    } = {},
+  ): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
       Authorization: piroBasicAuthorization(at),
     }
+
+    const clientId = overrides.clientId ?? this.config.clientId
+    if (clientId) headers.client_id = String(clientId)
+
+    const deviceId = overrides.deviceId ?? this.config.deviceId
+    if (deviceId) headers.device_id = String(deviceId)
+
+    const latitude = overrides.latitude ?? this.config.latitude
+    if (latitude) headers.latitude = String(latitude)
+
+    const longitude = overrides.longitude ?? this.config.longitude
+    if (longitude) headers.longitude = String(longitude)
+
+    if (overrides.signature) headers['x-signature'] = overrides.signature
+
+    return headers
   }
 
   async createPayment(payload: PiroCreatePaymentRequest): Promise<PiroCreatePaymentResult> {
-    const headers = await this.authorizedHeaders()
+    const secret = this.config.clientSecret ?? this.config.signatureKey
+    const amountValue = PiroClient.formatAmount(payload.amount)
+    const signature = secret
+      ? PiroClient.qrisSignature({
+          clientId: this.config.clientId,
+          value: amountValue,
+          orderId: payload.orderId,
+          clientSecret: secret,
+        })
+      : undefined
+    const headers = await this.authorizedHeaders(undefined, { signature })
     const body = clean({
       merchantId: this.config.merchantId,
       storeId: this.config.storeId,
@@ -268,7 +426,17 @@ export class PiroClient {
   }
 
   async getPaymentStatus(reference: string): Promise<PiroStatusResult> {
-    const headers = await this.authorizedHeaders()
+    const secret = this.config.clientSecret ?? this.config.signatureKey
+    const signature = secret
+      ? PiroClient.balanceInquirySignature({
+          clientId: this.config.clientId,
+          deviceId: this.config.deviceId ?? 'web',
+          latitude: this.config.latitude ?? '',
+          longitude: this.config.longitude ?? '',
+          clientSecret: secret,
+        })
+      : undefined
+    const headers = await this.authorizedHeaders(undefined, { signature })
     const url = `/v1/payments/${encodeURIComponent(reference)}`
     logger.info('[Piro] ▶ getPaymentStatus', { reference })
     const res = await this.http.get(url, { headers })
@@ -345,7 +513,19 @@ export class PiroClient {
   }
 
   async validateBankAccount(payload: PiroValidateAccountRequest): Promise<PiroValidateAccountResult> {
-    const headers = await this.authorizedHeaders()
+    const secret = this.config.clientSecret ?? this.config.signatureKey
+    const signature = secret
+      ? PiroClient.interbankTransferSignature({
+          clientId: this.config.clientId,
+          deviceId: this.config.deviceId ?? 'web',
+          latitude: this.config.latitude ?? '',
+          longitude: this.config.longitude ?? '',
+          value: PiroClient.formatAmount(0),
+          beneficiaryAccountNo: payload.accountNumber,
+          clientSecret: secret,
+        })
+      : undefined
+    const headers = await this.authorizedHeaders(undefined, { signature })
     const body = clean({
       merchantId: this.config.merchantId,
       referenceId: `acct-${Date.now()}`,
@@ -430,7 +610,19 @@ export class PiroClient {
   }
 
   async createWithdrawal(payload: PiroWithdrawalRequest): Promise<PiroWithdrawalResult> {
-    const headers = await this.authorizedHeaders()
+    const secret = this.config.clientSecret ?? this.config.signatureKey
+    const signature = secret
+      ? PiroClient.interbankTransferSignature({
+          clientId: this.config.clientId,
+          deviceId: this.config.deviceId ?? 'web',
+          latitude: this.config.latitude ?? '',
+          longitude: this.config.longitude ?? '',
+          value: PiroClient.formatAmount(payload.amount),
+          beneficiaryAccountNo: payload.accountNumber,
+          clientSecret: secret,
+        })
+      : undefined
+    const headers = await this.authorizedHeaders(undefined, { signature })
     const body = clean({
       merchantId: this.config.merchantId,
       storeId: this.config.storeId,
@@ -505,7 +697,17 @@ export class PiroClient {
   }
 
   async getWithdrawalStatus(reference: string): Promise<PiroWithdrawalStatusResult> {
-    const headers = await this.authorizedHeaders()
+    const secret = this.config.clientSecret ?? this.config.signatureKey
+    const signature = secret
+      ? PiroClient.balanceInquirySignature({
+          clientId: this.config.clientId,
+          deviceId: this.config.deviceId ?? 'web',
+          latitude: this.config.latitude ?? '',
+          longitude: this.config.longitude ?? '',
+          clientSecret: secret,
+        })
+      : undefined
+    const headers = await this.authorizedHeaders(undefined, { signature })
     const url = `/v1/disbursements/${encodeURIComponent(reference)}`
     logger.info('[Piro] ▶ getWithdrawalStatus', { reference })
     const res = await this.http.get(url, { headers })

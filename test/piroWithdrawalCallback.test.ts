@@ -5,9 +5,10 @@ process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test'
 
 import './helpers/testEnv'
 
+import crypto from 'crypto'
+
 import { piroWithdrawalCallback } from '../src/controller/withdrawals.controller'
 import { prisma } from '../src/core/prisma'
-import { PiroClient } from '../src/service/piroClient'
 import { config } from '../src/config'
 
 config.api.piro.signatureKey = 'piro-signature'
@@ -70,9 +71,10 @@ test('piroWithdrawalCallback updates pending withdrawal', async () => {
     bankName: 'Bank Mandiri',
   }
 
-  const signature = PiroClient.computeSignature(JSON.stringify(body), config.api.piro.signatureKey)
+  const raw = JSON.stringify(body)
+  const signature = crypto.createHash('md5').update(raw + config.api.piro.signatureKey, 'utf8').digest('hex')
   const req: any = {
-    rawBody: JSON.stringify(body),
+    rawBody: raw,
     header: (name: string) => (name.toLowerCase() === 'x-piro-signature' ? signature : ''),
   }
 

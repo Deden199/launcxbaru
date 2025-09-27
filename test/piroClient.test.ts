@@ -13,8 +13,12 @@ import {
 const baseConfig: PiroConfig = {
   baseUrl: 'https://api.piro.test',
   clientId: 'client-id',
+  clientSecret: 'client-secret',
   signatureKey: 'sig-key',
   merchantId: 'merchant-1',
+  deviceId: 'web',
+  latitude: '-6.175110',
+  longitude: '106.865036',
 }
 
 test('jakartaDailyMillis aligns with Asia/Jakarta start of day', () => {
@@ -32,16 +36,28 @@ test('piroDailyCredentials derives username/password from millis', () => {
   assert.equal(creds.password, `${expectedMillis}`)
 })
 
-test('authorized headers use Basic auth with daily credentials', async () => {
+test('authorized headers include MD5 signature metadata', async () => {
   const sample = new Date('2024-03-01T06:30:00.000Z')
   const expectedAuth = piroBasicAuthorization(sample)
 
   const client = new PiroClient(baseConfig)
-  const headers = await (client as any).authorizedHeaders(sample)
+  const signature = PiroClient.balanceInquirySignature({
+    clientId: baseConfig.clientId,
+    deviceId: baseConfig.deviceId!,
+    latitude: baseConfig.latitude!,
+    longitude: baseConfig.longitude!,
+    clientSecret: baseConfig.clientSecret!,
+  })
+  const headers = await (client as any).authorizedHeaders(sample, { signature })
 
   assert.equal(headers.Authorization, expectedAuth)
   const encoded = headers.Authorization.replace(/^Basic\s+/, '')
   const decoded = Buffer.from(encoded, 'base64').toString('utf8')
   const { username, password } = piroDailyCredentials(sample)
   assert.equal(decoded, `${username}:${password}`)
+  assert.equal(headers.client_id, baseConfig.clientId)
+  assert.equal(headers.device_id, baseConfig.deviceId)
+  assert.equal(headers.latitude, baseConfig.latitude)
+  assert.equal(headers.longitude, baseConfig.longitude)
+  assert.equal(headers['x-signature'], signature)
 })
