@@ -170,7 +170,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         startDate: toWibIso(startDate),
         endDate: toWibIso(endDate),
       }
-      const { data } = await apiClient.get<{ data: any[] }>('/admin/loan/transactions', {
+      const { data } = await apiClient.get<{ data: any[] }>('/admin/merchants/loan/transactions', {
         params,
       })
 
@@ -225,7 +225,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     setSubmitting(true)
     try {
       const settledCount = selectedOrders.length
-      await apiClient.post('/admin/loan/settle', {
+      await apiClient.post('/admin/merchants/loan/settle', {
         subMerchantId: selectedSub,
         orderIds: selectedOrders,
       })
