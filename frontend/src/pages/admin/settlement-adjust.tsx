@@ -15,6 +15,7 @@ dayjs.extend(utc)
 dayjs.extend(timezone)
 
 const WIB = 'Asia/Jakarta'
+const DEFAULT_PAGE_SIZE = 1500
 
 function parseJwt(token: string) {
   try {
@@ -120,7 +121,7 @@ export default function SettlementAdjustPage() {
   const [rowsError, setRowsError] = useState('')
 
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(1500)
+  const [pageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalCount, setTotalCount] = useState(0)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
