@@ -80,6 +80,9 @@ function createApiMock() {
 }
 
 const apiMock = createApiMock()
+const BALANCES_PATH = '/admin/merchants/all/balances'
+const LOAN_TRANSACTIONS_PATH = '/admin/merchants/loan/transactions'
+const LOAN_SETTLE_PATH = '/admin/merchants/loan/settle'
 
 const defaultProps: LoanPageViewProps = {
   apiClient: apiMock as unknown as LoanPageViewProps['apiClient'],
@@ -95,7 +98,7 @@ afterEach(() => {
 
 test('loads sub-merchant options on mount', async () => {
   apiMock.setGetImplementation(async (url: string) => {
-    if (url === '/admin/merchants/all/balances') {
+    if (url === BALANCES_PATH) {
       return {
         data: {
           subBalances: [
@@ -115,7 +118,7 @@ test('loads sub-merchant options on mount', async () => {
     assert.equal(select.options.length, 3)
   })
 
-  assert.deepEqual(apiMock.getCalls[0], ['/admin/merchants/all/balances'])
+  assert.deepEqual(apiMock.getCalls[0], [BALANCES_PATH])
 })
 
 test('fetches transactions with WIB date parameters', async () => {
@@ -124,10 +127,10 @@ test('fetches transactions with WIB date parameters', async () => {
 
   let capturedParams: any = null
   apiMock.setGetImplementation(async (url: string, config?: any) => {
-    if (url === '/admin/merchants/all/balances') {
+    if (url === BALANCES_PATH) {
       return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
     }
-    if (url === '/admin/merchants/loan/transactions') {
+    if (url === LOAN_TRANSACTIONS_PATH) {
       capturedParams = config?.params
       return {
         data: {
@@ -176,10 +179,10 @@ test('submits selected transactions to settle API', async () => {
 
   let loanFetchCount = 0
   apiMock.setGetImplementation(async (url: string, config?: any) => {
-    if (url === '/admin/merchants/all/balances') {
+    if (url === BALANCES_PATH) {
       return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
     }
-    if (url === '/admin/merchants/loan/transactions') {
+    if (url === LOAN_TRANSACTIONS_PATH) {
       loanFetchCount += 1
       if (loanFetchCount === 1) {
         return {
@@ -243,13 +246,13 @@ test('submits selected transactions to settle API', async () => {
   })
 
   assert.deepEqual(apiMock.postCalls[0], [
-    '/admin/merchants/loan/settle',
+    LOAN_SETTLE_PATH,
     { subMerchantId: 'sub-1', orderIds: ['order-1'] },
   ])
 
   await waitFor(() => {
     assert.ok(
-      apiMock.getCalls.filter(call => call[0] === '/admin/merchants/loan/transactions').length >= 2,
+      apiMock.getCalls.filter(call => call[0] === LOAN_TRANSACTIONS_PATH).length >= 2,
     )
   })
 })
@@ -260,10 +263,10 @@ test('allows loading additional loan transaction pages', async () => {
 
   let lastParams: any = null
   apiMock.setGetImplementation(async (url: string, config?: any) => {
-    if (url === '/admin/merchants/all/balances') {
+    if (url === BALANCES_PATH) {
       return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
     }
-    if (url === '/admin/merchants/loan/transactions') {
+    if (url === LOAN_TRANSACTIONS_PATH) {
       lastParams = config?.params
       if (config?.params?.page === 1) {
         return {

@@ -74,12 +74,12 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
   };
 
   const app = express();
-  app.get('/admin/loan/transactions', (req, res) =>
+  app.get('/admin/merchants/loan/transactions', (req, res) =>
     getLoanTransactions(req as any, res),
   );
 
   const res = await request(app)
-    .get('/admin/loan/transactions')
+    .get('/admin/merchants/loan/transactions')
     .query({
       subMerchantId: 'sub-1',
       startDate: '2024-05-01',
@@ -144,12 +144,12 @@ test('getLoanTransactions enforces maximum page size', async () => {
   };
 
   const app = express();
-  app.get('/admin/loan/transactions', (req, res) =>
+  app.get('/admin/merchants/loan/transactions', (req, res) =>
     getLoanTransactions(req as any, res),
   );
 
   const res = await request(app)
-    .get('/admin/loan/transactions')
+    .get('/admin/merchants/loan/transactions')
     .query({
       subMerchantId: 'sub-9',
       startDate: '2024-05-01',
@@ -189,13 +189,13 @@ test('settleLoanOrders migrates PAID orders to loan entries', async () => {
 
   const app = express();
   app.use(express.json());
-  app.post('/admin/loan/settle', (req, res) => {
+  app.post('/admin/merchants/loan/settle', (req, res) => {
     (req as any).userId = 'admin-123';
     settleLoanOrders(req as any, res);
   });
 
   const res = await request(app)
-    .post('/admin/loan/settle')
+    .post('/admin/merchants/loan/settle')
     .send({ subMerchantId: 'sub-2', orderIds: ['ord-5'] });
 
   assert.equal(res.status, 200);
