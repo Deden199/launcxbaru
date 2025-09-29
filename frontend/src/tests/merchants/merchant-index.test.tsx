@@ -4,7 +4,7 @@ import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { JSDOM } from 'jsdom'
-import { PaymentProvidersPageView, type PaymentProvidersPageProps } from './index'
+import { PaymentProvidersPageView, type PaymentProvidersPageProps } from '../../pages/admin/merchants/[merchantId]/index'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
 const { window } = dom
