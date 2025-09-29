@@ -84,18 +84,22 @@ export default function TransactionsTable({
 
   const statusBadge = (s?: string) => {
     const v = (s || '').toUpperCase()
-    const map: Record<string, string> = {
-      SUCCESS: 'bg-emerald-950/40 text-emerald-300 border-emerald-900/40',
-      PAID: 'bg-indigo-950/40 text-indigo-300 border-indigo-900/40',
-      PENDING: 'bg-amber-950/40 text-amber-300 border-amber-900/40',
-      EXPIRED: 'bg-neutral-900/60 text-neutral-300 border-neutral-800',
-      DONE: 'bg-sky-950/40 text-sky-300 border-sky-900/40',
-      FAILED: 'bg-rose-950/40 text-rose-300 border-rose-900/40',
+    const map: Record<string, { className: string; label?: string }> = {
+      SUCCESS: { className: 'bg-emerald-950/40 text-emerald-300 border-emerald-900/40' },
+      PAID: { className: 'bg-indigo-950/40 text-indigo-300 border-indigo-900/40' },
+      PENDING: { className: 'bg-amber-950/40 text-amber-300 border-amber-900/40' },
+      EXPIRED: { className: 'bg-neutral-900/60 text-neutral-300 border-neutral-800' },
+      DONE: { className: 'bg-sky-950/40 text-sky-300 border-sky-900/40' },
+      FAILED: { className: 'bg-rose-950/40 text-rose-300 border-rose-900/40' },
+      LN_SETTLE: {
+        className: 'bg-purple-950/40 text-purple-200 border-purple-900/40',
+        label: 'LOAN SETTLED',
+      },
     }
-    const cls = map[v] ?? map.EXPIRED
+    const meta = map[v] ?? map.EXPIRED
     return (
-      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
-        {v || '-'}
+      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.className}`}>
+        {meta.label ?? (v || '-')}
       </span>
     )
   }
@@ -185,34 +189,35 @@ export default function TransactionsTable({
               <option value="PAID">PAID</option>
               <option value="PENDING">PENDING</option>
               <option value="EXPIRED">EXPIRED</option>
-              </select>
-            </div>
+              <option value="LN_SETTLE">LN_SETTLE</option>
+            </select>
+          </div>
 
           {/* Date range */}
           <div className="relative">
             <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 opacity-60" size={16} />
-<DatePicker
-  selectsRange
-  startDate={dateRange[0]}
-  endDate={dateRange[1]}
-  onChange={(upd: [Date | null, Date | null] | Date | null) => {
-    const range = (upd as [Date | null, Date | null]) || [null, null]
-    setDateRange(range)
-    onDateChange(range)
-    setPage(1)
-  }}
-  isClearable
-  placeholderText="Filter tanggal…"
-  maxDate={new Date()}
-  dateFormat="dd-MM-yyyy"
-  /* ⬇️ ini kunci anti-kehalang */
-  withPortal
-  popperProps={{ strategy: 'fixed' }}
-  popperClassName="datepicker-popper"
-  calendarClassName="dp-dark"
-  className="w-full h-10 pl-9 pr-3 rounded-xl border border-neutral-800 bg-neutral-900 text-sm text-neutral-100 placeholder:text-neutral-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-/>
-</div>
+            <DatePicker
+              selectsRange
+              startDate={dateRange[0]}
+              endDate={dateRange[1]}
+              onChange={(upd: [Date | null, Date | null] | Date | null) => {
+                const range = (upd as [Date | null, Date | null]) || [null, null]
+                setDateRange(range)
+                onDateChange(range)
+                setPage(1)
+              }}
+              isClearable
+              placeholderText="Filter tanggal…"
+              maxDate={new Date()}
+              dateFormat="dd-MM-yyyy"
+              /* ⬇️ ini kunci anti-kehalang */
+              withPortal
+              popperProps={{ strategy: 'fixed' }}
+              popperClassName="datepicker-popper"
+              calendarClassName="dp-dark"
+              className="w-full h-10 pl-9 pr-3 rounded-xl border border-neutral-800 bg-neutral-900 text-sm text-neutral-100 placeholder:text-neutral-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+            />
+          </div>
 
           {/* Export */}
           <div className="flex sm:justify-end">
@@ -332,7 +337,16 @@ export default function TransactionsTable({
                         {t.feePg.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
                       </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap font-semibold">
-                        {t.netSettle.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>
+                            {t.netSettle.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
+                          </span>
+                          {t.status === 'LN_SETTLE' && (
+                            <span className="text-[11px] font-normal uppercase tracking-wide text-purple-200/80">
+                              Loan Amount
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2">{statusBadge(t.status)}</td>
                       <td className="px-3 py-2">{settlementBadge(t.settlementStatus)}</td>
