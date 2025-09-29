@@ -51,6 +51,7 @@ adminLog.logAdminAction = async (...args: any[]) => {
 const {
   getLoanTransactions,
   markLoanOrdersSettled,
+  markLoanOrdersSettledByRange,
 } = require('../src/controller/admin/loan.controller');
 
 test('getLoanTransactions returns PAID and LN_SETTLED orders', async () => {
@@ -390,5 +391,105 @@ test('markLoanOrdersSettled handles invalid input gracefully', async () => {
   assert.deepEqual(res.body.fail, ['missing-1']);
   assert.equal(res.body.errors[0].orderId, 'missing-1');
   assert.equal(prisma.__transactionCallCount, 0);
+});
+
+test('markLoanOrdersSettledByRange settles paid orders across paginated batches', async () => {
+  process.env.LOAN_FETCH_BATCH_SIZE = '2';
+  loggedAction = null;
+  resetTransactionTracking();
+
+  const paidOrders = Array.from({ length: 5 }).map((_, index) => ({
+    id: `range-ord-${index + 1}`,
+    status: 'PAID',
+    pendingAmount: index % 2 === 0 ? 100 * (index + 1) : 0,
+    settlementAmount: null,
+    settlementStatus: 'PENDING',
+    subMerchantId: 'sub-range-1',
+    metadata: index === 0 ? { loanSettlementHistory: [] } : {},
+    loanedAt: null,
+  }));
+
+  prisma.order.findMany = async (args: any) => {
+    assert.equal(args.where.subMerchantId, 'sub-range-1');
+    assert.equal(args.where.status, 'PAID');
+    assert.ok(args.where.createdAt.gte instanceof Date);
+    assert.ok(args.where.createdAt.lte instanceof Date);
+    const { skip, take } = args;
+    return paidOrders.slice(skip, skip + take);
+  };
+
+  const updateCalls: any[] = [];
+  prisma.order.updateMany = async (args: any) => {
+    updateCalls.push(args);
+    return { count: 1 };
+  };
+
+  const upsertCalls: any[] = [];
+  prisma.loanEntry.upsert = async (args: any) => {
+    upsertCalls.push(args);
+    return {};
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-range';
+    next();
+  });
+  app.post('/admin/merchants/loan/mark-settled/by-range', (req, res) => {
+    markLoanOrdersSettledByRange(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/mark-settled/by-range')
+    .send({
+      subMerchantId: 'sub-range-1',
+      startDate: '2024-05-01',
+      endDate: '2024-05-31',
+      note: 'Range adjust',
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.fail, []);
+  assert.equal(res.body.errors.length, 0);
+  assert.deepEqual(res.body.ok.sort(), paidOrders.map((o) => o.id).sort());
+
+  const chunkSize = Math.max(1, Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE ?? '1'));
+  const batchSize = Math.max(1, Number(process.env.LOAN_FETCH_BATCH_SIZE ?? '1'));
+  const batches = Math.floor(paidOrders.length / batchSize);
+  const remainder = paidOrders.length % batchSize;
+  let expectedTransactions = batches * Math.ceil(batchSize / chunkSize);
+  if (remainder > 0) {
+    expectedTransactions += Math.ceil(remainder / chunkSize);
+  }
+  assert.equal(prisma.__transactionCallCount, expectedTransactions);
+  assert.equal(prisma.__transactionOptions.length, expectedTransactions);
+  for (const opt of prisma.__transactionOptions) {
+    assert.deepEqual(opt, { timeout: 20000 });
+  }
+
+  assert.equal(updateCalls.length, paidOrders.length);
+  const updatedIds = updateCalls.map((call) => call.where.id).sort();
+  assert.deepEqual(updatedIds, paidOrders.map((order) => order.id).sort());
+  for (const call of updateCalls) {
+    assert.equal(call.where.status, 'PAID');
+    assert.equal(call.data.status, 'LN_SETTLED');
+    assert.equal(call.data.metadata.lastLoanSettlement.note, 'Range adjust');
+    assert.equal(call.data.metadata.lastLoanSettlement.markedBy, 'admin-range');
+  }
+
+  const upsertedIds = upsertCalls.map((call) => call.where.orderId).sort();
+  assert.deepEqual(
+    upsertedIds,
+    paidOrders
+      .filter((order) => Number(order.pendingAmount ?? 0) > 0)
+      .map((order) => order.id)
+      .sort(),
+  );
+
+  assert.ok(loggedAction);
+  assert.equal(loggedAction[0], 'admin-range');
+  assert.equal(loggedAction[1], 'loanMarkSettled');
+  assert.equal(loggedAction[3].orderIds.length, paidOrders.length);
 });
 

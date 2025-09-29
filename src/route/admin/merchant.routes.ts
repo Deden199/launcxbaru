@@ -49,6 +49,7 @@ router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 
 router.get('/loan/transactions', loanCtrl.getLoanTransactions)
 router.post('/loan/mark-settled', loanCtrl.markLoanOrdersSettled)
+router.post('/loan/mark-settled/by-range', loanCtrl.markLoanOrdersSettledByRange)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
 router.patch(
