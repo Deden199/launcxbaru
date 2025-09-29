@@ -6,6 +6,25 @@ import { computeSettlement } from '../../service/feeSettlement'
 
 const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS'])
 
+const prismaTxTimeoutMs = (() => {
+  const rawTimeout = process.env.PRISMA_TX_TIMEOUT_MS
+  if (rawTimeout == null || rawTimeout === '') {
+    return undefined
+  }
+
+  const parsedTimeout = Number(rawTimeout)
+  if (!Number.isFinite(parsedTimeout) || parsedTimeout <= 0) {
+    console.warn('[settlementAdjustment] Ignoring invalid PRISMA_TX_TIMEOUT_MS value', {
+      rawTimeout,
+    })
+    return undefined
+  }
+
+  return parsedTimeout
+})()
+
+const prismaTxOptions = prismaTxTimeoutMs ? { timeout: prismaTxTimeoutMs } : undefined
+
 type OrderReversalRecord = {
   id: string
   status: string | null
@@ -295,7 +314,7 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
           }
           return bu
         },
-        { timeout: 120000 }
+        prismaTxOptions
       )
       updates.push(...batchUpdates)
       batchUpdates.forEach(() => logProgress())
