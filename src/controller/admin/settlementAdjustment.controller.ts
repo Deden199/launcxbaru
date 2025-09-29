@@ -35,6 +35,114 @@ function calculateReversalAmount(
   return Number.isFinite(net) ? Math.max(net, 0) : 0
 }
 
+export async function getEligibleSettlements(req: AuthRequest, res: Response) {
+  const {
+    subMerchantId,
+    settled_from: settledFrom,
+    settled_to: settledTo,
+    q,
+    page = '1',
+    size = '25',
+    sort = '-settlementTime',
+  } = req.query as Record<string, unknown>
+
+  if (typeof subMerchantId !== 'string' || !subMerchantId.trim()) {
+    return res.status(400).json({ error: 'subMerchantId is required' })
+  }
+
+  if (typeof settledFrom !== 'string' || typeof settledTo !== 'string') {
+    return res.status(400).json({ error: 'settled_from and settled_to are required' })
+  }
+
+  const fromDate = new Date(settledFrom)
+  const toDate = new Date(settledTo)
+
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+    return res.status(400).json({ error: 'Invalid settlement date range' })
+  }
+
+  if (fromDate.getTime() >= toDate.getTime()) {
+    return res.status(400).json({ error: 'settled_from must be before settled_to' })
+  }
+
+  const pageNum = Math.max(1, parseInt(String(page), 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, parseInt(String(size), 10) || 25))
+
+  const sortField = typeof sort === 'string' ? sort : '-settlementTime'
+  const sortKey = sortField.startsWith('-') ? sortField.slice(1) : sortField
+  const sortDirection = sortField.startsWith('-') ? 'desc' : 'asc'
+
+  const orderBy: Record<string, 'asc' | 'desc'> = {}
+  if (sortKey === 'settlementTime') {
+    orderBy.settlementTime = sortDirection
+  } else if (sortKey === 'amount') {
+    orderBy.amount = sortDirection
+  } else {
+    orderBy.settlementTime = 'desc'
+  }
+
+  const where: any = {
+    subMerchantId: subMerchantId.trim(),
+    status: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
+    settlementTime: {
+      not: null,
+      gte: fromDate,
+      lt: toDate,
+    },
+  }
+
+  const keyword = typeof q === 'string' ? q.trim() : ''
+  if (keyword) {
+    where.OR = [
+      { id: { contains: keyword, mode: 'insensitive' } },
+      { rrn: { contains: keyword, mode: 'insensitive' } },
+    ]
+  }
+
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        orderBy,
+        skip: (pageNum - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          subMerchantId: true,
+          status: true,
+          settlementTime: true,
+          settlementAmount: true,
+          amount: true,
+          feeLauncx: true,
+          fee3rdParty: true,
+        },
+      }),
+      prisma.order.count({ where }),
+    ])
+
+    const data = rows.map(row => ({
+      id: row.id,
+      subMerchantId: row.subMerchantId,
+      status: row.status,
+      settlementTime: row.settlementTime?.toISOString() ?? null,
+      settlementAmount: row.settlementAmount ?? null,
+      amount: row.amount ?? null,
+      feeLauncx: row.feeLauncx ?? null,
+      fee3rdParty: row.fee3rdParty ?? null,
+    }))
+
+    return res.json({
+      data,
+      total,
+      page: pageNum,
+      size: pageSize,
+    })
+  } catch (err) {
+    console.error('[getEligibleSettlements]', err)
+    return res.status(500).json({ error: 'internal error' })
+  }
+}
+
 export async function adjustSettlements(req: AuthRequest, res: Response) {
   const { transactionIds, dateFrom, dateTo, settlementStatus, settlementTime, feeLauncx } = req.body as any
 

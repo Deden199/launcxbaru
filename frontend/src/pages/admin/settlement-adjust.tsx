@@ -36,7 +36,9 @@ type SettlementRow = {
   status: string
   settlementTime: string
   settlementAmount?: number | null
-  netAmount: number
+  amount?: number | null
+  feeLauncx?: number | null
+  fee3rdParty?: number | null
 }
 
 type ReversalResponse = {
@@ -65,8 +67,22 @@ function toWibStart(date: Date) {
   return dayjs(date).tz(WIB, true).startOf('day')
 }
 
-function toWibEnd(date: Date) {
-  return dayjs(date).tz(WIB, true).endOf('day')
+function toWibExclusiveEnd(date: Date) {
+  return dayjs(date).tz(WIB, true).startOf('day').add(1, 'day')
+}
+
+function computeReversalPreview(
+  row: Pick<SettlementRow, 'settlementAmount' | 'amount' | 'feeLauncx' | 'fee3rdParty'>
+) {
+  if (row.settlementAmount != null) {
+    return Number(row.settlementAmount) || 0
+  }
+
+  const amount = Number(row.amount ?? 0)
+  const feeLauncx = Number(row.feeLauncx ?? 0)
+  const fee3rdParty = Number(row.fee3rdParty ?? 0)
+  const net = amount - feeLauncx - fee3rdParty
+  return Number.isFinite(net) ? Math.max(net, 0) : 0
 }
 
 export default function SettlementAdjustPage() {
@@ -85,14 +101,13 @@ export default function SettlementAdjustPage() {
 
   const defaultRange: [Date | null, Date | null] = useMemo(() => {
     const end = new Date()
-    end.setDate(end.getDate() - 7)
     const start = new Date()
-    start.setDate(start.getDate() - 30)
+    start.setDate(start.getDate() - 6)
     return [start, end]
   }, [])
 
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>(defaultRange)
-  const [selectedSubMerchant, setSelectedSubMerchant] = useState<string>('all')
+  const [selectedSubMerchant, setSelectedSubMerchant] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
@@ -105,7 +120,7 @@ export default function SettlementAdjustPage() {
   const [rowsError, setRowsError] = useState('')
 
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(20)
+  const [pageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -158,64 +173,81 @@ export default function SettlementAdjustPage() {
     setPage(1)
   }, [debouncedSearch, selectedSubMerchant, dateRange])
 
+  useEffect(() => {
+    setSelectedIds([])
+    if (!selectedSubMerchant) {
+      setRows([])
+      setTotalCount(0)
+      setRowsError('')
+      setLoadingRows(false)
+    }
+  }, [selectedSubMerchant])
+
   const fetchRows = useCallback(
     async (targetPage: number) => {
       const [start, end] = dateRange
-      if (!start || !end) return
+      if (!start || !end || !selectedSubMerchant) {
+        setRows([])
+        setTotalCount(0)
+        setRowsError('')
+        setLoadingRows(false)
+        return
+      }
 
       setRowsError('')
       setLoadingRows(true)
 
       const params: Record<string, any> = {
-        status: 'SETTLED',
-        hasSettlementTime: true,
+        subMerchantId: selectedSubMerchant,
+        settled_from: toWibStart(start).toISOString(),
+        settled_to: toWibExclusiveEnd(end).toISOString(),
         page: targetPage,
-        limit: pageSize,
+        size: pageSize,
+        sort: '-settlementTime',
       }
-      if (selectedSubMerchant !== 'all') params.subMerchantId = selectedSubMerchant
       if (debouncedSearch) params.q = debouncedSearch
-      params.from = toWibStart(start).toISOString()
-      params.to = toWibEnd(end).toISOString()
 
       try {
-        const { data } = await api.get<any>('/admin/orders', { params })
-        const listSource = Array.isArray(data?.data)
-          ? data.data
-          : Array.isArray(data?.orders)
-          ? data.orders
-          : Array.isArray(data?.transactions)
-          ? data.transactions
-          : []
-        const mapped: SettlementRow[] = listSource
-          .map((raw: any) => ({
-            id: raw.id ?? raw.orderId ?? raw.transactionId ?? '',
-            subMerchantId:
-              raw.subMerchantId ?? raw.sub_merchant_id ?? raw.subMerchant?.id ?? raw.partnerClientId ?? '',
-            subMerchantName:
-              raw.subMerchantName ?? raw.subMerchant?.name ?? raw.sub_merchant_name ?? raw.partnerName ?? null,
-            status: (raw.status ?? '').toString(),
-            settlementTime:
-              raw.settlementTime ?? raw.settlement_time ?? raw.settledAt ?? raw.settlement_at ?? null,
-            settlementAmount:
-              raw.settlementAmount ?? raw.settlement_amount ?? raw.netSettle ?? raw.net_settle ?? null,
-            netAmount:
-              Number(
-                raw.netAmount ??
-                  raw.net_amount ??
-                  raw.netSettle ??
-                  raw.net_settle ??
-                  raw.settlementAmount ??
-                  raw.amount ??
-                  0
-              ) || 0,
-          }))
-          .filter((row: SettlementRow) => Boolean(row.id) && Boolean(row.settlementTime))
+        const { data } = await api.get<any>('/admin/settlement/eligible', { params })
+        const listSource = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+
+        const mapped: SettlementRow[] = []
+        for (const raw of listSource) {
+          const id = String(raw?.id ?? '')
+          const subMerchantId = String(
+            raw?.subMerchantId ?? raw?.sub_merchant_id ?? raw?.partnerClientId ?? ''
+          )
+          const settlementTimeSource = raw?.settlementTime ?? raw?.settlement_time ?? null
+          if (!id || !subMerchantId || !settlementTimeSource) {
+            continue
+          }
+
+          const settlementTime = new Date(settlementTimeSource)
+          if (Number.isNaN(settlementTime.getTime())) {
+            continue
+          }
+
+          const settlementAmount = raw?.settlementAmount ?? raw?.settlement_amount ?? null
+          const amount = raw?.amount ?? null
+          const feeLauncx = raw?.feeLauncx ?? raw?.fee_launcx ?? null
+          const fee3rdParty = raw?.fee3rdParty ?? raw?.fee3rd_party ?? raw?.fee_3rd_party ?? null
+
+          mapped.push({
+            id,
+            subMerchantId,
+            subMerchantName: subMerchants.find(sub => sub.id === subMerchantId)?.name ?? null,
+            status: String(raw?.status ?? ''),
+            settlementTime: settlementTime.toISOString(),
+            settlementAmount: settlementAmount != null ? Number(settlementAmount) : null,
+            amount: amount != null ? Number(amount) : null,
+            feeLauncx: feeLauncx != null ? Number(feeLauncx) : null,
+            fee3rdParty: fee3rdParty != null ? Number(fee3rdParty) : null,
+          })
+        }
 
         setRows(mapped)
-        setTotalCount(
-          data?.meta?.total ?? data?.total ?? (Array.isArray(listSource) ? listSource.length : mapped.length)
-        )
-        setPage(targetPage)
+        setTotalCount(typeof data?.total === 'number' ? data.total : mapped.length)
+        setPage(mapped.length > 0 || targetPage === 1 ? targetPage : 1)
       } catch (err: any) {
         if (err?.response?.status === 404) {
           setRowsError('Endpoint data settlement belum tersedia.')
@@ -228,12 +260,12 @@ export default function SettlementAdjustPage() {
         setLoadingRows(false)
       }
     },
-    [dateRange, debouncedSearch, pageSize, selectedSubMerchant]
+    [dateRange, debouncedSearch, pageSize, selectedSubMerchant, subMerchants]
   )
 
   useEffect(() => {
     const [start, end] = dateRange
-    if (!start || !end) return
+    if (!start || !end || !selectedSubMerchant) return
     fetchRows(1)
   }, [dateRange, debouncedSearch, selectedSubMerchant, fetchRows])
 
@@ -249,7 +281,7 @@ export default function SettlementAdjustPage() {
       (acc, row) => {
         if (selectedIds.includes(row.id)) {
           acc.count += 1
-          acc.total += row.settlementAmount ?? row.netAmount ?? 0
+          acc.total += computeReversalPreview(row)
         }
         return acc
       },
@@ -278,20 +310,24 @@ export default function SettlementAdjustPage() {
   }
 
   const onResetRange = () => {
-    setDateRange(defaultRange)
-    setDatePickerRange(defaultRange)
+    const [start, end] = defaultRange
+    if (start && end) {
+      const nextRange: [Date, Date] = [new Date(start), new Date(end)]
+      setDateRange(nextRange)
+      setDatePickerRange(nextRange)
+    }
   }
 
   const onConfirmReverse = async () => {
-    if (!selectedIds.length) return
+    if (!selectedIds.length || !selectedSubMerchant) return
     setSubmitting(true)
     setToast(null)
     setErrorList([])
     try {
-      const payload: { orderIds: string[]; subMerchantId?: string; reason?: string } = {
+      const payload: { orderIds: string[]; subMerchantId: string; reason?: string } = {
         orderIds: selectedIds,
+        subMerchantId: selectedSubMerchant,
       }
-      if (selectedSubMerchant !== 'all') payload.subMerchantId = selectedSubMerchant
       if (reason.trim()) payload.reason = reason.trim()
 
       const { data } = await api.post<ReversalResponse>(
@@ -340,7 +376,7 @@ export default function SettlementAdjustPage() {
     return totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1
   }, [totalCount, pageSize])
 
-  const canReverse = isAdmin && selectionSummary.count > 0
+  const canReverse = isAdmin && Boolean(selectedSubMerchant) && selectionSummary.count > 0
 
   return (
     <div className="min-h-screen bg-neutral-950 px-4 py-6 text-neutral-100 sm:px-6 lg:px-8">
@@ -402,7 +438,7 @@ export default function SettlementAdjustPage() {
                 onChange={event => setSelectedSubMerchant(event.target.value)}
                 className="h-11 rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
               >
-                <option value="all">Semua sub-merchant</option>
+                <option value="">Pilih sub-merchant</option>
                 {subMerchants.map(sub => (
                   <option key={sub.id} value={sub.id}>
                     {sub.name ?? sub.id}
@@ -414,7 +450,7 @@ export default function SettlementAdjustPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs uppercase tracking-wide text-neutral-400">Range settlement time</label>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Settlement Date range</label>
               <DatePicker
                 selectsRange
                 startDate={datePickerRange[0]}
@@ -432,12 +468,12 @@ export default function SettlementAdjustPage() {
                 onClick={onResetRange}
                 className="self-start text-[11px] text-neutral-400 underline hover:text-neutral-200"
               >
-                Reset ke 7–30 hari terakhir
+                Reset ke 7 hari terakhir
               </button>
             </div>
 
             <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="text-xs uppercase tracking-wide text-neutral-400">Cari Order ID</label>
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Cari Order ID / RRN</label>
               <input
                 type="text"
                 value={searchTerm}
@@ -445,7 +481,7 @@ export default function SettlementAdjustPage() {
                 placeholder="Masukkan Order ID / kata kunci"
                 className="h-11 rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
               />
-              <span className="text-[11px] text-neutral-500">Pencarian otomatis setelah berhenti mengetik.</span>
+              <span className="text-[11px] text-neutral-500">Pencarian berdasarkan Order ID atau RRN, otomatis setelah berhenti mengetik.</span>
             </div>
           </div>
         </section>
@@ -453,7 +489,9 @@ export default function SettlementAdjustPage() {
         <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-sm text-neutral-400">
-              {loadingRows
+              {!selectedSubMerchant
+                ? 'Pilih Sub-merchant untuk mulai.'
+                : loadingRows
                 ? 'Memuat data…'
                 : `${totalCount.toLocaleString('id-ID')} order ditemukan`}
             </div>
@@ -500,7 +538,7 @@ export default function SettlementAdjustPage() {
                       checked={allSelected}
                       onChange={onToggleAll}
                       className="h-4 w-4 rounded border-neutral-700 bg-neutral-900 text-indigo-500"
-                      disabled={!rows.length || !isAdmin}
+                      disabled={!rows.length || !isAdmin || !selectedSubMerchant}
                     />
                   </th>
                   <th className="whitespace-nowrap px-3 py-2">Order ID</th>
@@ -508,23 +546,32 @@ export default function SettlementAdjustPage() {
                   <th className="whitespace-nowrap px-3 py-2">Status</th>
                   <th className="whitespace-nowrap px-3 py-2">Settlement Time</th>
                   <th className="whitespace-nowrap px-3 py-2 text-right">Settlement Amount</th>
-                  <th className="whitespace-nowrap px-3 py-2 text-right">Net Amount</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right">Amount</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right">Fee Launcx</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right">Fee 3rd Party</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800">
                 {loadingRows && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-10 text-center text-neutral-400">
+                    <td colSpan={9} className="px-3 py-10 text-center text-neutral-400">
                       <span className="inline-flex items-center gap-2 text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" /> Memuat data settlement…
                       </span>
                     </td>
                   </tr>
                 )}
-                {!loadingRows && rows.length === 0 && (
+                {!loadingRows && !selectedSubMerchant && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-12 text-center text-neutral-500">
-                      Tidak ada transaksi dengan settlement time pada rentang ini.
+                    <td colSpan={9} className="px-3 py-12 text-center text-neutral-500">
+                      Pilih Sub-merchant untuk mulai.
+                    </td>
+                  </tr>
+                )}
+                {!loadingRows && selectedSubMerchant && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-3 py-12 text-center text-neutral-500">
+                      Tidak ada transaksi settled pada rentang tanggal ini.
                     </td>
                   </tr>
                 )}
@@ -557,10 +604,16 @@ export default function SettlementAdjustPage() {
                         </td>
                         <td className="px-3 py-2 text-sm text-neutral-200">{settlementFormatted}</td>
                         <td className="px-3 py-2 text-right text-sm text-neutral-100">
-                          {formatCurrency(row.settlementAmount ?? row.netAmount ?? 0)}
+                          {formatCurrency(row.settlementAmount ?? computeReversalPreview(row))}
                         </td>
                         <td className="px-3 py-2 text-right text-sm text-neutral-400">
-                          {formatCurrency(row.netAmount ?? 0)}
+                          {formatCurrency(row.amount ?? 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm text-neutral-400">
+                          {formatCurrency(row.feeLauncx ?? 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm text-neutral-400">
+                          {formatCurrency(row.fee3rdParty ?? 0)}
                         </td>
                       </tr>
                     )
@@ -576,14 +629,14 @@ export default function SettlementAdjustPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => fetchRows(Math.max(1, page - 1))}
-                disabled={page <= 1 || loadingRows}
+                disabled={page <= 1 || loadingRows || !selectedSubMerchant}
                 className="rounded-lg border border-neutral-800 px-3 py-1 text-neutral-300 transition hover:border-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Sebelumnya
               </button>
               <button
                 onClick={() => fetchRows(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages || loadingRows}
+                disabled={page >= totalPages || loadingRows || !selectedSubMerchant}
                 className="rounded-lg border border-neutral-800 px-3 py-1 text-neutral-300 transition hover:border-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Selanjutnya
