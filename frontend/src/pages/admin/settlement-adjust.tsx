@@ -113,6 +113,10 @@ export default function SettlementAdjustPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
   const [subMerchants, setSubMerchants] = useState<SubMerchantOption[]>([])
+  const subMerchantNameMap = useMemo(
+    () => Object.fromEntries(subMerchants.map(sub => [sub.id, sub.name ?? null])),
+    [subMerchants]
+  )
   const [loadingSubs, setLoadingSubs] = useState(false)
   const [subsError, setSubsError] = useState('')
 
@@ -240,7 +244,7 @@ export default function SettlementAdjustPage() {
           mapped.push({
             id,
             subMerchantId,
-            subMerchantName: subMerchants.find(sub => sub.id === subMerchantId)?.name ?? null,
+            subMerchantName: subMerchantNameMap[subMerchantId] ?? null,
             status: String(raw?.status ?? ''),
             settlementTime: settlementTime.toISOString(),
             settlementAmount: settlementAmount != null ? Number(settlementAmount) : null,
@@ -268,7 +272,7 @@ export default function SettlementAdjustPage() {
         }
       }
     },
-    [dateRange, debouncedSearch, pageSize, selectedSubMerchant, subMerchants]
+    [dateRange, debouncedSearch, pageSize, selectedSubMerchant, subMerchantNameMap]
   )
 
   useEffect(() => {
