@@ -55,12 +55,10 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
 
     const safePageSize = Math.min(pageSize, MAX_PAGE_SIZE);
     const skip = (page - 1) * safePageSize;
-    const statusFilter = includeSettled
-      ? { in: ['PAID', 'LN_SETTLE'] as const }
-      : { in: ['PAID'] as const };
+    const statusValues = includeSettled ? ['PAID', 'LN_SETTLE'] : ['PAID'];
     const where = {
       subMerchantId,
-      status: statusFilter,
+      status: { in: statusValues },
       createdAt: {
         gte: start,
         lte: end,
