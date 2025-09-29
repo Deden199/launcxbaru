@@ -5,7 +5,10 @@ import {
   startSettlement,
   settlementStatus,
 } from '../../controller/admin/settlement.controller'
-import { adjustSettlements } from '../../controller/admin/settlementAdjustment.controller'
+import {
+  adjustSettlements,
+  reverseSettlementToLnSettle,
+} from '../../controller/admin/settlementAdjustment.controller'
 
 const router = Router()
 
@@ -15,6 +18,7 @@ router.post('/', manualSettlement)
 router.post('/start', startSettlement)
 router.get('/status/:jobId', settlementStatus)
 router.post('/adjust', adjustSettlements)
+router.post('/reverse-to-ln-settle', reverseSettlementToLnSettle)
 
 export default router
 
