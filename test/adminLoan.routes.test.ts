@@ -9,18 +9,24 @@ const prisma: any = {
   order: {
     findMany: async () => [],
     count: async () => 0,
-    update: async (_args: any) => ({}),
+    updateMany: async (_args: any) => ({}),
   },
   loanEntry: {
-    create: async (_args: any) => ({}),
+    createMany: async (_args: any) => ({}),
   },
-  $transaction: async (cb: any) => cb({
-    loanEntry: prisma.loanEntry,
-    order: {
-      update: prisma.order.update,
-    },
-  }),
+  $transaction: async (cb: any, options?: any) => {
+    prisma.__lastTransactionOptions = options;
+    return cb({
+      loanEntry: prisma.loanEntry,
+      order: {
+        updateMany: prisma.order.updateMany,
+      },
+    });
+  },
+  __lastTransactionOptions: undefined,
 };
+
+process.env.LOAN_CREATE_MANY_CHUNK_SIZE = '2';
 
 (require as any).cache[require.resolve('../src/core/prisma')] = {
   exports: { prisma },
@@ -176,15 +182,15 @@ test('settleLoanOrders migrates PAID orders to loan entries', async () => {
   ];
 
   prisma.order.findMany = async () => orderRecords;
-  const loanCreates: any[] = [];
-  const orderUpdates: any[] = [];
-  prisma.loanEntry.create = async (args: any) => {
-    loanCreates.push(args);
-    return { id: 'loan-1' };
+  const loanCreateManyCalls: any[] = [];
+  let orderUpdateManyArgs: any = null;
+  prisma.loanEntry.createMany = async (args: any) => {
+    loanCreateManyCalls.push(args);
+    return { count: args.data.length };
   };
-  prisma.order.update = async (args: any) => {
-    orderUpdates.push(args);
-    return { id: args.where.id };
+  prisma.order.updateMany = async (args: any) => {
+    orderUpdateManyArgs = args;
+    return { count: args.where.id.in.length };
   };
 
   const app = express();
@@ -200,16 +206,63 @@ test('settleLoanOrders migrates PAID orders to loan entries', async () => {
 
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { processed: 1, totalAmount: 300 });
-  assert.equal(loanCreates.length, 1);
-  assert.equal(orderUpdates.length, 1);
-  assert.equal(loanCreates[0].data.subMerchantId, 'sub-2');
-  assert.equal(loanCreates[0].data.amount, 300);
-  assert.equal(orderUpdates[0].data.status, 'LN_SETTLE');
-  assert.equal(orderUpdates[0].data.pendingAmount, 0);
+  assert.equal(loanCreateManyCalls.length, 1);
+  assert.equal(loanCreateManyCalls[0].data.length, 1);
+  assert.equal(loanCreateManyCalls[0].data[0].subMerchantId, 'sub-2');
+  assert.equal(loanCreateManyCalls[0].data[0].amount, 300);
+  assert.deepEqual(orderUpdateManyArgs.where, { id: { in: ['ord-5'] } });
+  assert.equal(orderUpdateManyArgs.data.status, 'LN_SETTLE');
+  assert.equal(orderUpdateManyArgs.data.pendingAmount, 0);
+  assert.ok(orderUpdateManyArgs.data.loanedAt instanceof Date);
+  assert.deepEqual(prisma.__lastTransactionOptions, { timeout: 20000 });
   assert.deepEqual(loggedAction, [
     'admin-123',
     'loanSettle',
     'sub-2',
     { orderIds: ['ord-5'], totalAmount: 300 },
   ]);
+});
+
+test('settleLoanOrders handles large batches with chunked createMany calls', async () => {
+  const orderIds = ['ord-a', 'ord-b', 'ord-c', 'ord-d', 'ord-e'];
+  prisma.order.findMany = async () =>
+    orderIds.map((id, index) => ({
+      id,
+      pendingAmount: 100 + index,
+      subMerchantId: 'sub-99',
+    }));
+
+  const loanCreateManyCalls: any[] = [];
+  let updateArgs: any = null;
+  prisma.loanEntry.createMany = async (args: any) => {
+    loanCreateManyCalls.push(args);
+    return { count: args.data.length };
+  };
+  prisma.order.updateMany = async (args: any) => {
+    updateArgs = args;
+    return { count: orderIds.length };
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.post('/admin/merchants/loan/settle', (req, res) => {
+    settleLoanOrders(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/settle')
+    .send({ subMerchantId: 'sub-99', orderIds });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.processed, 5);
+  assert.equal(res.body.totalAmount, 5 * 100 + 10); // 100+101+102+103+104 = 510
+  assert.equal(loanCreateManyCalls.length, 3);
+  assert.deepEqual(
+    loanCreateManyCalls.map((call) => call.data.map((entry: any) => entry.orderId)),
+    [['ord-a', 'ord-b'], ['ord-c', 'ord-d'], ['ord-e']],
+  );
+  assert.ok(updateArgs);
+  assert.deepEqual(updateArgs.where, { id: { in: orderIds } });
+  assert.equal(updateArgs.data.pendingAmount, 0);
+  assert.equal(updateArgs.data.status, 'LN_SETTLE');
 });

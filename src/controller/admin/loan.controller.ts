@@ -144,34 +144,51 @@ export async function settleLoanOrders(req: AuthRequest, res: Response) {
     }
 
     const now = wibTimestamp();
-    let totalAmount = 0;
+    const settledBy = req.userId ?? 'unknown';
 
-    await prisma.$transaction(async (tx) => {
-      for (const order of orders) {
-        const loanAmount = Number(order.pendingAmount ?? 0);
-        totalAmount += loanAmount;
-        await tx.loanEntry.create({
-          data: {
-            orderId: order.id,
-            subMerchantId: order.subMerchantId!,
-            amount: loanAmount,
-            metadata: {
-              settledBy: req.userId ?? 'unknown',
-              settledAt: now.toISOString(),
-            },
-          },
-        });
+    const loanEntries = orders.map((order) => {
+      const amount = Number(order.pendingAmount ?? 0);
+      return {
+        orderId: order.id,
+        subMerchantId: order.subMerchantId!,
+        amount,
+        metadata: {
+          settledBy,
+          settledAt: now.toISOString(),
+        },
+      };
+    });
 
-        await tx.order.update({
-          where: { id: order.id },
+    const totalAmount = loanEntries.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
+
+    const configuredChunkSize = Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE);
+    const CREATE_MANY_CHUNK_SIZE =
+      Number.isFinite(configuredChunkSize) && configuredChunkSize > 0 ? configuredChunkSize : 1000;
+
+    const configuredTimeout = Number(process.env.LOAN_TRANSACTION_TIMEOUT);
+    const transactionTimeout =
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
+
+    await prisma.$transaction(
+      async (tx) => {
+        if (loanEntries.length > 0) {
+          for (let i = 0; i < loanEntries.length; i += CREATE_MANY_CHUNK_SIZE) {
+            const chunk = loanEntries.slice(i, i + CREATE_MANY_CHUNK_SIZE);
+            await tx.loanEntry.createMany({ data: chunk });
+          }
+        }
+
+        await tx.order.updateMany({
+          where: { id: { in: orderIds } },
           data: {
             status: 'LN_SETTLE',
             pendingAmount: 0,
             loanedAt: now,
           },
         });
-      }
-    });
+      },
+      { timeout: transactionTimeout },
+    );
 
     if (req.userId) {
       await logAdminAction(req.userId, 'loanSettle', subMerchantId, {
