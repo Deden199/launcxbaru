@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
@@ -28,7 +28,7 @@ type LoanTransaction = {
   id: string
   amount: number
   pendingAmount: number
-  status: 'PAID' | 'LN_SETTLE'
+  status: 'PAID' | 'LN_SETTLED'
   createdAt: string
   loanedAt: string | null
   loanAmount: number | null
@@ -53,19 +53,25 @@ const formatDateTime = (value: string | null) =>
 
 function LoanStatusBadge({ status }: { status: LoanTransaction['status'] }) {
   const meta =
-    status === 'LN_SETTLE'
+    status === 'LN_SETTLED'
       ? {
           label: 'Loan Settled',
           className:
             'bg-purple-950/40 text-purple-200 border border-purple-900/40',
+          title:
+            'Loan-settled: transaksi ditandai sebagai pelunasan pinjaman/manual, tidak ikut proses settlement.',
         }
       : {
           label: 'Paid',
           className: 'bg-indigo-950/40 text-indigo-300 border border-indigo-900/40',
+          title: undefined,
         }
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase ${meta.className}`}>
+    <span
+      title={meta.title}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase ${meta.className}`}
+    >
       {meta.label}
     </span>
   )
@@ -94,6 +100,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [submitting, setSubmitting] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
+  const noteRef = useRef<HTMLTextAreaElement | null>(null)
 
   const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [effectivePageSize, setEffectivePageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
@@ -101,7 +108,6 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
-  const includeSettled = false
 
   const pageSizeOptions = useMemo(() => {
     const unique = new Set<number>(PAGE_SIZE_OPTIONS)
@@ -177,7 +183,6 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       endDate: toWibIso(endDate),
       page: targetPage,
       pageSize: requestedPageSize,
-      includeSettled,
     }
 
     if (append) {
@@ -194,14 +199,12 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         params,
       })
 
-      const filteredRaw = includeSettled
-        ? data.data || []
-        : (data.data || []).filter((raw: any) => raw.status !== 'LN_SETTLE')
-      const mapped: LoanTransaction[] = filteredRaw.map((raw) => ({
+      const rawList = Array.isArray(data.data) ? data.data : []
+      const mapped: LoanTransaction[] = rawList.map((raw) => ({
         id: raw.id,
         amount: raw.amount ?? 0,
         pendingAmount: raw.pendingAmount ?? 0,
-        status: raw.status === 'LN_SETTLE' ? 'LN_SETTLE' : 'PAID',
+        status: raw.status === 'LN_SETTLED' ? 'LN_SETTLED' : 'PAID',
         createdAt: raw.createdAt,
         loanedAt: raw.loanedAt ?? null,
         loanAmount: raw.loanAmount ?? null,
@@ -286,15 +289,45 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
     setSubmitting(true)
     try {
-      const settledCount = selectedOrders.length
-      await apiClient.post('/admin/merchants/loan/settle', {
-        subMerchantId: selectedSub,
-        orderIds: selectedOrders,
-      })
+      const payload: { orderIds: string[]; note?: string } = { orderIds: selectedOrders }
+      const trimmedNote = (noteRef.current?.value ?? '').trim()
+      if (trimmedNote) {
+        payload.note = trimmedNote
+      }
+
+      const { data } = await apiClient.post<{
+        ok?: string[]
+        fail?: string[]
+        errors?: { orderId: string; message: string }[]
+      }>('/admin/merchants/loan/mark-settled', payload)
+
       await loadTransactions()
-      setActionMessage(`Berhasil mengirim permintaan settle untuk ${settledCount} transaksi`)
+
+      const ok = data?.ok ?? []
+      const fail = data?.fail ?? []
+      const errors = data?.errors ?? []
+
+      if (ok.length > 0) {
+        setActionMessage(`Berhasil menandai ${ok.length} transaksi sebagai loan-settled.`)
+      } else {
+        setActionMessage('Tidak ada perubahan status yang dilakukan.')
+      }
+
+      if (fail.length > 0) {
+        const detail = errors
+          .map(err => `${err.orderId ?? 'unknown'}: ${err.message}`)
+          .join('; ')
+        setActionError(`Gagal menandai ${fail.length} transaksi: ${detail}`)
+      } else {
+        setActionError('')
+        if (ok.length > 0) {
+          if (noteRef.current) {
+            noteRef.current.value = ''
+          }
+        }
+      }
     } catch (err: any) {
-      setActionError(err?.response?.data?.error ?? 'Gagal mengirim permintaan settle')
+      setActionError(err?.response?.data?.error ?? 'Gagal menandai transaksi sebagai loan-settled')
     } finally {
       setSubmitting(false)
     }
@@ -314,7 +347,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         <header className="space-y-1">
           <h1 className="text-xl font-semibold">Loan Management</h1>
           <p className="text-sm text-neutral-400">
-            Pantau dan settle transaksi loan untuk sub-merchant terpilih.
+            Pantau transaksi loan dan tandai pembayaran manual sebagai loan-settled.
           </p>
         </header>
 
@@ -550,9 +583,25 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
               </div>
             )}
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-neutral-400">
-                Hanya transaksi berstatus <strong>PAID</strong> yang dapat disettle menjadi loan.
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="text-xs text-neutral-400 sm:max-w-sm">
+                Hanya transaksi berstatus <strong>PAID</strong> yang dapat ditandai sebagai loan-settled.
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:w-72">
+                <label htmlFor="loan-note" className="text-sm font-medium text-neutral-200">
+                  Catatan (opsional)
+                </label>
+                <textarea
+                  id="loan-note"
+                  ref={noteRef}
+                  placeholder="Contoh: penyesuaian manual oleh tim loan"
+                  rows={3}
+                  maxLength={500}
+                  className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                />
+                <p className="text-xs text-neutral-500">
+                  Catatan akan tersimpan dalam metadata audit untuk referensi tim finance.
+                </p>
               </div>
               <button
                 type="button"
@@ -561,7 +610,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
-                Settle Loan ({selectedOrders.length.toLocaleString('id-ID')})
+                Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
               </button>
             </div>
           </div>

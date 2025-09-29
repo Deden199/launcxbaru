@@ -20,6 +20,7 @@ const BALANCE_TTL_MS = 30_000
 
 import { prisma } from '../../core/prisma';
 import { logAdminAction } from '../../util/adminLog';
+import { ORDER_STATUS } from '../../types/orderStatus';
 
 // 1. Create merchant (mdr wajib)
 export const createMerchant = async (req: AuthRequest, res: Response) => {
@@ -362,13 +363,13 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     if (dateFrom && !isNaN(dateFrom.getTime())) createdAtFilter.gte = dateFrom
     if (dateTo   && !isNaN(dateTo.getTime()))   createdAtFilter.lte = dateTo
     const allowedStatuses = [
-      'SUCCESS',
-      'DONE',
-      'SETTLED',
-      'PAID',
-      'LN_SETTLE',
-      'PENDING',
-      'EXPIRED'
+      ORDER_STATUS.SUCCESS,
+      ORDER_STATUS.DONE,
+      ORDER_STATUS.SETTLED,
+      ORDER_STATUS.PAID,
+      ORDER_STATUS.LN_SETTLED,
+      ORDER_STATUS.PENDING,
+      ORDER_STATUS.EXPIRED,
     ] as const
     let statusList: string[] | undefined
     if (status !== undefined) {
@@ -377,8 +378,8 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         return res.status(400).json({ error: 'Invalid status' })
       }
       statusList = arr.map(String)
-            if (statusList.includes('SUCCESS') && !statusList.includes('SETTLED')) {
-        statusList.push('SETTLED')
+      if (statusList.includes(ORDER_STATUS.SUCCESS) && !statusList.includes(ORDER_STATUS.SETTLED)) {
+        statusList.push(ORDER_STATUS.SETTLED)
       }
       statusList = Array.from(new Set(statusList))
     }
@@ -412,15 +413,23 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     const [pendingAgg, settleAgg, paidAgg, partnerClients] = await Promise.all([
       prisma.order.aggregate({
         _sum: { pendingAmount: true },
-        where: { ...whereOrders, status: 'PAID' }
+        where: { ...whereOrders, status: ORDER_STATUS.PAID }
       }),
       prisma.order.aggregate({
         _sum: { settlementAmount: true },
-        where: { ...whereOrders, status: { in: ['SUCCESS', 'DONE', 'SETTLED'] } }
+        where: {
+          ...whereOrders,
+          status: {
+            in: [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED],
+          },
+        },
       }),
       prisma.order.aggregate({
         _sum: { amount: true },
-        where: { ...whereOrders, status: { in: ['PAID', 'LN_SETTLE'] } }
+        where: {
+          ...whereOrders,
+          status: { in: [ORDER_STATUS.PAID, ORDER_STATUS.LN_SETTLED] },
+        },
       }),
       prisma.partnerClient.findMany({
         where: pcWhere,
@@ -475,9 +484,9 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       const pend = o.pendingAmount    ?? 0
       const sett = o.settlementAmount ?? 0
       let netSettle = sett
-      if (o.status === 'PAID') {
+      if (o.status === ORDER_STATUS.PAID) {
         netSettle = pend
-      } else if (o.status === 'LN_SETTLE') {
+      } else if (o.status === ORDER_STATUS.LN_SETTLED) {
         netSettle = o.loanEntry?.amount ?? 0
       }
 
@@ -491,7 +500,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         feeLauncx:            o.feeLauncx   ?? 0,
         feePg:                o.fee3rdParty ?? 0,
         netSettle,
-        status:               o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+        status:               o.status === ORDER_STATUS.SETTLED ? ORDER_STATUS.SUCCESS : o.status,
         settlementStatus:     o.settlementStatus ?? '',
         channel:              o.channel     ?? '',
         // tiga timestamp baru:
@@ -554,13 +563,13 @@ export async function getDashboardVolume(req: Request, res: Response) {
     const searchStr = typeof search === 'string' ? search.trim() : '';
 
     const allowedStatuses = [
-      'SUCCESS',
-      'DONE',
-      'SETTLED',
-      'PAID',
-      'LN_SETTLE',
-      'PENDING',
-      'EXPIRED',
+      ORDER_STATUS.SUCCESS,
+      ORDER_STATUS.DONE,
+      ORDER_STATUS.SETTLED,
+      ORDER_STATUS.PAID,
+      ORDER_STATUS.LN_SETTLED,
+      ORDER_STATUS.PENDING,
+      ORDER_STATUS.EXPIRED,
     ] as const;
 
     let statusList: string[] | undefined;
@@ -570,8 +579,8 @@ export async function getDashboardVolume(req: Request, res: Response) {
         return res.status(400).json({ error: 'Invalid status' });
       }
       statusList = arr.map(String);
-      if (statusList.includes('SUCCESS') && !statusList.includes('SETTLED')) {
-        statusList.push('SETTLED');
+      if (statusList.includes(ORDER_STATUS.SUCCESS) && !statusList.includes(ORDER_STATUS.SETTLED)) {
+        statusList.push(ORDER_STATUS.SETTLED);
       }
       statusList = Array.from(new Set(statusList));
     }
@@ -950,7 +959,13 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       whereWd.subMerchantId = String(subMerchantId)
     }
 
-    const successStatuses = ['PAID', 'LN_SETTLE', 'DONE', 'SETTLED', 'SUCCESS']
+    const successStatuses = [
+      ORDER_STATUS.PAID,
+      ORDER_STATUS.LN_SETTLED,
+      ORDER_STATUS.DONE,
+      ORDER_STATUS.SETTLED,
+      ORDER_STATUS.SUCCESS,
+    ]
 
     const [orderGroup, succWdAgg, inAgg, outAgg] = await Promise.all([
       prisma.order.groupBy({
@@ -982,13 +997,13 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 
     const tpvAgg = orderGroup.reduce((n, g) => n + (g._sum.amount ?? 0), 0);
     const paidAgg = orderGroup.reduce((total, group) => {
-      if (group.status === 'PAID' || group.status === 'LN_SETTLE') {
+      if (group.status === ORDER_STATUS.PAID || group.status === ORDER_STATUS.LN_SETTLED) {
         total += group._sum.amount ?? 0
       }
       return total
     }, 0)
     const settleAgg = orderGroup.reduce((n, g) => {
-      if (['SUCCESS', 'DONE', 'SETTLED'].includes(g.status)) {
+      if ([ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED].includes(g.status)) {
         n += g._sum.settlementAmount ?? 0;
       }
       return n;
@@ -1123,13 +1138,13 @@ export async function exportDashboardAll(req: Request, res: Response) {
 
     // ▶ REVISI #1: Izinkan semua kemungkinan status
     const allowedStatuses = [
-      'SUCCESS',
-      'DONE',
-      'SETTLED',
-      'PAID',
-      'LN_SETTLE',
-      'PENDING',
-      'EXPIRED',
+      ORDER_STATUS.SUCCESS,
+      ORDER_STATUS.DONE,
+      ORDER_STATUS.SETTLED,
+      ORDER_STATUS.PAID,
+      ORDER_STATUS.LN_SETTLED,
+      ORDER_STATUS.PENDING,
+      ORDER_STATUS.EXPIRED,
     ] as const
 
     // ▶ REVISI #2: Bangun statusList dan tambahkan mapping khusus
@@ -1142,15 +1157,15 @@ export async function exportDashboardAll(req: Request, res: Response) {
       statusList = arr.map(String)
 
       // ▶ REVISI: kalau user pilih 'SUCCESS', sertakan 'SETTLED'
-      if (statusList.includes('SUCCESS') && !statusList.includes('SETTLED')) {
-        statusList.push('SETTLED')
+      if (statusList.includes(ORDER_STATUS.SUCCESS) && !statusList.includes(ORDER_STATUS.SETTLED)) {
+        statusList.push(ORDER_STATUS.SETTLED)
       }
       // ▶ REVISI: kalau user pilih 'PAID', sertakan 'DONE'
-      if (statusList.includes('PAID') && !statusList.includes('DONE')) {
-        statusList.push('DONE')
+      if (statusList.includes(ORDER_STATUS.PAID) && !statusList.includes(ORDER_STATUS.DONE)) {
+        statusList.push(ORDER_STATUS.DONE)
       }
-      if (statusList.includes('PAID') && !statusList.includes('LN_SETTLE')) {
-        statusList.push('LN_SETTLE')
+      if (statusList.includes(ORDER_STATUS.PAID) && !statusList.includes(ORDER_STATUS.LN_SETTLED)) {
+        statusList.push(ORDER_STATUS.LN_SETTLED)
       }
 
       // hilangkan duplikat
@@ -1214,9 +1229,9 @@ export async function exportDashboardAll(req: Request, res: Response) {
 
       for (const o of ordersChunk) {
         let net: number | null | undefined = o.settlementAmount
-        if (o.status === 'PAID') {
+        if (o.status === ORDER_STATUS.PAID) {
           net = o.pendingAmount
-        } else if (o.status === 'LN_SETTLE') {
+        } else if (o.status === ORDER_STATUS.LN_SETTLED) {
           net = o.loanEntry?.amount
         }
         txSheet.addRow([

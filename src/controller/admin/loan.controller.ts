@@ -6,6 +6,8 @@ import { prisma } from '../../core/prisma';
 import { AuthRequest } from '../../middleware/auth';
 import { logAdminAction } from '../../util/adminLog';
 import { wibTimestamp } from '../../util/time';
+import { ORDER_STATUS, LOAN_SETTLED_METADATA_REASON } from '../../types/orderStatus';
+import { emitOrderEvent } from '../../util/orderEvents';
 
 const MAX_CONFIGURED_PAGE_SIZE = 1500;
 const configuredMaxPageSize = Number(process.env.LOAN_MAX_PAGE_SIZE);
@@ -21,12 +23,11 @@ const loanQuerySchema = z.object({
   endDate: z.string().min(1, 'endDate is required'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).default(DEFAULT_PAGE_SIZE),
-  includeSettled: z.coerce.boolean().optional().default(false),
 });
 
-const settleBodySchema = z.object({
-  subMerchantId: z.string().min(1, 'subMerchantId is required'),
+const markSettledBodySchema = z.object({
   orderIds: z.array(z.string().min(1)).nonempty('orderIds is required'),
+  note: z.string().max(500).optional(),
 });
 
 const toStartOfDayWib = (value: string) => {
@@ -47,7 +48,7 @@ const toEndOfDayWib = (value: string) => {
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
   try {
-    const { subMerchantId, startDate, endDate, page, pageSize, includeSettled } =
+    const { subMerchantId, startDate, endDate, page, pageSize } =
       loanQuerySchema.parse(req.query);
 
     const start = toStartOfDayWib(startDate);
@@ -55,7 +56,7 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
 
     const safePageSize = Math.min(pageSize, MAX_PAGE_SIZE);
     const skip = (page - 1) * safePageSize;
-    const statusValues = includeSettled ? ['PAID', 'LN_SETTLE'] : ['PAID'];
+    const statusValues = [ORDER_STATUS.PAID, ORDER_STATUS.LN_SETTLED];
     const where = {
       subMerchantId,
       status: { in: statusValues },
@@ -122,108 +123,204 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
   }
 }
 
-class OrderSettlementConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'OrderSettlementConflictError';
+function normalizeMetadata(value: unknown): Record<string, any> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, any>) };
   }
+  return {};
 }
 
-export async function settleLoanOrders(req: AuthRequest, res: Response) {
+type MarkSettledSummary = {
+  ok: string[];
+  fail: string[];
+  errors: { orderId: string; message: string }[];
+};
+
+type LoanSettlementEventPayload = {
+  orderId: string;
+  previousStatus: string;
+  adminId?: string;
+  markedAt: string;
+  note?: string;
+};
+
+export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
   try {
-    const { subMerchantId, orderIds } = settleBodySchema.parse(req.body);
+    const parsed = markSettledBodySchema.parse(req.body);
+    const note = parsed.note?.trim() ? parsed.note.trim() : undefined;
+    const orderIds = Array.from(new Set(parsed.orderIds));
 
     const orders = await prisma.order.findMany({
-      where: {
-        id: { in: orderIds },
-        subMerchantId,
-        status: 'PAID',
-      },
+      where: { id: { in: orderIds } },
       select: {
         id: true,
+        status: true,
         pendingAmount: true,
+        settlementAmount: true,
+        settlementStatus: true,
+        metadata: true,
         subMerchantId: true,
+        loanedAt: true,
       },
     });
 
-    if (orders.length !== orderIds.length) {
-      return res.status(400).json({
-        error: 'Some orders were not found or not in PAID status',
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const summary: MarkSettledSummary = { ok: [], fail: [], errors: [] };
+    const updates: {
+      id: string;
+      subMerchantId?: string | null;
+      metadata: Record<string, any>;
+      pendingAmount: number | null | undefined;
+    }[] = [];
+
+    const now = wibTimestamp();
+    const markedAtIso = now.toISOString();
+    const adminId = req.userId ?? undefined;
+
+    for (const id of orderIds) {
+      const order = ordersById.get(id);
+      if (!order) {
+        summary.fail.push(id);
+        summary.errors.push({ orderId: id, message: 'Order not found' });
+        continue;
+      }
+
+      if (order.status === ORDER_STATUS.LN_SETTLED) {
+        if (!summary.ok.includes(id)) {
+          summary.ok.push(id);
+        }
+        continue;
+      }
+
+      if (order.status !== ORDER_STATUS.PAID) {
+        summary.fail.push(id);
+        summary.errors.push({
+          orderId: id,
+          message: `Order is in status ${order.status} and cannot be loan-settled`,
+        });
+        continue;
+      }
+
+      const metadata = normalizeMetadata(order.metadata);
+      const auditEntry = {
+        reason: LOAN_SETTLED_METADATA_REASON,
+        previousStatus: ORDER_STATUS.PAID,
+        markedBy: adminId ?? 'unknown',
+        markedAt: markedAtIso,
+        ...(note ? { note } : {}),
+      };
+
+      const historyKey = 'loanSettlementHistory';
+      const history = Array.isArray(metadata[historyKey])
+        ? [...metadata[historyKey], auditEntry]
+        : [auditEntry];
+
+      metadata[historyKey] = history;
+      metadata.lastLoanSettlement = auditEntry;
+
+      updates.push({
+        id,
+        subMerchantId: order.subMerchantId,
+        metadata,
+        pendingAmount: order.pendingAmount,
       });
     }
 
-    const now = wibTimestamp();
-    const settledBy = req.userId ?? 'unknown';
-
-    const loanEntries = orders.map((order) => {
-      const amount = Number(order.pendingAmount ?? 0);
-      return {
-        orderId: order.id,
-        subMerchantId: order.subMerchantId!,
-        amount,
-        metadata: {
-          settledBy,
-          settledAt: now.toISOString(),
-        },
-      };
-    });
-
-    const totalAmount = loanEntries.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
-
-    const configuredChunkSize = Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE);
-    const CREATE_MANY_CHUNK_SIZE =
-      Number.isFinite(configuredChunkSize) && configuredChunkSize > 0 ? configuredChunkSize : 1000;
+    if (updates.length === 0) {
+      return res.json(summary);
+    }
 
     const configuredTimeout = Number(process.env.LOAN_TRANSACTION_TIMEOUT);
     const transactionTimeout =
       Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
 
-    let processedCount = 0;
+    const events: LoanSettlementEventPayload[] = [];
+
     await prisma.$transaction(
       async (tx) => {
-        const updateResult = await tx.order.updateMany({
-          where: { id: { in: orderIds }, subMerchantId, status: 'PAID' },
-          data: {
-            status: 'LN_SETTLE',
-            pendingAmount: 0,
-            loanedAt: now,
-          },
-        });
+        for (const update of updates) {
+          const result = await tx.order.updateMany({
+            where: { id: update.id, status: ORDER_STATUS.PAID },
+            data: {
+              status: ORDER_STATUS.LN_SETTLED,
+              pendingAmount: null,
+              settlementStatus: null,
+              loanedAt: now,
+              metadata: update.metadata,
+            },
+          });
 
-        processedCount = updateResult.count;
-        if (updateResult.count !== orderIds.length) {
-          throw new OrderSettlementConflictError(
-            'Some orders were updated by another process. Please retry.',
-          );
-        }
-
-        if (loanEntries.length > 0) {
-          for (let i = 0; i < loanEntries.length; i += CREATE_MANY_CHUNK_SIZE) {
-            const chunk = loanEntries.slice(i, i + CREATE_MANY_CHUNK_SIZE);
-            await tx.loanEntry.createMany({ data: chunk });
+          if (result.count === 0) {
+            summary.fail.push(update.id);
+            summary.errors.push({
+              orderId: update.id,
+              message: 'Order status changed before loan settlement could be applied',
+            });
+            continue;
           }
+
+          if (!summary.ok.includes(update.id)) {
+            summary.ok.push(update.id);
+          }
+
+          const amount = Number(update.pendingAmount ?? 0);
+          if (amount > 0 && update.subMerchantId) {
+            await tx.loanEntry.upsert({
+              where: { orderId: update.id },
+              create: {
+                orderId: update.id,
+                subMerchantId: update.subMerchantId,
+                amount,
+                metadata: {
+                  reason: LOAN_SETTLED_METADATA_REASON,
+                  markedAt: markedAtIso,
+                  ...(adminId ? { markedBy: adminId } : {}),
+                  ...(note ? { note } : {}),
+                },
+              },
+              update: {
+                amount,
+                metadata: {
+                  reason: LOAN_SETTLED_METADATA_REASON,
+                  markedAt: markedAtIso,
+                  ...(adminId ? { markedBy: adminId } : {}),
+                  ...(note ? { note } : {}),
+                },
+              },
+            });
+          }
+
+          events.push({
+            orderId: update.id,
+            previousStatus: ORDER_STATUS.PAID,
+            adminId,
+            markedAt: markedAtIso,
+            note,
+          });
         }
       },
       { timeout: transactionTimeout },
     );
 
-    if (req.userId) {
-      await logAdminAction(req.userId, 'loanSettle', subMerchantId, {
+    if (adminId) {
+      await logAdminAction(adminId, 'loanMarkSettled', undefined, {
         orderIds,
-        processed: processedCount,
-        totalAmount,
+        ok: summary.ok,
+        fail: summary.fail,
+        note,
       });
     }
 
-    return res.json({ processed: processedCount, totalAmount });
+    for (const event of events) {
+      emitOrderEvent('order.loan_settled', event);
+    }
+
+    return res.json(summary);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
     }
-    if (error instanceof OrderSettlementConflictError) {
-      return res.status(409).json({ error: error.message });
-    }
-    console.error('[settleLoanOrders]', error);
-    return res.status(500).json({ error: 'Failed to settle loans' });
+    console.error('[markLoanOrdersSettled]', error);
+    return res.status(500).json({ error: 'Failed to mark loans as settled' });
   }
 }

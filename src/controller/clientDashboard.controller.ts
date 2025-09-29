@@ -12,14 +12,16 @@ import pLimit from 'p-limit' // optional kalau mau throttle paralel, tapi tidak 
 
 import { retry } from '../utils/retry';
 import { CALLBACK_ALLOWED_STATUSES, isCallbackStatusAllowed } from '../utils/callbackStatus';
+import { ORDER_STATUS } from '../types/orderStatus';
 
 const DASHBOARD_STATUSES = [
-  'SUCCESS',
-  'DONE',
-  'SETTLED',
-  'PAID',
-  'PENDING',      // <<< REVISI: tambahkan biar order PENDING ikut ter-fetch
-  'EXPIRED',      // <<< REVISI: tambahkan biar order EXPIRED ikut ter-fetch
+  ORDER_STATUS.SUCCESS,
+  ORDER_STATUS.DONE,
+  ORDER_STATUS.SETTLED,
+  ORDER_STATUS.PAID,
+  ORDER_STATUS.LN_SETTLED,
+  ORDER_STATUS.PENDING,      // <<< REVISI: tambahkan biar order PENDING ikut ter-fetch
+  ORDER_STATUS.EXPIRED,      // <<< REVISI: tambahkan biar order EXPIRED ikut ter-fetch
   // …tambahkan status lain jika ada…
 ];
 
@@ -134,14 +136,26 @@ let statuses: string[] = [];
 if (Array.isArray(rawStatus)) {
   statuses = rawStatus
     .map(String)
-    .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+    .flatMap(s =>
+      s === ORDER_STATUS.SUCCESS
+        ? [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED]
+        : [s],
+    )
     .filter(s => allowed.includes(s));
 } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
   statuses = rawStatus
     .split(',')
     .map(s => s.trim())
-    .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+    .flatMap(s =>
+      s === ORDER_STATUS.SUCCESS
+        ? [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED]
+        : [s],
+    )
     .filter(s => allowed.includes(s));
+}
+
+if (statuses.includes(ORDER_STATUS.PAID) && !statuses.includes(ORDER_STATUS.LN_SETTLED)) {
+  statuses.push(ORDER_STATUS.LN_SETTLED);
 }
 
 if (statuses.length === 0) statuses = [...allowed];
@@ -172,7 +186,7 @@ if (statuses.length === 0) statuses = [...allowed];
       _sum: { pendingAmount: true },
       where: {
         partnerClientId: { in: clientIds },
-        status: 'PAID',
+        status: ORDER_STATUS.PAID,
         ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       }
     })
@@ -183,7 +197,7 @@ if (statuses.length === 0) statuses = [...allowed];
       _sum: { amount: true },
       where: {
         partnerClientId: { in: clientIds },
-        status: 'PAID',
+        status: { in: [ORDER_STATUS.PAID, ORDER_STATUS.LN_SETTLED] },
         ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       }
     })
@@ -194,7 +208,7 @@ if (statuses.length === 0) statuses = [...allowed];
       _sum: { settlementAmount: true },
       where: {
         partnerClientId: { in: clientIds },
-        status: { in: ['SUCCESS', 'DONE', 'SETTLED'] },
+        status: { in: [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED] },
         ...(dateFrom || dateTo ? { createdAt: createdAtFilter } : {})
       }
     })
@@ -256,7 +270,7 @@ const totalCount = totalRows; // jumlah order matching filter
 
 // (6) map ke response
 const transactions = orders.map(o => {
-  const netSettle = o.status === 'PAID'
+  const netSettle = o.status === ORDER_STATUS.PAID
     ? (o.pendingAmount ?? 0)
     : (o.settlementAmount ?? 0);
   return {
@@ -269,7 +283,7 @@ const transactions = orders.map(o => {
     feeLauncx: o.feeLauncx ?? 0,
     netSettle,
     settlementStatus: o.settlementStatus ?? '',
-    status: o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+    status: o.status === ORDER_STATUS.SETTLED ? ORDER_STATUS.SUCCESS : o.status,
     paymentReceivedTime: o.paymentReceivedTime?.toISOString() ?? '',
     settlementTime:      o.settlementTime?.toISOString()      ?? '',
     trxExpirationTime:   o.trxExpirationTime?.toISOString()   ?? '',
@@ -331,14 +345,25 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
     if (Array.isArray(rawStatus)) {
       statuses = rawStatus
         .map(String)
-        .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+        .flatMap(s =>
+          s === ORDER_STATUS.SUCCESS
+            ? [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED]
+            : [s],
+        )
         .filter(s => allowed.includes(s))
     } else if (typeof rawStatus === 'string' && rawStatus.trim() !== '') {
       statuses = rawStatus
         .split(',')
         .map(s => s.trim())
-        .flatMap(s => (s === 'SUCCESS' ? ['SUCCESS', 'DONE', 'SETTLED'] : [s]))
+        .flatMap(s =>
+          s === ORDER_STATUS.SUCCESS
+            ? [ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED]
+            : [s],
+        )
         .filter(s => allowed.includes(s))
+    }
+    if (statuses.includes(ORDER_STATUS.PAID) && !statuses.includes(ORDER_STATUS.LN_SETTLED)) {
+      statuses.push(ORDER_STATUS.LN_SETTLED)
     }
     if (statuses.length === 0) statuses = [...allowed]
     const statusWhere = { in: statuses }
@@ -419,7 +444,7 @@ export async function exportClientTransactions(req: ClientAuthRequest, res: Resp
           pend:     o.pendingAmount ?? 0,
           sett:     o.settlementAmount ?? 0,
           fee:      o.feeLauncx ?? 0,
-          stat:     o.status === 'SETTLED' ? 'SUCCESS' : o.status,
+          stat:     o.status === ORDER_STATUS.SETTLED ? ORDER_STATUS.SUCCESS : o.status,
           date:     formatDateJakarta(o.createdAt),
           paidAt:    o.paymentReceivedTime ? formatDateJakarta(o.paymentReceivedTime) : '',
           settledAt: o.settlementTime      ? formatDateJakarta(o.settlementTime)      : '',

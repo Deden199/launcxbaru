@@ -7,7 +7,7 @@ export type Tx = {
   feeLauncx: number
   feePg: number
   netSettle: number
-  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID' | 'LN_SETTLE'
+  status: '' | 'SUCCESS' | 'PENDING' | 'EXPIRED' | 'DONE' | 'PAID' | 'LN_SETTLED'
   settlementStatus: string
   channel: string
   paymentReceivedTime?: string

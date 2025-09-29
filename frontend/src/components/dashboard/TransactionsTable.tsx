@@ -84,21 +84,26 @@ export default function TransactionsTable({
 
   const statusBadge = (s?: string) => {
     const v = (s || '').toUpperCase()
-    const map: Record<string, { className: string; label?: string }> = {
+    const map: Record<string, { className: string; label?: string; title?: string }> = {
       SUCCESS: { className: 'bg-emerald-950/40 text-emerald-300 border-emerald-900/40' },
       PAID: { className: 'bg-indigo-950/40 text-indigo-300 border-indigo-900/40' },
       PENDING: { className: 'bg-amber-950/40 text-amber-300 border-amber-900/40' },
       EXPIRED: { className: 'bg-neutral-900/60 text-neutral-300 border-neutral-800' },
       DONE: { className: 'bg-sky-950/40 text-sky-300 border-sky-900/40' },
       FAILED: { className: 'bg-rose-950/40 text-rose-300 border-rose-900/40' },
-      LN_SETTLE: {
+      LN_SETTLED: {
         className: 'bg-purple-950/40 text-purple-200 border-purple-900/40',
         label: 'LOAN SETTLED',
+        title:
+          'Loan-settled: transaksi ditandai sebagai pelunasan pinjaman/manual, tidak ikut proses settlement.',
       },
     }
     const meta = map[v] ?? map.EXPIRED
     return (
-      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.className}`}>
+      <span
+        title={meta.title}
+        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.className}`}
+      >
         {meta.label ?? (v || '-')}
       </span>
     )
@@ -189,7 +194,7 @@ export default function TransactionsTable({
               <option value="PAID">PAID</option>
               <option value="PENDING">PENDING</option>
               <option value="EXPIRED">EXPIRED</option>
-              <option value="LN_SETTLE">LN_SETTLE</option>
+              <option value="LN_SETTLED">LN_SETTLED</option>
             </select>
           </div>
 
@@ -341,7 +346,7 @@ export default function TransactionsTable({
                           <span>
                             {t.netSettle.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
                           </span>
-                          {t.status === 'LN_SETTLE' && (
+                          {t.status === 'LN_SETTLED' && (
                             <span className="text-[11px] font-normal uppercase tracking-wide text-purple-200/80">
                               Loan Amount
                             </span>
