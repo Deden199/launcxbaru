@@ -20,6 +20,8 @@ if (typeof window !== 'undefined') {
 
 export const toWibIso = (date: Date) => dayjs(date).tz('Asia/Jakarta', true).toDate().toISOString()
 
+export const DEFAULT_LOAN_PAGE_SIZE = 20
+
 type LoanTransaction = {
   id: string
   amount: number
@@ -82,6 +84,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   })
   const [transactions, setTransactions] = useState<LoanTransaction[]>([])
   const [loadingTx, setLoadingTx] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [txError, setTxError] = useState('')
   const [formError, setFormError] = useState('')
 
@@ -89,6 +92,10 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [submitting, setSubmitting] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
+
+  const [pageSize, setPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
+  const [totalCount, setTotalCount] = useState(0)
+  const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
 
@@ -150,27 +157,28 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     )
   }, [selectedOrders, transactions])
 
-  const loadTransactions = async () => {
-    setFormError('')
-    setTxError('')
+  const fetchTransactions = async (targetPage: number, append: boolean) => {
+    if (!selectedSub || !startDate || !endDate) return
 
-    if (!selectedSub) {
-      setFormError('Pilih sub-merchant terlebih dahulu.')
-      return
-    }
-    if (!startDate || !endDate) {
-      setFormError('Pilih rentang tanggal terlebih dahulu.')
-      return
+    const params = {
+      subMerchantId: selectedSub,
+      startDate: toWibIso(startDate),
+      endDate: toWibIso(endDate),
+      page: targetPage,
+      pageSize,
     }
 
-    setLoadingTx(true)
+    if (append) {
+      setLoadingMore(true)
+    } else {
+      setLoadingTx(true)
+    }
+
     try {
-      const params = {
-        subMerchantId: selectedSub,
-        startDate: toWibIso(startDate),
-        endDate: toWibIso(endDate),
-      }
-      const { data } = await apiClient.get<{ data: any[] }>('/admin/merchants/loan/transactions', {
+      const { data } = await apiClient.get<{
+        data: any[]
+        meta?: { total?: number; page?: number; pageSize?: number }
+      }>('/admin/merchants/loan/transactions', {
         params,
       })
 
@@ -185,13 +193,50 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         loanCreatedAt: raw.loanCreatedAt ?? null,
       }))
 
-      setTransactions(mapped)
-      setSelectedOrders([])
+      setTransactions(prev => (append ? [...prev, ...mapped] : mapped))
+      setTotalCount(prev => data.meta?.total ?? (append ? prev : mapped.length))
+      setPageSize(prev => data.meta?.pageSize ?? prev)
+      setLastLoadedPage(data.meta?.page ?? targetPage)
+
+      if (!append) {
+        setSelectedOrders([])
+      }
     } catch (err: any) {
       setTxError(err?.response?.data?.error ?? 'Gagal memuat transaksi loan')
     } finally {
-      setLoadingTx(false)
+      if (append) {
+        setLoadingMore(false)
+      } else {
+        setLoadingTx(false)
+      }
     }
+  }
+
+  const loadTransactions = async () => {
+    setFormError('')
+    setTxError('')
+
+    if (!selectedSub) {
+      setFormError('Pilih sub-merchant terlebih dahulu.')
+      return
+    }
+    if (!startDate || !endDate) {
+      setFormError('Pilih rentang tanggal terlebih dahulu.')
+      return
+    }
+
+    setTotalCount(0)
+    setLastLoadedPage(0)
+    await fetchTransactions(1, false)
+  }
+
+  const loadMoreTransactions = async () => {
+    if (loadingMore || loadingTx) return
+    if (!selectedSub || !startDate || !endDate) return
+    if (transactions.length >= totalCount) return
+
+    setTxError('')
+    await fetchTransactions(lastLoadedPage + 1, true)
   }
 
   const toggleAll = (checked: boolean) => {
@@ -243,6 +288,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     setActionMessage('')
     void loadTransactions()
   }
+
+  const hasMore = transactions.length < totalCount
 
   return (
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100 p-4 sm:p-6">
@@ -347,7 +394,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
             <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
               <span>
-                Total data: <strong>{transactions.length}</strong>
+                Menampilkan <strong>{transactions.length}</strong> dari{' '}
+                <strong>{totalCount}</strong> transaksi
               </span>
               <span>
                 Pending amount: <strong>{formatCurrency(totalPending)}</strong>
@@ -438,6 +486,20 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                 </tbody>
               </table>
             </div>
+
+            {hasMore && (
+              <div className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => void loadMoreTransactions()}
+                  disabled={loadingMore}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-800 px-3 py-2.5 text-sm font-medium transition hover:bg-neutral-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? <Loader2 className="animate-spin" size={16} /> : null}
+                  Muat Lebih
+                </button>
+              </div>
+            )}
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-neutral-400">

@@ -4,7 +4,12 @@ import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { JSDOM } from 'jsdom'
 
-import { LoanPageView, type LoanPageViewProps, toWibIso } from '../pages/admin/loan'
+import {
+  LoanPageView,
+  type LoanPageViewProps,
+  toWibIso,
+  DEFAULT_LOAN_PAGE_SIZE,
+} from '../pages/admin/loan'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
 const { window } = dom
@@ -122,7 +127,7 @@ test('fetches transactions with WIB date parameters', async () => {
     if (url === '/admin/merchants/all/balances') {
       return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
     }
-    if (url === '/admin/loan/transactions') {
+    if (url === '/admin/merchants/loan/transactions') {
       capturedParams = config?.params
       return {
         data: {
@@ -138,6 +143,7 @@ test('fetches transactions with WIB date parameters', async () => {
               loanCreatedAt: null,
             },
           ],
+          meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
         },
       }
     }
@@ -160,6 +166,8 @@ test('fetches transactions with WIB date parameters', async () => {
   assert.equal(capturedParams.subMerchantId, 'sub-1')
   assert.equal(capturedParams.startDate, toWibIso(start))
   assert.equal(capturedParams.endDate, toWibIso(end))
+  assert.equal(capturedParams.page, 1)
+  assert.equal(capturedParams.pageSize, DEFAULT_LOAN_PAGE_SIZE)
 })
 
 test('submits selected transactions to settle API', async () => {
@@ -171,7 +179,7 @@ test('submits selected transactions to settle API', async () => {
     if (url === '/admin/merchants/all/balances') {
       return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
     }
-    if (url === '/admin/loan/transactions') {
+    if (url === '/admin/merchants/loan/transactions') {
       loanFetchCount += 1
       if (loanFetchCount === 1) {
         return {
@@ -188,6 +196,7 @@ test('submits selected transactions to settle API', async () => {
                 loanCreatedAt: null,
               },
             ],
+            meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
           },
         }
       }
@@ -205,6 +214,7 @@ test('submits selected transactions to settle API', async () => {
               loanCreatedAt: new Date('2024-01-03T02:00:00Z').toISOString(),
             },
           ],
+          meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
         },
       }
     }
@@ -233,11 +243,85 @@ test('submits selected transactions to settle API', async () => {
   })
 
   assert.deepEqual(apiMock.postCalls[0], [
-    '/admin/loan/settle',
+    '/admin/merchants/loan/settle',
     { subMerchantId: 'sub-1', orderIds: ['order-1'] },
   ])
 
   await waitFor(() => {
-    assert.ok(apiMock.getCalls.filter(call => call[0] === '/admin/loan/transactions').length >= 2)
+    assert.ok(
+      apiMock.getCalls.filter(call => call[0] === '/admin/merchants/loan/transactions').length >= 2,
+    )
+  })
+})
+
+test('allows loading additional loan transaction pages', async () => {
+  const start = new Date('2024-01-02T00:00:00Z')
+  const end = new Date('2024-01-03T00:00:00Z')
+
+  let lastParams: any = null
+  apiMock.setGetImplementation(async (url: string, config?: any) => {
+    if (url === '/admin/merchants/all/balances') {
+      return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
+    }
+    if (url === '/admin/merchants/loan/transactions') {
+      lastParams = config?.params
+      if (config?.params?.page === 1) {
+        return {
+          data: {
+            data: [
+              {
+                id: 'order-1',
+                amount: 10000,
+                pendingAmount: 5000,
+                status: 'PAID',
+                createdAt: new Date('2024-01-02T03:00:00Z').toISOString(),
+                loanedAt: null,
+                loanAmount: null,
+                loanCreatedAt: null,
+              },
+            ],
+            meta: { total: 2, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+          },
+        }
+      }
+      return {
+        data: {
+          data: [
+            {
+              id: 'order-2',
+              amount: 20000,
+              pendingAmount: 0,
+              status: 'LN_SETTLE',
+              createdAt: new Date('2024-01-02T05:00:00Z').toISOString(),
+              loanedAt: new Date('2024-01-02T06:00:00Z').toISOString(),
+              loanAmount: 20000,
+              loanCreatedAt: new Date('2024-01-02T06:00:00Z').toISOString(),
+            },
+          ],
+          meta: { total: 2, page: 2, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  const { findByLabelText, getByRole, findByText, queryByRole } = render(
+    <LoanPageView {...defaultProps} initialRange={[start, end]} />,
+  )
+
+  const select = (await findByLabelText('Sub-merchant')) as HTMLSelectElement
+  fireEvent.change(select, { target: { value: 'sub-1' } })
+
+  fireEvent.click(getByRole('button', { name: 'Muat Transaksi' }))
+  await findByText('order-1')
+
+  const loadMoreButton = getByRole('button', { name: 'Muat Lebih' })
+  fireEvent.click(loadMoreButton)
+
+  await findByText('order-2')
+  assert.equal(lastParams.page, 2)
+  assert.equal(lastParams.pageSize, DEFAULT_LOAN_PAGE_SIZE)
+  await waitFor(() => {
+    assert.equal(queryByRole('button', { name: 'Muat Lebih' }), null)
   })
 })
