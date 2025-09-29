@@ -7,6 +7,7 @@ import {
 } from '../../controller/admin/settlement.controller'
 import {
   adjustSettlements,
+  getEligibleSettlements,
   reverseSettlementToLnSettle,
 } from '../../controller/admin/settlementAdjustment.controller'
 
@@ -18,6 +19,7 @@ router.post('/', manualSettlement)
 router.post('/start', startSettlement)
 router.get('/status/:jobId', settlementStatus)
 router.post('/adjust', adjustSettlements)
+router.get('/eligible', getEligibleSettlements)
 router.post('/reverse-to-ln-settle', reverseSettlementToLnSettle)
 
 export default router
