@@ -254,8 +254,21 @@ export default function SettlementAdjustPage() {
           })
         }
 
+        const reportedTotal = typeof data?.total === 'number' ? data.total : null
+
+        if (requestId === requestIdRef.current && targetPage > 1 && mapped.length === 0 && reportedTotal && reportedTotal > 0) {
+          setPage(1)
+          // API occasionally reports more pages than are actually available, so refetch page 1 to avoid a blank table.
+          window.setTimeout(() => {
+            if (requestId === requestIdRef.current) {
+              fetchRows(1)
+            }
+          }, 0)
+          return
+        }
+
         setRows(mapped)
-        setTotalCount(typeof data?.total === 'number' ? data.total : mapped.length)
+        setTotalCount(reportedTotal ?? mapped.length)
         setPage(mapped.length > 0 || targetPage === 1 ? targetPage : 1)
       } catch (err: any) {
         if (requestId !== requestIdRef.current) return
