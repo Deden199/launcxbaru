@@ -101,6 +101,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
+  const includeSettled = false
 
   const pageSizeOptions = useMemo(() => {
     const unique = new Set<number>(PAGE_SIZE_OPTIONS)
@@ -176,6 +177,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       endDate: toWibIso(endDate),
       page: targetPage,
       pageSize: requestedPageSize,
+      includeSettled,
     }
 
     if (append) {
@@ -192,7 +194,10 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         params,
       })
 
-      const mapped: LoanTransaction[] = (data.data || []).map((raw) => ({
+      const filteredRaw = includeSettled
+        ? data.data || []
+        : (data.data || []).filter((raw: any) => raw.status !== 'LN_SETTLE')
+      const mapped: LoanTransaction[] = filteredRaw.map((raw) => ({
         id: raw.id,
         amount: raw.amount ?? 0,
         pendingAmount: raw.pendingAmount ?? 0,

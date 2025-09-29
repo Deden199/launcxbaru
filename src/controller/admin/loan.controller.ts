@@ -21,6 +21,7 @@ const loanQuerySchema = z.object({
   endDate: z.string().min(1, 'endDate is required'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).default(DEFAULT_PAGE_SIZE),
+  includeSettled: z.coerce.boolean().optional().default(false),
 });
 
 const settleBodySchema = z.object({
@@ -46,7 +47,7 @@ const toEndOfDayWib = (value: string) => {
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
   try {
-    const { subMerchantId, startDate, endDate, page, pageSize } =
+    const { subMerchantId, startDate, endDate, page, pageSize, includeSettled } =
       loanQuerySchema.parse(req.query);
 
     const start = toStartOfDayWib(startDate);
@@ -54,9 +55,12 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
 
     const safePageSize = Math.min(pageSize, MAX_PAGE_SIZE);
     const skip = (page - 1) * safePageSize;
+    const statusFilter = includeSettled
+      ? { in: ['PAID', 'LN_SETTLE'] as const }
+      : { in: ['PAID'] as const };
     const where = {
       subMerchantId,
-      status: { in: ['PAID', 'LN_SETTLE'] },
+      status: statusFilter,
       createdAt: {
         gte: start,
         lte: end,
