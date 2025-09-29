@@ -178,7 +178,7 @@ export default function SettlementAdjustPage() {
       params.to = toWibEnd(end).toISOString()
 
       try {
-        const { data } = await api.get<any>('/api/v1/admin/orders', { params })
+        const { data } = await api.get<any>('/admin/orders', { params })
         const listSource = Array.isArray(data?.data)
           ? data.data
           : Array.isArray(data?.orders)
@@ -295,7 +295,7 @@ export default function SettlementAdjustPage() {
       if (reason.trim()) payload.reason = reason.trim()
 
       const { data } = await api.post<ReversalResponse>(
-        '/api/v1/admin/settlement/reverse-to-ln-settle',
+        '/admin/settlement/reverse-to-ln-settle',
         payload
       )
 
