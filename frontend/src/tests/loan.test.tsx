@@ -4,7 +4,7 @@ import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { JSDOM } from 'jsdom'
 
-import { LoanPageView, type LoanPageViewProps, toWibIso } from './loan'
+import { LoanPageView, type LoanPageViewProps, toWibIso } from '../pages/admin/loan'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
 const { window } = dom

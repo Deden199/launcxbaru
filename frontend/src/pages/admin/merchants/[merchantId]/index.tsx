@@ -1112,3 +1112,7 @@ export function PaymentProvidersPageView({
     </div>
   )
 }
+
+export default function PaymentProvidersPage(props: PaymentProvidersPageProps) {
+  return <PaymentProvidersPageView {...props} />
+}
