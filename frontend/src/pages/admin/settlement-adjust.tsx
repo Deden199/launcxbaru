@@ -481,6 +481,7 @@ export default function SettlementAdjustPage() {
                 startDate={datePickerRange[0]}
                 endDate={datePickerRange[1]}
                 onChange={onChangeRange}
+                shouldCloseOnSelect={false}
                 maxDate={new Date()}
                 dateFormat="dd MMM yyyy"
                 withPortal
