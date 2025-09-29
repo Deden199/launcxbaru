@@ -17,6 +17,13 @@ const MAX_PAGE_SIZE =
     : MAX_CONFIGURED_PAGE_SIZE;
 const DEFAULT_PAGE_SIZE = 50;
 
+const DEFAULT_LOAN_CHUNK_SIZE = 25;
+const configuredLoanChunkSize = Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE);
+const LOAN_CREATE_MANY_CHUNK_SIZE =
+  Number.isFinite(configuredLoanChunkSize) && configuredLoanChunkSize >= 1
+    ? Math.floor(configuredLoanChunkSize)
+    : DEFAULT_LOAN_CHUNK_SIZE;
+
 const loanQuerySchema = z.object({
   subMerchantId: z.string().min(1, 'subMerchantId is required'),
   startDate: z.string().min(1, 'startDate is required'),
@@ -144,13 +151,24 @@ type LoanSettlementEventPayload = {
   note?: string;
 };
 
+type OrderForLoanSettlement = {
+  id: string;
+  status: string;
+  pendingAmount: number | null | undefined;
+  settlementAmount: number | null | undefined;
+  settlementStatus: string | null | undefined;
+  metadata: unknown;
+  subMerchantId: string | null | undefined;
+  loanedAt: Date | null;
+};
+
 export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
   try {
     const parsed = markSettledBodySchema.parse(req.body);
     const note = parsed.note?.trim() ? parsed.note.trim() : undefined;
     const orderIds = Array.from(new Set(parsed.orderIds));
 
-    const orders = await prisma.order.findMany({
+    const orders = (await prisma.order.findMany({
       where: { id: { in: orderIds } },
       select: {
         id: true,
@@ -162,9 +180,11 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         subMerchantId: true,
         loanedAt: true,
       },
-    });
+    })) as OrderForLoanSettlement[];
 
-    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const ordersById = new Map<string, OrderForLoanSettlement>(
+      orders.map((order) => [order.id, order]),
+    );
     const summary: MarkSettledSummary = { ok: [], fail: [], errors: [] };
     const updates: {
       id: string;
@@ -238,65 +258,85 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
 
     await prisma.$transaction(
       async (tx) => {
-        for (const update of updates) {
-          const result = await tx.order.updateMany({
-            where: { id: update.id, status: ORDER_STATUS.PAID },
-            data: {
-              status: ORDER_STATUS.LN_SETTLED,
-              pendingAmount: null,
-              settlementStatus: null,
-              loanedAt: now,
-              metadata: update.metadata,
-            },
-          });
+        const chunkSize = Math.max(1, LOAN_CREATE_MANY_CHUNK_SIZE);
+        for (let start = 0; start < updates.length; start += chunkSize) {
+          const chunk = updates.slice(start, start + chunkSize);
 
-          if (result.count === 0) {
-            summary.fail.push(update.id);
-            summary.errors.push({
-              orderId: update.id,
-              message: 'Order status changed before loan settlement could be applied',
-            });
-            continue;
-          }
+          await Promise.all(
+            chunk.map(async (update) => {
+              try {
+                const result = await tx.order.updateMany({
+                  where: { id: update.id, status: ORDER_STATUS.PAID },
+                  data: {
+                    status: ORDER_STATUS.LN_SETTLED,
+                    pendingAmount: null,
+                    settlementStatus: null,
+                    loanedAt: now,
+                    metadata: update.metadata,
+                  },
+                });
 
-          if (!summary.ok.includes(update.id)) {
-            summary.ok.push(update.id);
-          }
+                if (result.count === 0) {
+                  if (!summary.fail.includes(update.id)) {
+                    summary.fail.push(update.id);
+                  }
+                  summary.errors.push({
+                    orderId: update.id,
+                    message: 'Order status changed before loan settlement could be applied',
+                  });
+                  return;
+                }
 
-          const amount = Number(update.pendingAmount ?? 0);
-          if (amount > 0 && update.subMerchantId) {
-            await tx.loanEntry.upsert({
-              where: { orderId: update.id },
-              create: {
-                orderId: update.id,
-                subMerchantId: update.subMerchantId,
-                amount,
-                metadata: {
-                  reason: LOAN_SETTLED_METADATA_REASON,
+                if (!summary.ok.includes(update.id)) {
+                  summary.ok.push(update.id);
+                }
+
+                const amount = Number(update.pendingAmount ?? 0);
+                if (amount > 0 && update.subMerchantId) {
+                  await tx.loanEntry.upsert({
+                    where: { orderId: update.id },
+                    create: {
+                      orderId: update.id,
+                      subMerchantId: update.subMerchantId,
+                      amount,
+                      metadata: {
+                        reason: LOAN_SETTLED_METADATA_REASON,
+                        markedAt: markedAtIso,
+                        ...(adminId ? { markedBy: adminId } : {}),
+                        ...(note ? { note } : {}),
+                      },
+                    },
+                    update: {
+                      amount,
+                      metadata: {
+                        reason: LOAN_SETTLED_METADATA_REASON,
+                        markedAt: markedAtIso,
+                        ...(adminId ? { markedBy: adminId } : {}),
+                        ...(note ? { note } : {}),
+                      },
+                    },
+                  });
+                }
+
+                events.push({
+                  orderId: update.id,
+                  previousStatus: ORDER_STATUS.PAID,
+                  adminId,
                   markedAt: markedAtIso,
-                  ...(adminId ? { markedBy: adminId } : {}),
-                  ...(note ? { note } : {}),
-                },
-              },
-              update: {
-                amount,
-                metadata: {
-                  reason: LOAN_SETTLED_METADATA_REASON,
-                  markedAt: markedAtIso,
-                  ...(adminId ? { markedBy: adminId } : {}),
-                  ...(note ? { note } : {}),
-                },
-              },
-            });
-          }
-
-          events.push({
-            orderId: update.id,
-            previousStatus: ORDER_STATUS.PAID,
-            adminId,
-            markedAt: markedAtIso,
-            note,
-          });
+                  note,
+                });
+              } catch (error: any) {
+                if (!summary.fail.includes(update.id)) {
+                  summary.fail.push(update.id);
+                }
+                const message =
+                  error instanceof Error && error.message
+                    ? error.message
+                    : 'Failed to mark order as loan-settled';
+                summary.errors.push({ orderId: update.id, message });
+              }
+            }),
+          );
         }
       },
       { timeout: transactionTimeout },

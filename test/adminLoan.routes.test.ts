@@ -271,6 +271,77 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
   assert.deepEqual(loggedAction[3].ok.sort(), ['ord-paid-1', 'ord-paid-2', 'ord-settled'].sort());
 });
 
+test('markLoanOrdersSettled processes batches larger than the chunk size', async () => {
+  loggedAction = null;
+  const orderIds = ['ord-1', 'ord-2', 'ord-3', 'ord-4', 'ord-5'];
+  const fetchedOrders = orderIds.map((id, index) => ({
+    id,
+    status: 'PAID',
+    pendingAmount: index % 2 === 0 ? 500 : 0,
+    settlementAmount: null,
+    settlementStatus: 'PENDING',
+    subMerchantId: 'sub-123',
+    metadata: {},
+    loanedAt: null,
+  }));
+
+  prisma.order.findMany = async () => fetchedOrders;
+
+  const updateCalls: any[] = [];
+  prisma.order.updateMany = async (args: any) => {
+    updateCalls.push(args);
+    return { count: 1 };
+  };
+
+  const upsertCalls: any[] = [];
+  prisma.loanEntry.upsert = async (args: any) => {
+    upsertCalls.push(args);
+    return {};
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-999';
+    next();
+  });
+  app.post('/admin/merchants/loan/mark-settled', (req, res) => {
+    markLoanOrdersSettled(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/mark-settled')
+    .send({ orderIds, note: 'Bulk adjustment' });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.ok.sort(), orderIds.slice().sort());
+  assert.deepEqual(res.body.fail, []);
+  assert.equal(res.body.errors.length, 0);
+
+  assert.equal(updateCalls.length, orderIds.length);
+  const seenIds = updateCalls.map((call) => call.where.id).sort();
+  assert.deepEqual(seenIds, orderIds.slice().sort());
+  for (const call of updateCalls) {
+    assert.equal(call.where.status, 'PAID');
+    assert.equal(call.data.status, 'LN_SETTLED');
+    assert.equal(call.data.pendingAmount, null);
+    assert.equal(call.data.settlementStatus, null);
+    assert.equal(call.data.loanedAt.toISOString(), '2024-01-01T00:00:00.000Z');
+    assert.ok(Array.isArray(call.data.metadata.loanSettlementHistory));
+    assert.equal(call.data.metadata.loanSettlementHistory.length, 1);
+    assert.equal(call.data.metadata.loanSettlementHistory[0].reason, 'loan_adjustment');
+    assert.equal(call.data.metadata.loanSettlementHistory[0].note, 'Bulk adjustment');
+    assert.equal(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
+  }
+
+  const upsertedOrderIds = upsertCalls.map((call) => call.where.orderId).sort();
+  assert.deepEqual(upsertedOrderIds, ['ord-1', 'ord-3', 'ord-5']);
+  for (const call of upsertCalls) {
+    assert.equal(call.create.metadata.note, 'Bulk adjustment');
+    assert.equal(call.create.metadata.reason, 'loan_adjustment');
+  }
+});
+
 test('markLoanOrdersSettled handles invalid input gracefully', async () => {
   prisma.order.findMany = async () => [];
   prisma.order.updateMany = async () => ({ count: 0 });
