@@ -1,288 +1,658 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import api from '@/lib/api'
-import { useRequireAuth } from '@/hooks/useAuth'
-import TransactionsTable from '@/components/dashboard/TransactionsTable'
-import { Tx } from '@/types/dashboard'
-import { AlertCircle, CheckCircle, ClipboardCopy } from 'lucide-react'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
-import { hourRange } from '@/utils/timeRange'
+import { AlertTriangle, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+
+import api from '@/lib/api'
+import { useRequireAuth } from '@/hooks/useAuth'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
 
+const WIB = 'Asia/Jakarta'
+
+function parseJwt(token: string) {
+  try {
+    return JSON.parse(atob(token.split('.')[1]))
+  } catch {
+    return null
+  }
+}
+
+type SubMerchantOption = {
+  id: string
+  name?: string | null
+}
+
+type SettlementRow = {
+  id: string
+  subMerchantId: string
+  subMerchantName?: string | null
+  status: string
+  settlementTime: string
+  settlementAmount?: number | null
+  netAmount: number
+}
+
+type ReversalResponse = {
+  processed?: number
+  totalReversalAmount?: number
+  ok?: number
+  fail?: number
+  errors?: { id?: string; message?: string }[]
+}
+
+type ToastState =
+  | { type: 'success'; title: string; message: string; detail?: string }
+  | { type: 'error'; title: string; message: string; detail?: string }
+  | { type: 'warning'; title: string; message: string; detail?: string }
+  | null
+
+const DATEPICKER_POPPER = {
+  strategy: 'fixed' as const,
+}
+
+function formatCurrency(value: number) {
+  return value.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })
+}
+
+function toWibStart(date: Date) {
+  return dayjs(date).tz(WIB, true).startOf('day')
+}
+
+function toWibEnd(date: Date) {
+  return dayjs(date).tz(WIB, true).endOf('day')
+}
+
 export default function SettlementAdjustPage() {
   useRequireAuth()
 
-  const [startDate, setStartDate] = useState<Date | null>(null)
-  const [endDate, setEndDate] = useState<Date | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
-  const [txs, setTxs] = useState<Tx[]>([])
-  const [loadingTx, setLoadingTx] = useState(false)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [perPage, setPerPage] = useState(10)
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+    const payload = parseJwt(token)
+    if (!payload?.role) return
+    const role = String(payload.role).toUpperCase()
+    setIsAdmin(role === 'ADMIN' || role === 'SUPER_ADMIN')
+  }, [])
+
+  const defaultRange: [Date | null, Date | null] = useMemo(() => {
+    const end = new Date()
+    end.setDate(end.getDate() - 7)
+    const start = new Date()
+    start.setDate(start.getDate() - 30)
+    return [start, end]
+  }, [])
+
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>(defaultRange)
+  const [selectedSubMerchant, setSelectedSubMerchant] = useState<string>('all')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  const [subMerchants, setSubMerchants] = useState<SubMerchantOption[]>([])
+  const [loadingSubs, setLoadingSubs] = useState(false)
+  const [subsError, setSubsError] = useState('')
+
+  const [rows, setRows] = useState<SettlementRow[]>([])
+  const [loadingRows, setLoadingRows] = useState(false)
+  const [rowsError, setRowsError] = useState('')
+
   const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
+  const [pageSize] = useState(20)
+  const [totalCount, setTotalCount] = useState(0)
 
-  const [newStatus, setNewStatus] = useState('SETTLED')
-  const [settlementTime, setSettlementTime] = useState<Date | null>(null)
-  const [fee, setFee] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-  const [updatedIds, setUpdatedIds] = useState<string[]>([])
-
-  const [mode, setMode] = useState<'FULL_DAY' | 'TRANSACTION_ID' | 'PER_HOUR'>('FULL_DAY')
-  const [adjustDate, setAdjustDate] = useState<Date | null>(null)
-  const [transactionIds, setTransactionIds] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
 
-  const buildParams = () => {
-    const p: any = { page, limit: perPage }
-    if (startDate) p.date_from = dayjs(startDate).tz('Asia/Jakarta', true).toDate().toISOString()
-    if (endDate) p.date_to = dayjs(endDate).tz('Asia/Jakarta', true).toDate().toISOString()
-    if (statusFilter !== 'all') p.status = statusFilter
-    if (search.trim()) p.search = search.trim()
-    return p
-  }
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const mapTx = (o: any): Tx => ({
-    id: o.id,
-    date: o.date || o.createdAt || '',
-    rrn: o.rrn || '-',
-    playerId: o.playerId || '',
-    amount: o.amount || 0,
-    feeLauncx: o.feeLauncx || 0,
-    feePg: o.feePg || o.fee3rdParty || 0,
-    netSettle: o.netSettle ?? o.settlementAmount ?? 0,
-    status: o.status || '',
-    settlementStatus: o.settlementStatus || '',
-    channel: o.channel || '',
-    paymentReceivedTime: o.paymentReceivedTime || '',
-    settlementTime: o.settlementTime || '',
-    trxExpirationTime: o.trxExpirationTime || '',
-  })
+  const [toast, setToast] = useState<ToastState>(null)
+  const [errorList, setErrorList] = useState<{ id?: string; message?: string }[]>([])
 
-  const handleDateChange = (dates: [Date | null, Date | null]) => {
-    setStartDate(dates[0])
-    setEndDate(dates[1])
-    fetchTransactions()
-  }
+  const [datePickerRange, setDatePickerRange] = useState<[Date | null, Date | null]>(defaultRange)
 
-  async function fetchTransactions() {
-    setError('')
-    setLoadingTx(true)
-    try {
-      const params = buildParams()
-      const { data } = await api.get('/admin/merchants/dashboard/transactions', { params })
-      const mapped = (data.transactions || []).map(mapTx)
-      setTotalPages(Math.max(1, Math.ceil((data.total || mapped.length) / perPage)))
-      setTxs(mapped)
-    } catch (e: any) {
-      setError(e?.response?.data?.error || 'Failed to fetch transactions')
-    } finally {
-      setLoadingTx(false)
+  useEffect(() => {
+    setDatePickerRange(dateRange)
+  }, [dateRange])
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 400)
+    return () => window.clearTimeout(id)
+  }, [searchTerm])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadSubMerchants() {
+      setLoadingSubs(true)
+      setSubsError('')
+      try {
+        const { data } = await api.get<{ subBalances?: { id: string; name?: string | null }[] }>(
+          '/admin/merchants/all/balances'
+        )
+        if (cancelled) return
+        const options = (data.subBalances ?? []).map(sub => ({ id: sub.id, name: sub.name }))
+        setSubMerchants(options)
+      } catch (err: any) {
+        if (cancelled) return
+        setSubsError(err?.response?.data?.error ?? 'Gagal memuat daftar sub-merchant')
+      } finally {
+        if (cancelled) return
+        setLoadingSubs(false)
+      }
+    }
+    loadSubMerchants()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, selectedSubMerchant, dateRange])
+
+  const fetchRows = useCallback(
+    async (targetPage: number) => {
+      const [start, end] = dateRange
+      if (!start || !end) return
+
+      setRowsError('')
+      setLoadingRows(true)
+
+      const params: Record<string, any> = {
+        status: 'SETTLED',
+        hasSettlementTime: true,
+        page: targetPage,
+        limit: pageSize,
+      }
+      if (selectedSubMerchant !== 'all') params.subMerchantId = selectedSubMerchant
+      if (debouncedSearch) params.q = debouncedSearch
+      params.from = toWibStart(start).toISOString()
+      params.to = toWibEnd(end).toISOString()
+
+      try {
+        const { data } = await api.get<any>('/api/v1/admin/orders', { params })
+        const listSource = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.orders)
+          ? data.orders
+          : Array.isArray(data?.transactions)
+          ? data.transactions
+          : []
+        const mapped: SettlementRow[] = listSource
+          .map((raw: any) => ({
+            id: raw.id ?? raw.orderId ?? raw.transactionId ?? '',
+            subMerchantId:
+              raw.subMerchantId ?? raw.sub_merchant_id ?? raw.subMerchant?.id ?? raw.partnerClientId ?? '',
+            subMerchantName:
+              raw.subMerchantName ?? raw.subMerchant?.name ?? raw.sub_merchant_name ?? raw.partnerName ?? null,
+            status: (raw.status ?? '').toString(),
+            settlementTime:
+              raw.settlementTime ?? raw.settlement_time ?? raw.settledAt ?? raw.settlement_at ?? null,
+            settlementAmount:
+              raw.settlementAmount ?? raw.settlement_amount ?? raw.netSettle ?? raw.net_settle ?? null,
+            netAmount:
+              Number(
+                raw.netAmount ??
+                  raw.net_amount ??
+                  raw.netSettle ??
+                  raw.net_settle ??
+                  raw.settlementAmount ??
+                  raw.amount ??
+                  0
+              ) || 0,
+          }))
+          .filter((row: SettlementRow) => Boolean(row.id) && Boolean(row.settlementTime))
+
+        setRows(mapped)
+        setTotalCount(
+          data?.meta?.total ?? data?.total ?? (Array.isArray(listSource) ? listSource.length : mapped.length)
+        )
+        setPage(targetPage)
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          setRowsError('Endpoint data settlement belum tersedia.')
+        } else {
+          setRowsError(err?.response?.data?.error ?? 'Gagal memuat data settlement')
+        }
+        setRows([])
+        setTotalCount(0)
+      } finally {
+        setLoadingRows(false)
+      }
+    },
+    [dateRange, debouncedSearch, pageSize, selectedSubMerchant]
+  )
+
+  useEffect(() => {
+    const [start, end] = dateRange
+    if (!start || !end) return
+    fetchRows(1)
+  }, [dateRange, debouncedSearch, selectedSubMerchant, fetchRows])
+
+  useEffect(() => {
+    setSelectedIds(prev => prev.filter(id => rows.some(row => row.id === id)))
+  }, [rows])
+
+  const selectableRows = useMemo(() => rows.map(row => row.id), [rows])
+  const allSelected = selectableRows.length > 0 && selectableRows.every(id => selectedIds.includes(id))
+
+  const selectionSummary = useMemo(() => {
+    return rows.reduce(
+      (acc, row) => {
+        if (selectedIds.includes(row.id)) {
+          acc.count += 1
+          acc.total += row.settlementAmount ?? row.netAmount ?? 0
+        }
+        return acc
+      },
+      { count: 0, total: 0 }
+    )
+  }, [rows, selectedIds])
+
+  const onToggleAll = () => {
+    if (allSelected) {
+      setSelectedIds([])
+    } else {
+      setSelectedIds(selectableRows)
     }
   }
 
-  useEffect(() => {
-    fetchTransactions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, page, perPage])
+  const onToggleOne = (id: string) => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]))
+  }
 
-  useEffect(() => {
-    if (mode === 'TRANSACTION_ID') {
-      setTransactionIds(selectedIds.join(','))
+  const onChangeRange = (dates: [Date | null, Date | null]) => {
+    const [start, end] = dates
+    setDatePickerRange(dates)
+    if (start && end) {
+      setDateRange([start, end])
     }
-  }, [mode, selectedIds])
+  }
 
-  const submit = async () => {
+  const onResetRange = () => {
+    setDateRange(defaultRange)
+    setDatePickerRange(defaultRange)
+  }
+
+  const onConfirmReverse = async () => {
+    if (!selectedIds.length) return
     setSubmitting(true)
-    setError('')
-    setMessage('')
-    setUpdatedIds([])
+    setToast(null)
+    setErrorList([])
     try {
-      const payload: any = { settlementStatus: newStatus }
-      if (mode === 'FULL_DAY') {
-        if (!adjustDate) throw new Error('Date is required')
-        const start = dayjs(adjustDate).tz('Asia/Jakarta', true).startOf('day')
-        if (!start.isValid()) throw new Error('Invalid date')
-        const end = start.add(1, 'day')
-        payload.dateFrom = start.toDate().toISOString()
-        payload.dateTo = end.toDate().toISOString()
-      } else if (mode === 'PER_HOUR') {
-        if (!adjustDate) throw new Error('Date and hour are required')
-        // Derive hourly range in Jakarta time for the selected adjustment
-        const { from, to } = hourRange(adjustDate, adjustDate.getHours())
-        payload.dateFrom = from
-        payload.dateTo = to
-      } else if (mode === 'TRANSACTION_ID') {
-        const ids = transactionIds
-          .split(',')
-          .map(id => id.trim())
-          .filter(Boolean)
-        if (!ids.length) throw new Error('Transaction IDs are required')
-        payload.transactionIds = ids
+      const payload: { orderIds: string[]; subMerchantId?: string; reason?: string } = {
+        orderIds: selectedIds,
       }
-      if (settlementTime) {
-        const st = dayjs(settlementTime).tz('Asia/Jakarta', true)
-        if (!st.isValid()) throw new Error('Invalid settlement time')
-        payload.settlementTime = st.toDate().toISOString()
+      if (selectedSubMerchant !== 'all') payload.subMerchantId = selectedSubMerchant
+      if (reason.trim()) payload.reason = reason.trim()
+
+      const { data } = await api.post<ReversalResponse>(
+        '/api/v1/admin/settlement/reverse-to-ln-settle',
+        payload
+      )
+
+      const processed = data?.processed ?? selectedIds.length
+      const ok = data?.ok ?? processed
+      const fail = data?.fail ?? 0
+      const totalReversalAmount = data?.totalReversalAmount ?? selectionSummary.total
+      const errors = Array.isArray(data?.errors) ? data.errors : []
+      setErrorList(errors)
+
+      const resultType = fail > 0 || errors.length > 0 ? 'warning' : 'success'
+      const title = fail > 0 ? 'Sebagian reversal gagal' : 'Reversal berhasil'
+      const message = `Processed ${processed} order (OK: ${ok}, Fail: ${fail}). Total reversal ${formatCurrency(
+        totalReversalAmount
+      )}`
+
+      setToast({ type: resultType, title, message })
+      setShowConfirm(false)
+      setReason('')
+      setSelectedIds([])
+      fetchRows(1)
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.response?.status >= 500) {
+        setToast({
+          type: 'error',
+          title: 'Reversal tidak tersedia',
+          message: 'Endpoint reversal belum tersedia, hubungi backend.',
+        })
+      } else {
+        setToast({
+          type: 'error',
+          title: 'Reversal gagal',
+          message: err?.response?.data?.error ?? err?.message ?? 'Gagal melakukan reversal',
+        })
       }
-      if (fee) payload.feeLauncx = Number(fee)
-      const { data } = await api.post('/admin/settlement/adjust', payload)
-      setMessage(`Updated ${data.data.updated} transactions`)
-      setUpdatedIds(data.data.ids || [])
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e.message || 'Failed to adjust settlements')
     } finally {
       setSubmitting(false)
     }
   }
 
+  const totalPages = useMemo(() => {
+    return totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1
+  }, [totalCount, pageSize])
+
+  const canReverse = isAdmin && selectionSummary.count > 0
+
   return (
-    <div className="dark min-h-screen bg-neutral-950 text-neutral-100 p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl space-y-4">
-        <header className="mb-4">
-          <h1 className="text-xl font-semibold">Settlement Adjustment</h1>
-          <p className="text-xs text-neutral-400">Update settlement status and fee for selected transactions</p>
+    <div className="min-h-screen bg-neutral-950 px-4 py-6 text-neutral-100 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Settlement Adjustment</h1>
+          <p className="text-sm text-neutral-400">
+            Cari transaksi yang sudah disettle dan lakukan reversal ke status <code>LN_SETTLE</code>.
+          </p>
         </header>
 
-        {(message || error) && (
-          <div className="space-y-2">
-            {message && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-900/40 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
-                <CheckCircle size={16} /> {message}
-              </div>
+        {toast && (
+          <div
+            className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-lg ${
+              toast.type === 'success'
+                ? 'border-emerald-900/40 bg-emerald-950/40 text-emerald-200'
+                : toast.type === 'warning'
+                ? 'border-amber-900/40 bg-amber-950/40 text-amber-200'
+                : 'border-rose-900/40 bg-rose-950/40 text-rose-200'
+            }`}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="h-5 w-5" />
+            ) : toast.type === 'warning' ? (
+              <AlertTriangle className="h-5 w-5" />
+            ) : (
+              <ShieldAlert className="h-5 w-5" />
             )}
-            {message && updatedIds.length > 0 && (
-              <div className="flex items-center gap-2 text-xs">
-                <button
-                  onClick={() => navigator.clipboard.writeText(updatedIds.join(','))}
-                  className="inline-flex items-center gap-1 underline"
-                >
-                  <ClipboardCopy size={14} /> Copy IDs
-                </button>
-                <span className="break-all">{updatedIds.join(', ')}</span>
-              </div>
-            )}
-            {error && (
-              <div className="inline-flex items-center gap-2 rounded-lg border border-rose-900/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
-                <AlertCircle size={16} /> {error}
-              </div>
-            )}
+            <div className="space-y-1">
+              <div className="font-medium">{toast.title}</div>
+              <div>{toast.message}</div>
+              {toast.detail && <div className="text-xs opacity-80">{toast.detail}</div>}
+            </div>
           </div>
         )}
 
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow-sm">
-          <TransactionsTable
-            search={search}
-            setSearch={setSearch}
-            statusFilter={statusFilter}
-            setStatusFilter={setStatusFilter}
-            loadingTx={loadingTx}
-            txs={txs}
-            perPage={perPage}
-            setPerPage={setPerPage}
-            page={page}
-            setPage={setPage}
-            totalPages={totalPages}
-            buildParams={buildParams}
-            onDateChange={handleDateChange}
-            onSelectIds={setSelectedIds}
-          />
-        </div>
+        {errorList.length > 0 && (
+          <div className="rounded-2xl border border-amber-900/40 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+            <div className="mb-2 flex items-center gap-2 font-medium">
+              <AlertTriangle className="h-4 w-4" /> Detail error reversal
+            </div>
+            <ul className="space-y-1 text-xs">
+              {errorList.map((err, idx) => (
+                <li key={`${err.id ?? idx}-${idx}`} className="flex items-center gap-2">
+                  <span className="font-mono text-amber-200">{err.id ?? '—'}</span>
+                  <span className="text-amber-100/80">{err.message ?? 'Terjadi kesalahan pada order ini'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-4 sm:p-5 shadow-sm space-y-3">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <select
-              value={mode}
-              onChange={e => setMode(e.target.value as any)}
-              className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-            >
-              <option value="FULL_DAY">FULL_DAY</option>
-              <option value="PER_HOUR">PER_HOUR</option>
-              <option value="TRANSACTION_ID">TRANSACTION_ID</option>
-            </select>
-            {mode === 'FULL_DAY' && (
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,240px)_minmax(0,1fr)_minmax(0,200px)]">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Sub-merchant</label>
+              <select
+                value={selectedSubMerchant}
+                onChange={event => setSelectedSubMerchant(event.target.value)}
+                className="h-11 rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
+              >
+                <option value="all">Semua sub-merchant</option>
+                {subMerchants.map(sub => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name ?? sub.id}
+                  </option>
+                ))}
+              </select>
+              {loadingSubs && <span className="text-[11px] text-neutral-500">Memuat sub-merchant…</span>}
+              {subsError && <span className="text-[11px] text-rose-400">{subsError}</span>}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Range settlement time</label>
               <DatePicker
-                selected={adjustDate}
-                onChange={(date: Date | null) => setAdjustDate(date)}
-                dateFormat="dd-MM-yyyy"
+                selectsRange
+                startDate={datePickerRange[0]}
+                endDate={datePickerRange[1]}
+                onChange={onChangeRange}
+                maxDate={new Date()}
+                dateFormat="dd MMM yyyy"
                 withPortal
-                popperProps={{ strategy: 'fixed' }}
+                popperProps={DATEPICKER_POPPER}
                 popperClassName="datepicker-popper"
                 calendarClassName="dp-dark"
-                className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
               />
-            )}
-            {mode === 'PER_HOUR' && (
-              <DatePicker
-                selected={adjustDate}
-                onChange={(date: Date | null) => setAdjustDate(date)}
-                showTimeSelect
-                timeIntervals={60}
-                dateFormat="dd-MM-yyyy HH:00"
-                withPortal
-                popperProps={{ strategy: 'fixed' }}
-                popperClassName="datepicker-popper"
-                calendarClassName="dp-dark"
-                className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
+              <button
+                onClick={onResetRange}
+                className="self-start text-[11px] text-neutral-400 underline hover:text-neutral-200"
+              >
+                Reset ke 7–30 hari terakhir
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label className="text-xs uppercase tracking-wide text-neutral-400">Cari Order ID</label>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={event => setSearchTerm(event.target.value)}
+                placeholder="Masukkan Order ID / kata kunci"
+                className="h-11 rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
               />
-            )}
-            {mode === 'TRANSACTION_ID' && (
-              <textarea
-                placeholder="Comma-separated IDs"
-                value={transactionIds}
-                onChange={e => setTransactionIds(e.target.value)}
-                className="h-24 rounded-xl border border-neutral-800 bg-neutral-900 p-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-              />
-            )}
+              <span className="text-[11px] text-neutral-500">Pencarian otomatis setelah berhenti mengetik.</span>
+            </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <select
-              value={newStatus}
-              onChange={e => setNewStatus(e.target.value)}
-              className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-            >
-              <option value="SETTLED">SETTLED</option>
-              <option value="WAITING">WAITING</option>
-              <option value="UNSUCCESSFUL">UNSUCCESSFUL</option>
-            </select>
-            <DatePicker
-              selected={settlementTime}
-              onChange={(date: Date | null) => setSettlementTime(date)}
-              showTimeSelect
-              dateFormat="dd-MM-yyyy HH:mm"
-              withPortal
-              popperProps={{ strategy: 'fixed' }}
-              popperClassName="datepicker-popper"
-              calendarClassName="dp-dark"
-              className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-            />
-            <input
-              type="number"
-              placeholder="Launcx Fee"
-              value={fee}
-              onChange={e => setFee(e.target.value)}
-              className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
-            />
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-sm text-neutral-400">
+              {loadingRows
+                ? 'Memuat data…'
+                : `${totalCount.toLocaleString('id-ID')} order ditemukan`}
+            </div>
+            <div className="ml-auto flex items-center gap-3 text-sm">
+              <div className="rounded-full border border-indigo-900/40 bg-indigo-950/40 px-3 py-1 text-indigo-200">
+                Dipilih: {selectionSummary.count} order
+              </div>
+              <div className="rounded-full border border-indigo-900/40 bg-indigo-950/40 px-3 py-1 text-indigo-200">
+                Total reversal: {formatCurrency(selectionSummary.total)}
+              </div>
+              <button
+                onClick={() => setShowConfirm(true)}
+                disabled={!canReverse}
+                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  canReverse
+                    ? 'bg-rose-600 text-white hover:bg-rose-500'
+                    : 'cursor-not-allowed bg-neutral-800 text-neutral-500'
+                }`}
+              >
+                Reverse to LN_SETTLE
+              </button>
+            </div>
           </div>
-          <button
-            onClick={submit}
-            disabled={submitting}
-            className="h-10 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {submitting ? 'Submitting…' : 'Submit Adjustment'}
-          </button>
+
+          {!isAdmin && (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-400">
+              Hanya admin yang dapat melakukan reversal. Hubungi administrator jika membutuhkan akses.
+            </div>
+          )}
+
+          {rowsError && (
+            <div className="rounded-xl border border-rose-900/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+              {rowsError}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-neutral-800 text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-neutral-400">
+                  <th className="whitespace-nowrap px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleAll}
+                      className="h-4 w-4 rounded border-neutral-700 bg-neutral-900 text-indigo-500"
+                      disabled={!rows.length || !isAdmin}
+                    />
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2">Order ID</th>
+                  <th className="whitespace-nowrap px-3 py-2">Sub-Merchant</th>
+                  <th className="whitespace-nowrap px-3 py-2">Status</th>
+                  <th className="whitespace-nowrap px-3 py-2">Settlement Time</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right">Settlement Amount</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right">Net Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800">
+                {loadingRows && (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-10 text-center text-neutral-400">
+                      <span className="inline-flex items-center gap-2 text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Memuat data settlement…
+                      </span>
+                    </td>
+                  </tr>
+                )}
+                {!loadingRows && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-12 text-center text-neutral-500">
+                      Tidak ada transaksi dengan settlement time pada rentang ini.
+                    </td>
+                  </tr>
+                )}
+                {!loadingRows &&
+                  rows.map(row => {
+                    const isChecked = selectedIds.includes(row.id)
+                    const settlementFormatted = row.settlementTime
+                      ? dayjs(row.settlementTime).tz(WIB).format('DD MMM YYYY HH:mm')
+                      : '—'
+                    return (
+                      <tr key={row.id} className="transition hover:bg-neutral-900/60">
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => onToggleOne(row.id)}
+                            className="h-4 w-4 rounded border-neutral-700 bg-neutral-900 text-indigo-500"
+                            disabled={!isAdmin}
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-mono text-sm text-indigo-200">{row.id}</td>
+                        <td className="px-3 py-2 text-sm text-neutral-200">
+                          {row.subMerchantName ?? row.subMerchantId}
+                        </td>
+                        <td className="px-3 py-2 text-xs uppercase">
+                          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-900/40 bg-emerald-950/40 px-3 py-1 text-emerald-200">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                            {row.status || 'SETTLED'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-sm text-neutral-200">{settlementFormatted}</td>
+                        <td className="px-3 py-2 text-right text-sm text-neutral-100">
+                          {formatCurrency(row.settlementAmount ?? row.netAmount ?? 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm text-neutral-400">
+                          {formatCurrency(row.netAmount ?? 0)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-neutral-500">
+            <div>
+              Halaman {page} dari {totalPages}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fetchRows(Math.max(1, page - 1))}
+                disabled={page <= 1 || loadingRows}
+                className="rounded-lg border border-neutral-800 px-3 py-1 text-neutral-300 transition hover:border-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Sebelumnya
+              </button>
+              <button
+                onClick={() => fetchRows(Math.min(totalPages, page + 1))}
+                disabled={page >= totalPages || loadingRows}
+                className="rounded-lg border border-neutral-800 px-3 py-1 text-neutral-300 transition hover:border-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Selanjutnya
+              </button>
+            </div>
+          </div>
         </section>
       </div>
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
+          <div className="w-full max-w-lg rounded-2xl border border-neutral-800 bg-neutral-950 p-6 shadow-2xl">
+            <div className="mb-4 space-y-1">
+              <h2 className="text-lg font-semibold text-white">Konfirmasi reversal</h2>
+              <p className="text-sm text-neutral-400">
+                Reversal akan mengubah status menjadi <code>LN_SETTLE</code>, mengosongkan settlement time & amount,
+                serta mengurangi Available Withdraw client.
+              </p>
+            </div>
+
+            <div className="space-y-3 text-sm text-neutral-200">
+              <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2">
+                <span>Order terpilih</span>
+                <span className="font-semibold text-white">{selectionSummary.count} order</span>
+              </div>
+              <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2">
+                <span>Total reversal amount</span>
+                <span className="font-semibold text-white">{formatCurrency(selectionSummary.total)}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs uppercase tracking-wide text-neutral-400">Reason (opsional)</label>
+                <textarea
+                  value={reason}
+                  onChange={event => setReason(event.target.value)}
+                  rows={4}
+                  placeholder="Catatan tambahan untuk backend"
+                  className="rounded-xl border border-neutral-800 bg-neutral-950 p-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
+                />
+              </div>
+              <div className="rounded-xl border border-amber-900/40 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+                Reversal akan mengurangi Available Withdraw client.
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => {
+                  if (!submitting) {
+                    setShowConfirm(false)
+                  }
+                }}
+                className="inline-flex items-center justify-center rounded-xl border border-neutral-700 px-4 py-2 text-sm font-medium text-neutral-200 transition hover:border-neutral-600"
+                disabled={submitting}
+              >
+                Batal
+              </button>
+              <button
+                onClick={onConfirmReverse}
+                disabled={submitting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {submitting ? 'Memproses…' : 'Konfirmasi Reversal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx global>{`
         .datepicker-popper.react-datepicker-popper { z-index: 2147483647 !important; }
         .dp-dark.react-datepicker {
@@ -306,4 +676,3 @@ export default function SettlementAdjustPage() {
     </div>
   )
 }
-
