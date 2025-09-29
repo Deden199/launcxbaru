@@ -46,17 +46,8 @@ const {
   settleLoanOrders,
 } = require('../src/controller/admin/loan.controller');
 
-test('getLoanTransactions filters by WIB range and formats response', async () => {
+test('getLoanTransactions filters PAID orders by default', async () => {
   const orders = [
-    {
-      id: 'ord-1',
-      amount: 500,
-      pendingAmount: 0,
-      status: 'LN_SETTLE',
-      createdAt: new Date('2024-05-02T03:00:00.000Z'),
-      loanedAt: new Date('2024-05-02T04:00:00.000Z'),
-      loanEntry: { amount: 500, createdAt: new Date('2024-05-02T04:00:00.000Z') },
-    },
     {
       id: 'ord-2',
       amount: 250,
@@ -95,7 +86,7 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
   assert.equal(res.status, 200);
   assert.ok(receivedFindManyArgs);
   assert.equal(receivedFindManyArgs.where.subMerchantId, 'sub-1');
-  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID', 'LN_SETTLE'] });
+  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID'] });
   assert.equal(
     receivedFindManyArgs.where.createdAt.gte.toISOString(),
     '2024-04-30T17:00:00.000Z',
@@ -109,16 +100,6 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
   assert.deepEqual(receivedCountArgs, { where: receivedFindManyArgs.where });
   assert.deepEqual(res.body, {
     data: [
-      {
-        id: 'ord-1',
-        amount: 500,
-        pendingAmount: 0,
-        status: 'LN_SETTLE',
-        createdAt: '2024-05-02T03:00:00.000Z',
-        loanedAt: '2024-05-02T04:00:00.000Z',
-        loanAmount: 500,
-        loanCreatedAt: '2024-05-02T04:00:00.000Z',
-      },
       {
         id: 'ord-2',
         amount: 250,
@@ -135,6 +116,81 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
       page: 1,
       pageSize: 50,
     },
+  });
+});
+
+test('getLoanTransactions can include settled orders when requested', async () => {
+  const orders = [
+    {
+      id: 'ord-1',
+      amount: 500,
+      pendingAmount: 0,
+      status: 'LN_SETTLE',
+      createdAt: new Date('2024-05-02T03:00:00.000Z'),
+      loanedAt: new Date('2024-05-02T04:00:00.000Z'),
+      loanEntry: { amount: 500, createdAt: new Date('2024-05-02T04:00:00.000Z') },
+    },
+    {
+      id: 'ord-2',
+      amount: 250,
+      pendingAmount: 250,
+      status: 'PAID',
+      createdAt: new Date('2024-05-02T05:00:00.000Z'),
+      loanedAt: null,
+      loanEntry: null,
+    },
+  ];
+
+  prisma.order.findMany = async (args: any) => {
+    assert.deepEqual(args.where.status, { in: ['PAID', 'LN_SETTLE'] });
+    return orders;
+  };
+  prisma.order.count = async (args: any) => {
+    assert.deepEqual(args.where.status, { in: ['PAID', 'LN_SETTLE'] });
+    return 2;
+  };
+
+  const app = express();
+  app.get('/admin/merchants/loan/transactions', (req, res) =>
+    getLoanTransactions(req as any, res),
+  );
+
+  const res = await request(app)
+    .get('/admin/merchants/loan/transactions')
+    .query({
+      subMerchantId: 'sub-1',
+      startDate: '2024-05-01',
+      endDate: '2024-05-03',
+      includeSettled: true,
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data, [
+    {
+      id: 'ord-1',
+      amount: 500,
+      pendingAmount: 0,
+      status: 'LN_SETTLE',
+      createdAt: '2024-05-02T03:00:00.000Z',
+      loanedAt: '2024-05-02T04:00:00.000Z',
+      loanAmount: 500,
+      loanCreatedAt: '2024-05-02T04:00:00.000Z',
+    },
+    {
+      id: 'ord-2',
+      amount: 250,
+      pendingAmount: 250,
+      status: 'PAID',
+      createdAt: '2024-05-02T05:00:00.000Z',
+      loanedAt: null,
+      loanAmount: null,
+      loanCreatedAt: null,
+    },
+  ]);
+  assert.deepEqual(res.body.meta, {
+    total: 2,
+    page: 1,
+    pageSize: 50,
   });
 });
 

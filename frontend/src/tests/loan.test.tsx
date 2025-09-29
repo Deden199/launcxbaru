@@ -174,6 +174,7 @@ test('fetches transactions with WIB date parameters', async () => {
   assert.equal(capturedParams.endDate, toWibIso(end))
   assert.equal(capturedParams.page, 1)
   assert.equal(capturedParams.pageSize, DEFAULT_LOAN_PAGE_SIZE)
+  assert.equal(capturedParams.includeSettled, false)
 })
 
 test('submits selected transactions to settle API', async () => {
@@ -208,19 +209,8 @@ test('submits selected transactions to settle API', async () => {
       }
       return {
         data: {
-          data: [
-            {
-              id: 'order-1',
-              amount: 10000,
-              pendingAmount: 0,
-              status: 'LN_SETTLE',
-              createdAt: new Date('2024-01-02T03:00:00Z').toISOString(),
-              loanedAt: new Date('2024-01-03T02:00:00Z').toISOString(),
-              loanAmount: 5000,
-              loanCreatedAt: new Date('2024-01-03T02:00:00Z').toISOString(),
-            },
-          ],
-          meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+          data: [],
+          meta: { total: 0, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
         },
       }
     }
@@ -292,18 +282,8 @@ test('bulk settle submits every selectable order id', async () => {
               loanAmount: null,
               loanCreatedAt: null,
             },
-            {
-              id: 'order-3',
-              amount: 15000,
-              pendingAmount: 0,
-              status: 'LN_SETTLE',
-              createdAt: new Date('2024-01-02T05:00:00Z').toISOString(),
-              loanedAt: new Date('2024-01-02T06:00:00Z').toISOString(),
-              loanAmount: 15000,
-              loanCreatedAt: new Date('2024-01-02T06:00:00Z').toISOString(),
-            },
           ],
-          meta: { total: 3, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+          meta: { total: 2, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
         },
       }
     }
@@ -379,7 +359,7 @@ test('allows loading additional loan transaction pages', async () => {
               id: 'order-2',
               amount: 20000,
               pendingAmount: 0,
-              status: 'LN_SETTLE',
+              status: 'PAID',
               createdAt: new Date('2024-01-02T05:00:00Z').toISOString(),
               loanedAt: new Date('2024-01-02T06:00:00Z').toISOString(),
               loanAmount: 20000,
