@@ -458,7 +458,7 @@ export default function DashboardPage() {
       setTotalPages(Math.max(1, Math.ceil(data.total / perPage)))
       setTotalTrans(data.totalPaid)
 
-      const VALID_STATUSES: Tx['status'][] = ['SUCCESS', 'PENDING', 'EXPIRED', 'DONE', 'PAID']
+      const VALID_STATUSES: Tx['status'][] = ['SUCCESS', 'PENDING', 'EXPIRED', 'DONE', 'PAID', 'LN_SETTLE']
 
       const mapped: Tx[] = data.transactions.map(o => {
         const raw = o.status ?? ''

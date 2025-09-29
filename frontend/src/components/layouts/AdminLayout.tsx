@@ -17,6 +17,7 @@ import {
   Wrench,
   Wallet,
   Globe,
+  Coins,
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 
@@ -33,6 +34,7 @@ const navItems = [
   { label: '2FA Setup',         href: '/admin/2fa',        Icon: ShieldCheck },
   { label: 'Settings',       href: '/admin/settings',   Icon: Settings },
   { label: 'Settlement',        href: '/admin/settlement', Icon: Banknote },
+  { label: 'Loan',              href: '/admin/loan',       Icon: Coins },
   { label: 'Settlement Adjust', href: '/admin/settlement-adjust', Icon: Wrench },
   { label: 'Logs',              href: '/admin/logs',       Icon: FileText },
   { label: 'IP Whitelist',      href: '/super-admin/ip-whitelist', Icon: Globe },
