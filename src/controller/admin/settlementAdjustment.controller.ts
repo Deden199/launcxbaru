@@ -66,7 +66,16 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
   }
 
   const pageNum = Math.max(1, parseInt(String(page), 10) || 1)
-  const pageSize = Math.min(100, Math.max(1, parseInt(String(size), 10) || 25))
+  const requestedPageSize = parseInt(String(size), 10)
+  const pageSize = Number.isFinite(requestedPageSize) && requestedPageSize > 0 ? requestedPageSize : 25
+
+  if (pageSize > 1500) {
+    console.warn(
+      '[getEligibleSettlements] Requested page size exceeds limit',
+      { requestedSize: pageSize, subMerchantId }
+    )
+    return res.status(400).json({ error: 'size must be 1500 or less' })
+  }
 
   const sortField = typeof sort === 'string' ? sort : '-settlementTime'
   const sortKey = sortField.startsWith('-') ? sortField.slice(1) : sortField
