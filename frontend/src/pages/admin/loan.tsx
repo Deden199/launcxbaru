@@ -104,7 +104,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
   const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [effectivePageSize, setEffectivePageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
-  const [totalCount, setTotalCount] = useState(0)
+  const [rawTotalCount, setRawTotalCount] = useState(0)
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
@@ -141,27 +141,32 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     }
   }, [apiClient])
 
+  const displayedTransactions = useMemo(
+    () => transactions.filter(tx => tx.status === 'PAID'),
+    [transactions]
+  )
+
   useEffect(() => {
     setSelectedOrders(prev =>
-      prev.filter(id => transactions.some(tx => tx.id === id && tx.status === 'PAID'))
+      prev.filter(id => displayedTransactions.some(tx => tx.id === id))
     )
-  }, [transactions])
+  }, [displayedTransactions])
 
   const selectableIds = useMemo(
-    () => transactions.filter(tx => tx.status === 'PAID').map(tx => tx.id),
-    [transactions]
+    () => displayedTransactions.map(tx => tx.id),
+    [displayedTransactions]
   )
 
   const totalPending = useMemo(
-    () => transactions.reduce((sum, tx) => sum + (tx.pendingAmount ?? 0), 0),
-    [transactions]
+    () => displayedTransactions.reduce((sum, tx) => sum + (tx.pendingAmount ?? 0), 0),
+    [displayedTransactions]
   )
   const totalLoanAmount = useMemo(
-    () => transactions.reduce((sum, tx) => sum + (tx.loanAmount ?? 0), 0),
-    [transactions]
+    () => displayedTransactions.reduce((sum, tx) => sum + (tx.loanAmount ?? 0), 0),
+    [displayedTransactions]
   )
   const selectedSummary = useMemo(() => {
-    return transactions.reduce(
+    return displayedTransactions.reduce(
       (acc, tx) => {
         if (selectedOrders.includes(tx.id)) {
           acc.count += 1
@@ -172,7 +177,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       },
       { count: 0, pending: 0, loan: 0 }
     )
-  }, [selectedOrders, transactions])
+  }, [selectedOrders, displayedTransactions])
 
   const fetchTransactions = async (targetPage: number, append: boolean) => {
     if (!selectedSub || !startDate || !endDate) return
@@ -212,7 +217,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       }))
 
       setTransactions(prev => (append ? [...prev, ...mapped] : mapped))
-      setTotalCount(prev => data.meta?.total ?? (append ? prev : mapped.length))
+      setRawTotalCount(prev => data.meta?.total ?? (append ? prev : mapped.length))
       const resolvedPageSize = data.meta?.pageSize ?? requestedPageSize
       setEffectivePageSize(resolvedPageSize)
       setRequestedPageSize(resolvedPageSize)
@@ -245,7 +250,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       return
     }
 
-    setTotalCount(0)
+    setRawTotalCount(0)
     setLastLoadedPage(0)
     await fetchTransactions(1, false)
   }
@@ -253,7 +258,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const loadMoreTransactions = async () => {
     if (loadingMore || loadingTx) return
     if (!selectedSub || !startDate || !endDate) return
-    if (transactions.length >= totalCount) return
+    if (transactions.length >= rawTotalCount) return
 
     setTxError('')
     await fetchTransactions(lastLoadedPage + 1, true)
@@ -339,7 +344,12 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     void loadTransactions()
   }
 
-  const hasMore = transactions.length < totalCount
+  const hiddenCount = transactions.length - displayedTransactions.length
+  const displayedTotalCount = Math.max(
+    displayedTransactions.length,
+    rawTotalCount - hiddenCount
+  )
+  const hasMore = transactions.length < rawTotalCount
 
   return (
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100 p-4 sm:p-6">
@@ -414,7 +424,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     setRequestedPageSize(value)
                     setEffectivePageSize(value)
                     setTransactions([])
-                    setTotalCount(0)
+                    setRawTotalCount(0)
                     setLastLoadedPage(0)
                     setSelectedOrders([])
                   }}
@@ -471,8 +481,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
             <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
               <span>
-                Menampilkan <strong>{transactions.length}</strong> dari{' '}
-                <strong>{totalCount}</strong> transaksi
+                Menampilkan <strong>{displayedTransactions.length}</strong> dari{' '}
+                <strong>{displayedTotalCount}</strong> transaksi
               </span>
               <span>
                 Ukuran batch efektif:{' '}
@@ -527,14 +537,14 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                         </div>
                       </td>
                     </tr>
-                  ) : transactions.length === 0 ? (
+                  ) : displayedTransactions.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-3 py-6 text-center text-sm text-neutral-400">
                         Tidak ada data untuk filter saat ini.
                       </td>
                     </tr>
                   ) : (
-                    transactions.map(tx => {
+                    displayedTransactions.map(tx => {
                       const disabled = tx.status !== 'PAID'
                       const checked = selectedOrders.includes(tx.id)
                       return (

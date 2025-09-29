@@ -415,3 +415,58 @@ test('allows loading additional loan transaction pages', async () => {
     assert.equal(queryByRole('button', { name: 'Muat Lebih' }), null)
   })
 })
+
+test('does not render loan-settled transactions in the table', async () => {
+  const start = new Date('2024-01-02T00:00:00Z')
+  const end = new Date('2024-01-03T00:00:00Z')
+
+  apiMock.setGetImplementation(async (url: string, config?: any) => {
+    if (url === BALANCES_PATH) {
+      return {
+        data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] },
+      }
+    }
+    if (url === LOAN_TRANSACTIONS_PATH) {
+      return {
+        data: {
+          data: [
+            {
+              id: 'order-1',
+              amount: 10000,
+              pendingAmount: 5000,
+              status: 'PAID',
+              createdAt: new Date('2024-01-02T03:00:00Z').toISOString(),
+              loanedAt: null,
+              loanAmount: null,
+              loanCreatedAt: null,
+            },
+            {
+              id: 'order-2',
+              amount: 20000,
+              pendingAmount: 0,
+              status: 'LN_SETTLED',
+              createdAt: new Date('2024-01-02T04:00:00Z').toISOString(),
+              loanedAt: null,
+              loanAmount: null,
+              loanCreatedAt: null,
+            },
+          ],
+          meta: { total: 2, page: config?.params?.page ?? 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  const { findByLabelText, getByRole, findByText, queryByText } = render(
+    <LoanPageView {...defaultProps} initialRange={[start, end]} />
+  )
+
+  const select = (await findByLabelText('Sub-merchant')) as HTMLSelectElement
+  fireEvent.change(select, { target: { value: 'sub-1' } })
+
+  fireEvent.click(getByRole('button', { name: 'Muat Transaksi' }))
+
+  await findByText('order-1')
+  assert.equal(queryByText('order-2'), null)
+})
