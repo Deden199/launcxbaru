@@ -7,7 +7,12 @@ import { AuthRequest } from '../../middleware/auth';
 import { logAdminAction } from '../../util/adminLog';
 import { wibTimestamp } from '../../util/time';
 
-const MAX_PAGE_SIZE = 100;
+const MAX_CONFIGURED_PAGE_SIZE = 1500;
+const configuredMaxPageSize = Number(process.env.LOAN_MAX_PAGE_SIZE);
+const MAX_PAGE_SIZE =
+  Number.isFinite(configuredMaxPageSize) && configuredMaxPageSize >= 1
+    ? Math.min(configuredMaxPageSize, MAX_CONFIGURED_PAGE_SIZE)
+    : MAX_CONFIGURED_PAGE_SIZE;
 const DEFAULT_PAGE_SIZE = 50;
 
 const loanQuerySchema = z.object({

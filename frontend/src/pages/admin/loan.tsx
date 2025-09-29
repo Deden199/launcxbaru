@@ -20,7 +20,9 @@ if (typeof window !== 'undefined') {
 
 export const toWibIso = (date: Date) => dayjs(date).tz('Asia/Jakarta', true).toDate().toISOString()
 
-export const DEFAULT_LOAN_PAGE_SIZE = 20
+export const MAX_LOAN_PAGE_SIZE = 1500
+export const DEFAULT_LOAN_PAGE_SIZE = MAX_LOAN_PAGE_SIZE
+const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000, MAX_LOAN_PAGE_SIZE]
 
 type LoanTransaction = {
   id: string
@@ -93,11 +95,19 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
 
-  const [pageSize, setPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
+  const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
+  const [effectivePageSize, setEffectivePageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [totalCount, setTotalCount] = useState(0)
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
+
+  const pageSizeOptions = useMemo(() => {
+    const unique = new Set<number>(PAGE_SIZE_OPTIONS)
+    unique.add(requestedPageSize)
+    unique.add(effectivePageSize)
+    return Array.from(unique).sort((a, b) => a - b)
+  }, [effectivePageSize, requestedPageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -165,7 +175,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       startDate: toWibIso(startDate),
       endDate: toWibIso(endDate),
       page: targetPage,
-      pageSize,
+      pageSize: requestedPageSize,
     }
 
     if (append) {
@@ -195,7 +205,9 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
       setTransactions(prev => (append ? [...prev, ...mapped] : mapped))
       setTotalCount(prev => data.meta?.total ?? (append ? prev : mapped.length))
-      setPageSize(prev => data.meta?.pageSize ?? prev)
+      const resolvedPageSize = data.meta?.pageSize ?? requestedPageSize
+      setEffectivePageSize(resolvedPageSize)
+      setRequestedPageSize(resolvedPageSize)
       setLastLoadedPage(data.meta?.page ?? targetPage)
 
       if (!append) {
@@ -309,7 +321,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow-sm">
           <div className="space-y-4 p-4 sm:p-5">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1fr)]">
               <div className="flex flex-col gap-1">
                 <label htmlFor="loan-sub-merchant" className="text-sm font-medium">
                   Sub-merchant
@@ -350,6 +362,33 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                   placeholderText="Pilih rentang tanggal"
                   className="h-10 w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm text-neutral-100 placeholder:text-neutral-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 outline-none"
                 />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label htmlFor="loan-page-size" className="text-sm font-medium">
+                  Jumlah per permintaan
+                </label>
+                <select
+                  id="loan-page-size"
+                  value={requestedPageSize}
+                  onChange={event => {
+                    const value = Number(event.target.value)
+                    setRequestedPageSize(value)
+                    setEffectivePageSize(value)
+                    setTransactions([])
+                    setTotalCount(0)
+                    setLastLoadedPage(0)
+                    setSelectedOrders([])
+                  }}
+                  disabled={loadingTx || loadingMore || submitting}
+                  className="h-10 rounded-xl border border-neutral-800 bg-neutral-900 px-3 text-sm text-neutral-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 disabled:opacity-60"
+                >
+                  {pageSizeOptions.map(option => (
+                    <option key={option} value={option}>
+                      {option.toLocaleString('id-ID')}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex flex-col justify-end gap-2 sm:flex-row sm:items-end">
@@ -398,13 +437,18 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                 <strong>{totalCount}</strong> transaksi
               </span>
               <span>
+                Ukuran batch efektif:{' '}
+                <strong>{effectivePageSize.toLocaleString('id-ID')}</strong>
+              </span>
+              <span>
                 Pending amount: <strong>{formatCurrency(totalPending)}</strong>
               </span>
               <span>
                 Loan amount: <strong>{formatCurrency(totalLoanAmount)}</strong>
               </span>
-              <span>
-                Dipilih: <strong>{selectedSummary.count}</strong>
+              <span className="inline-flex items-center gap-2 rounded-full bg-indigo-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-200">
+                <span>Dipilih</span>
+                <span>{selectedSummary.count.toLocaleString('id-ID')}</span>
               </span>
               <span>
                 Pending terpilih: <strong>{formatCurrency(selectedSummary.pending)}</strong>
@@ -512,7 +556,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
-                Settle Loan
+                Settle Loan ({selectedOrders.length.toLocaleString('id-ID')})
               </button>
             </div>
           </div>

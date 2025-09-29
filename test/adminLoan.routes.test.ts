@@ -134,8 +134,8 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
 
 test('getLoanTransactions enforces maximum page size', async () => {
   prisma.order.findMany = async (args: any) => {
-    assert.equal(args.take, 100);
-    assert.equal(args.skip, 100);
+    assert.equal(args.take, 1500);
+    assert.equal(args.skip, 1500);
     return [];
   };
   prisma.order.count = async (args: any) => {
@@ -155,14 +155,14 @@ test('getLoanTransactions enforces maximum page size', async () => {
       startDate: '2024-05-01',
       endDate: '2024-05-03',
       page: 2,
-      pageSize: 500,
+      pageSize: 5000,
     });
 
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.meta, {
     total: 0,
     page: 2,
-    pageSize: 100,
+    pageSize: 1500,
   });
 });
 
