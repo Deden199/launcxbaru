@@ -15,7 +15,8 @@ const prisma: any = {
     upsert: async (_args: any) => ({}),
   },
   $transaction: async (cb: any, options?: any) => {
-    prisma.__lastTransactionOptions = options;
+    prisma.__transactionOptions.push(options);
+    prisma.__transactionCallCount += 1;
     return cb({
       loanEntry: prisma.loanEntry,
       order: {
@@ -23,7 +24,13 @@ const prisma: any = {
       },
     });
   },
-  __lastTransactionOptions: undefined,
+  __transactionOptions: [] as any[],
+  __transactionCallCount: 0,
+};
+
+const resetTransactionTracking = () => {
+  prisma.__transactionOptions = [];
+  prisma.__transactionCallCount = 0;
 };
 
 process.env.LOAN_CREATE_MANY_CHUNK_SIZE = '2';
@@ -174,6 +181,7 @@ test('getLoanTransactions enforces maximum page size', async () => {
 
 test('markLoanOrdersSettled updates PAID orders and returns summary', async () => {
   loggedAction = null;
+  resetTransactionTracking();
   const orderIds = ['ord-paid-1', 'ord-settled', 'ord-failed', 'ord-missing', 'ord-paid-2'];
   const fetchedOrders = [
     {
@@ -251,6 +259,10 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
   assert.deepEqual(res.body.fail.sort(), ['ord-failed', 'ord-missing'].sort());
   assert.equal(res.body.errors.length, 2);
 
+  assert.equal(prisma.__transactionCallCount, 1);
+  assert.equal(prisma.__transactionOptions.length, 1);
+  assert.deepEqual(prisma.__transactionOptions[0], { timeout: 20000 });
+
   assert.equal(updateCalls.length, 2);
   assert.deepEqual(updateCalls.map(call => call.where.id).sort(), ['ord-paid-1', 'ord-paid-2'].sort());
   for (const call of updateCalls) {
@@ -273,6 +285,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
 
 test('markLoanOrdersSettled processes batches larger than the chunk size', async () => {
   loggedAction = null;
+  resetTransactionTracking();
   const orderIds = ['ord-1', 'ord-2', 'ord-3', 'ord-4', 'ord-5'];
   const fetchedOrders = orderIds.map((id, index) => ({
     id,
@@ -318,6 +331,16 @@ test('markLoanOrdersSettled processes batches larger than the chunk size', async
   assert.deepEqual(res.body.fail, []);
   assert.equal(res.body.errors.length, 0);
 
+  const chunkSize = Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE ?? '1');
+  assert.equal(
+    prisma.__transactionCallCount,
+    Math.ceil(orderIds.length / Math.max(1, chunkSize)),
+  );
+  assert.equal(prisma.__transactionOptions.length, prisma.__transactionCallCount);
+  for (const opt of prisma.__transactionOptions) {
+    assert.deepEqual(opt, { timeout: 20000 });
+  }
+
   assert.equal(updateCalls.length, orderIds.length);
   const seenIds = updateCalls.map((call) => call.where.id).sort();
   assert.deepEqual(seenIds, orderIds.slice().sort());
@@ -346,6 +369,7 @@ test('markLoanOrdersSettled handles invalid input gracefully', async () => {
   prisma.order.findMany = async () => [];
   prisma.order.updateMany = async () => ({ count: 0 });
   prisma.loanEntry.upsert = async () => ({})
+  resetTransactionTracking();
 
   const app = express();
   app.use(express.json());
@@ -365,5 +389,6 @@ test('markLoanOrdersSettled handles invalid input gracefully', async () => {
   assert.deepEqual(res.body.ok, []);
   assert.deepEqual(res.body.fail, ['missing-1']);
   assert.equal(res.body.errors[0].orderId, 'missing-1');
+  assert.equal(prisma.__transactionCallCount, 0);
 });
 
