@@ -255,92 +255,90 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
       Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
 
     const events: LoanSettlementEventPayload[] = [];
+    const chunkSize = Math.max(1, LOAN_CREATE_MANY_CHUNK_SIZE);
 
-    await prisma.$transaction(
-      async (tx) => {
-        const chunkSize = Math.max(1, LOAN_CREATE_MANY_CHUNK_SIZE);
-        for (let start = 0; start < updates.length; start += chunkSize) {
-          const chunk = updates.slice(start, start + chunkSize);
+    for (let start = 0; start < updates.length; start += chunkSize) {
+      const chunk = updates.slice(start, start + chunkSize);
 
-          await Promise.all(
-            chunk.map(async (update) => {
-              try {
-                const result = await tx.order.updateMany({
-                  where: { id: update.id, status: ORDER_STATUS.PAID },
-                  data: {
-                    status: ORDER_STATUS.LN_SETTLED,
-                    pendingAmount: null,
-                    settlementStatus: null,
-                    loanedAt: now,
-                    metadata: update.metadata,
-                  },
-                });
+      await prisma.$transaction(
+        async (tx) => {
+          for (const update of chunk) {
+            try {
+              const result = await tx.order.updateMany({
+                where: { id: update.id, status: ORDER_STATUS.PAID },
+                data: {
+                  status: ORDER_STATUS.LN_SETTLED,
+                  pendingAmount: null,
+                  settlementStatus: null,
+                  loanedAt: now,
+                  metadata: update.metadata,
+                },
+              });
 
-                if (result.count === 0) {
-                  if (!summary.fail.includes(update.id)) {
-                    summary.fail.push(update.id);
-                  }
-                  summary.errors.push({
-                    orderId: update.id,
-                    message: 'Order status changed before loan settlement could be applied',
-                  });
-                  return;
-                }
-
-                if (!summary.ok.includes(update.id)) {
-                  summary.ok.push(update.id);
-                }
-
-                const amount = Number(update.pendingAmount ?? 0);
-                if (amount > 0 && update.subMerchantId) {
-                  await tx.loanEntry.upsert({
-                    where: { orderId: update.id },
-                    create: {
-                      orderId: update.id,
-                      subMerchantId: update.subMerchantId,
-                      amount,
-                      metadata: {
-                        reason: LOAN_SETTLED_METADATA_REASON,
-                        markedAt: markedAtIso,
-                        ...(adminId ? { markedBy: adminId } : {}),
-                        ...(note ? { note } : {}),
-                      },
-                    },
-                    update: {
-                      amount,
-                      metadata: {
-                        reason: LOAN_SETTLED_METADATA_REASON,
-                        markedAt: markedAtIso,
-                        ...(adminId ? { markedBy: adminId } : {}),
-                        ...(note ? { note } : {}),
-                      },
-                    },
-                  });
-                }
-
-                events.push({
-                  orderId: update.id,
-                  previousStatus: ORDER_STATUS.PAID,
-                  adminId,
-                  markedAt: markedAtIso,
-                  note,
-                });
-              } catch (error: any) {
+              if (result.count === 0) {
                 if (!summary.fail.includes(update.id)) {
                   summary.fail.push(update.id);
                 }
-                const message =
-                  error instanceof Error && error.message
-                    ? error.message
-                    : 'Failed to mark order as loan-settled';
-                summary.errors.push({ orderId: update.id, message });
+                summary.errors.push({
+                  orderId: update.id,
+                  message: 'Order status changed before loan settlement could be applied',
+                });
+                continue;
               }
-            }),
-          );
-        }
-      },
-      { timeout: transactionTimeout },
-    );
+
+              if (!summary.ok.includes(update.id)) {
+                summary.ok.push(update.id);
+              }
+
+              const amount = Number(update.pendingAmount ?? 0);
+              if (amount > 0 && update.subMerchantId) {
+                await tx.loanEntry.upsert({
+                  where: { orderId: update.id },
+                  create: {
+                    orderId: update.id,
+                    subMerchantId: update.subMerchantId,
+                    amount,
+                    metadata: {
+                      reason: LOAN_SETTLED_METADATA_REASON,
+                      markedAt: markedAtIso,
+                      ...(adminId ? { markedBy: adminId } : {}),
+                      ...(note ? { note } : {}),
+                    },
+                  },
+                  update: {
+                    amount,
+                    metadata: {
+                      reason: LOAN_SETTLED_METADATA_REASON,
+                      markedAt: markedAtIso,
+                      ...(adminId ? { markedBy: adminId } : {}),
+                      ...(note ? { note } : {}),
+                    },
+                  },
+                });
+              }
+
+              events.push({
+                orderId: update.id,
+                previousStatus: ORDER_STATUS.PAID,
+                adminId,
+                markedAt: markedAtIso,
+                note,
+              });
+            } catch (error: any) {
+              if (!summary.fail.includes(update.id)) {
+                summary.fail.push(update.id);
+              }
+              const message =
+                error instanceof Error && error.message
+                  ? error.message
+                  : 'Failed to mark order as loan-settled';
+              summary.errors.push({ orderId: update.id, message });
+            }
+          }
+        },
+        { timeout: transactionTimeout },
+      );
+    }
 
     if (adminId) {
       await logAdminAction(adminId, 'loanMarkSettled', undefined, {
