@@ -366,6 +366,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       'DONE',
       'SETTLED',
       'PAID',
+      'LN_SETTLE',
       'PENDING',
       'EXPIRED'
     ] as const
@@ -419,7 +420,7 @@ export async function getDashboardTransactions(req: Request, res: Response) {
       }),
       prisma.order.aggregate({
         _sum: { amount: true },
-        where: { ...whereOrders, status: 'PAID' }
+        where: { ...whereOrders, status: { in: ['PAID', 'LN_SETTLE'] } }
       }),
       prisma.partnerClient.findMany({
         where: pcWhere,
@@ -458,6 +459,13 @@ export async function getDashboardTransactions(req: Request, res: Response) {
           paymentReceivedTime:  true,  // ← baru
           settlementTime:       true,  // ← baru
           trxExpirationTime:    true,  // ← barus
+          loanedAt:             true,
+          loanEntry: {
+            select: {
+              amount:    true,
+              createdAt: true,
+            }
+          }
         }
       }),
       prisma.order.count({ where: whereOrders })
@@ -466,7 +474,12 @@ export async function getDashboardTransactions(req: Request, res: Response) {
     const transactions = orders.map(o => {
       const pend = o.pendingAmount    ?? 0
       const sett = o.settlementAmount ?? 0
-      const netSettle = o.status === 'PAID' ? pend : sett
+      let netSettle = sett
+      if (o.status === 'PAID') {
+        netSettle = pend
+      } else if (o.status === 'LN_SETTLE') {
+        netSettle = o.loanEntry?.amount ?? 0
+      }
 
       return {
         id:                   o.id,
@@ -491,6 +504,11 @@ export async function getDashboardTransactions(req: Request, res: Response) {
         trxExpirationTime:    o.trxExpirationTime
                                ? o.trxExpirationTime.toISOString()
                                : '',
+        loanedAt:             o.loanedAt ? o.loanedAt.toISOString() : '',
+        loanAmount:           o.loanEntry?.amount ?? null,
+        loanCreatedAt:        o.loanEntry?.createdAt
+                               ? o.loanEntry.createdAt.toISOString()
+                               : null,
       }
     })
 
@@ -540,6 +558,7 @@ export async function getDashboardVolume(req: Request, res: Response) {
       'DONE',
       'SETTLED',
       'PAID',
+      'LN_SETTLE',
       'PENDING',
       'EXPIRED',
     ] as const;
@@ -931,7 +950,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       whereWd.subMerchantId = String(subMerchantId)
     }
 
-    const successStatuses = ['PAID', 'DONE', 'SETTLED', 'SUCCESS']
+    const successStatuses = ['PAID', 'LN_SETTLE', 'DONE', 'SETTLED', 'SUCCESS']
 
     const [orderGroup, succWdAgg, inAgg, outAgg] = await Promise.all([
       prisma.order.groupBy({
@@ -962,8 +981,12 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     ])
 
     const tpvAgg = orderGroup.reduce((n, g) => n + (g._sum.amount ?? 0), 0);
-    const paidAgg =
-      orderGroup.find(g => g.status === 'PAID')?._sum.amount ?? 0;
+    const paidAgg = orderGroup.reduce((total, group) => {
+      if (group.status === 'PAID' || group.status === 'LN_SETTLE') {
+        total += group._sum.amount ?? 0
+      }
+      return total
+    }, 0)
     const settleAgg = orderGroup.reduce((n, g) => {
       if (['SUCCESS', 'DONE', 'SETTLED'].includes(g.status)) {
         n += g._sum.settlementAmount ?? 0;
@@ -1104,6 +1127,7 @@ export async function exportDashboardAll(req: Request, res: Response) {
       'DONE',
       'SETTLED',
       'PAID',
+      'LN_SETTLE',
       'PENDING',
       'EXPIRED',
     ] as const
@@ -1124,6 +1148,9 @@ export async function exportDashboardAll(req: Request, res: Response) {
       // ▶ REVISI: kalau user pilih 'PAID', sertakan 'DONE'
       if (statusList.includes('PAID') && !statusList.includes('DONE')) {
         statusList.push('DONE')
+      }
+      if (statusList.includes('PAID') && !statusList.includes('LN_SETTLE')) {
+        statusList.push('LN_SETTLE')
       }
 
       // hilangkan duplikat
@@ -1176,14 +1203,22 @@ export async function exportDashboardAll(req: Request, res: Response) {
           fee3rdParty: true,
           pendingAmount: true,
           settlementAmount: true,
-          status: true
+          status: true,
+          loanEntry: {
+            select: { amount: true }
+          }
         },
         take: CHUNK_SIZE,
         skip: skipOrders,
       })
 
       for (const o of ordersChunk) {
-        const net = o.status === 'PAID' ? o.pendingAmount : o.settlementAmount
+        let net: number | null | undefined = o.settlementAmount
+        if (o.status === 'PAID') {
+          net = o.pendingAmount
+        } else if (o.status === 'LN_SETTLE') {
+          net = o.loanEntry?.amount
+        }
         txSheet.addRow([
           formatDateJakarta(o.createdAt),
           o.id,

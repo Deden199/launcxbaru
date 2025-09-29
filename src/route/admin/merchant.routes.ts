@@ -5,6 +5,7 @@ import * as exportCtrl from '../../controller/admin/merchant.controller'
 import { authMiddleware, AuthRequest, requireSuperAdminAuth } from '../../middleware/auth'
 import { adminIpWhitelist } from '../../middleware/ipWhitelist'
 import subMerchantRouter from './subMerchant.routes'   // ← import
+import * as loanCtrl from '../../controller/admin/loan.controller'
 
 const router = Router()
 
@@ -45,6 +46,9 @@ router.get('/dashboard/volume',       ctrl.getDashboardVolume)
 router.get('/dashboard/summary',      ctrl.getDashboardSummary)
 router.get('/dashboard/profit',       ctrl.getPlatformProfit)
 router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
+
+router.get('/loan/transactions', loanCtrl.getLoanTransactions)
+router.post('/loan/settle', loanCtrl.settleLoanOrders)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
 router.patch(
