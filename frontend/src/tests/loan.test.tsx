@@ -82,7 +82,7 @@ function createApiMock() {
 const apiMock = createApiMock()
 const BALANCES_PATH = '/admin/merchants/all/balances'
 const LOAN_TRANSACTIONS_PATH = '/admin/merchants/loan/transactions'
-const LOAN_SETTLE_PATH = '/admin/merchants/loan/settle'
+const LOAN_MARK_SETTLED_PATH = '/admin/merchants/loan/mark-settled'
 
 const defaultProps: LoanPageViewProps = {
   apiClient: apiMock as unknown as LoanPageViewProps['apiClient'],
@@ -174,7 +174,6 @@ test('fetches transactions with WIB date parameters', async () => {
   assert.equal(capturedParams.endDate, toWibIso(end))
   assert.equal(capturedParams.page, 1)
   assert.equal(capturedParams.pageSize, DEFAULT_LOAN_PAGE_SIZE)
-  assert.equal(capturedParams.includeSettled, false)
 })
 
 test('submits selected transactions to settle API', async () => {
@@ -217,7 +216,15 @@ test('submits selected transactions to settle API', async () => {
     throw new Error(`Unhandled GET ${url}`)
   })
 
-  apiMock.setPostImplementation(async () => ({ data: { processed: 1 } }))
+  let capturedPayload: any = null
+  apiMock.setPostImplementation(async (_url: string, payload: any) => {
+    capturedPayload = { ...payload }
+    if (payload.note) {
+      capturedPayload.note = payload.note
+    }
+    assert.equal(payload.note, 'Manual adjustment')
+    return { data: { ok: payload.orderIds ?? [], fail: [], errors: [] } }
+  })
 
   const { findByLabelText, getByRole, findByText } = render(
     <LoanPageView {...defaultProps} initialRange={[start, end]} />
@@ -229,19 +236,34 @@ test('submits selected transactions to settle API', async () => {
   fireEvent.click(getByRole('button', { name: 'Muat Transaksi' }))
   await findByText('order-1')
 
+  const noteField = (await findByLabelText('Catatan (opsional)')) as HTMLTextAreaElement
+  fireEvent.change(noteField, { target: { value: 'Manual adjustment ' } })
+  await waitFor(() => {
+    assert.equal(noteField.value, 'Manual adjustment ')
+  })
+
   const checkbox = await findByLabelText('Pilih transaksi order-1')
   fireEvent.click(checkbox)
+  await waitFor(() => {
+    assert.equal(noteField.value, 'Manual adjustment ')
+  })
 
-  fireEvent.click(getByRole('button', { name: 'Settle Loan (1)' }))
+  fireEvent.click(getByRole('button', { name: 'Tandai Loan Settled (1)' }))
 
   await waitFor(() => {
     assert.ok(apiMock.postCalls.length > 0)
   })
 
-  assert.deepEqual(apiMock.postCalls[0], [
-    LOAN_SETTLE_PATH,
-    { subMerchantId: 'sub-1', orderIds: ['order-1'] },
-  ])
+  await waitFor(() => {
+    assert.equal(capturedPayload?.note, 'Manual adjustment')
+  })
+
+  assert.deepEqual(apiMock.postCalls[0][0], LOAN_MARK_SETTLED_PATH)
+  assert.deepEqual(capturedPayload, { orderIds: ['order-1'], note: 'Manual adjustment' })
+
+  await waitFor(() => {
+    assert.equal(noteField.value, '')
+  })
 
   await waitFor(() => {
     assert.ok(
@@ -291,7 +313,7 @@ test('bulk settle submits every selectable order id', async () => {
   })
 
   apiMock.setPostImplementation(async (_url: string, payload: any) => ({
-    data: { processed: payload.orderIds.length },
+    data: { ok: payload.orderIds ?? [], fail: [], errors: [] },
   }))
 
   const { findByLabelText, getByRole, findByText, findByRole } = render(
@@ -308,16 +330,16 @@ test('bulk settle submits every selectable order id', async () => {
   const toggleAll = (await findByLabelText('Pilih semua transaksi PAID')) as HTMLInputElement
   fireEvent.click(toggleAll)
 
-  const settleButton = await findByRole('button', { name: 'Settle Loan (2)' })
+  const settleButton = await findByRole('button', { name: 'Tandai Loan Settled (2)' })
   fireEvent.click(settleButton)
 
   await waitFor(() => {
     assert.equal(apiMock.postCalls.length, 1)
   })
 
-  const [, payload] = apiMock.postCalls[0]
+  const [postUrl, payload] = apiMock.postCalls[0]
+  assert.equal(postUrl, LOAN_MARK_SETTLED_PATH)
   assert.deepEqual(payload, {
-    subMerchantId: 'sub-1',
     orderIds: ['order-1', 'order-2'],
   })
 })

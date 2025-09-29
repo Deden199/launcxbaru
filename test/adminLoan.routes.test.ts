@@ -12,7 +12,7 @@ const prisma: any = {
     updateMany: async (_args: any) => ({}),
   },
   loanEntry: {
-    createMany: async (_args: any) => ({}),
+    upsert: async (_args: any) => ({}),
   },
   $transaction: async (cb: any, options?: any) => {
     prisma.__lastTransactionOptions = options;
@@ -43,11 +43,20 @@ adminLog.logAdminAction = async (...args: any[]) => {
 
 const {
   getLoanTransactions,
-  settleLoanOrders,
+  markLoanOrdersSettled,
 } = require('../src/controller/admin/loan.controller');
 
-test('getLoanTransactions filters PAID orders by default', async () => {
+test('getLoanTransactions returns PAID and LN_SETTLED orders', async () => {
   const orders = [
+    {
+      id: 'ord-1',
+      amount: 500,
+      pendingAmount: 0,
+      status: 'LN_SETTLED',
+      createdAt: new Date('2024-05-02T03:00:00.000Z'),
+      loanedAt: new Date('2024-05-02T04:00:00.000Z'),
+      loanEntry: { amount: 500, createdAt: new Date('2024-05-02T04:00:00.000Z') },
+    },
     {
       id: 'ord-2',
       amount: 250,
@@ -86,7 +95,7 @@ test('getLoanTransactions filters PAID orders by default', async () => {
   assert.equal(res.status, 200);
   assert.ok(receivedFindManyArgs);
   assert.equal(receivedFindManyArgs.where.subMerchantId, 'sub-1');
-  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID'] });
+  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID', 'LN_SETTLED'] });
   assert.equal(
     receivedFindManyArgs.where.createdAt.gte.toISOString(),
     '2024-04-30T17:00:00.000Z',
@@ -100,6 +109,16 @@ test('getLoanTransactions filters PAID orders by default', async () => {
   assert.deepEqual(receivedCountArgs, { where: receivedFindManyArgs.where });
   assert.deepEqual(res.body, {
     data: [
+      {
+        id: 'ord-1',
+        amount: 500,
+        pendingAmount: 0,
+        status: 'LN_SETTLED',
+        createdAt: '2024-05-02T03:00:00.000Z',
+        loanedAt: '2024-05-02T04:00:00.000Z',
+        loanAmount: 500,
+        loanCreatedAt: '2024-05-02T04:00:00.000Z',
+      },
       {
         id: 'ord-2',
         amount: 250,
@@ -116,81 +135,6 @@ test('getLoanTransactions filters PAID orders by default', async () => {
       page: 1,
       pageSize: 50,
     },
-  });
-});
-
-test('getLoanTransactions can include settled orders when requested', async () => {
-  const orders = [
-    {
-      id: 'ord-1',
-      amount: 500,
-      pendingAmount: 0,
-      status: 'LN_SETTLE',
-      createdAt: new Date('2024-05-02T03:00:00.000Z'),
-      loanedAt: new Date('2024-05-02T04:00:00.000Z'),
-      loanEntry: { amount: 500, createdAt: new Date('2024-05-02T04:00:00.000Z') },
-    },
-    {
-      id: 'ord-2',
-      amount: 250,
-      pendingAmount: 250,
-      status: 'PAID',
-      createdAt: new Date('2024-05-02T05:00:00.000Z'),
-      loanedAt: null,
-      loanEntry: null,
-    },
-  ];
-
-  prisma.order.findMany = async (args: any) => {
-    assert.deepEqual(args.where.status, { in: ['PAID', 'LN_SETTLE'] });
-    return orders;
-  };
-  prisma.order.count = async (args: any) => {
-    assert.deepEqual(args.where.status, { in: ['PAID', 'LN_SETTLE'] });
-    return 2;
-  };
-
-  const app = express();
-  app.get('/admin/merchants/loan/transactions', (req, res) =>
-    getLoanTransactions(req as any, res),
-  );
-
-  const res = await request(app)
-    .get('/admin/merchants/loan/transactions')
-    .query({
-      subMerchantId: 'sub-1',
-      startDate: '2024-05-01',
-      endDate: '2024-05-03',
-      includeSettled: true,
-    });
-
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data, [
-    {
-      id: 'ord-1',
-      amount: 500,
-      pendingAmount: 0,
-      status: 'LN_SETTLE',
-      createdAt: '2024-05-02T03:00:00.000Z',
-      loanedAt: '2024-05-02T04:00:00.000Z',
-      loanAmount: 500,
-      loanCreatedAt: '2024-05-02T04:00:00.000Z',
-    },
-    {
-      id: 'ord-2',
-      amount: 250,
-      pendingAmount: 250,
-      status: 'PAID',
-      createdAt: '2024-05-02T05:00:00.000Z',
-      loanedAt: null,
-      loanAmount: null,
-      loanCreatedAt: null,
-    },
-  ]);
-  assert.deepEqual(res.body.meta, {
-    total: 2,
-    page: 1,
-    pageSize: 50,
   });
 });
 
@@ -228,138 +172,127 @@ test('getLoanTransactions enforces maximum page size', async () => {
   });
 });
 
-test('settleLoanOrders migrates PAID orders to loan entries', async () => {
+test('markLoanOrdersSettled updates PAID orders and returns summary', async () => {
   loggedAction = null;
-  const orderRecords = [
+  const orderIds = ['ord-paid-1', 'ord-settled', 'ord-failed', 'ord-missing', 'ord-paid-2'];
+  const fetchedOrders = [
     {
-      id: 'ord-5',
-      pendingAmount: 300,
+      id: 'ord-paid-1',
+      status: 'PAID',
+      pendingAmount: 150,
+      settlementAmount: null,
+      settlementStatus: 'PENDING',
+      subMerchantId: 'sub-1',
+      metadata: { loanSettlementHistory: [] },
+      loanedAt: null,
+    },
+    {
+      id: 'ord-settled',
+      status: 'LN_SETTLED',
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      subMerchantId: 'sub-1',
+      metadata: {},
+      loanedAt: new Date('2023-12-31T00:00:00Z'),
+    },
+    {
+      id: 'ord-failed',
+      status: 'FAILED',
+      pendingAmount: 10,
+      settlementAmount: null,
+      settlementStatus: null,
       subMerchantId: 'sub-2',
+      metadata: null,
+      loanedAt: null,
+    },
+    {
+      id: 'ord-paid-2',
+      status: 'PAID',
+      pendingAmount: 0,
+      settlementAmount: null,
+      settlementStatus: null,
+      subMerchantId: 'sub-1',
+      metadata: null,
+      loanedAt: null,
     },
   ];
 
-  prisma.order.findMany = async () => orderRecords;
-  const loanCreateManyCalls: any[] = [];
-  let orderUpdateManyArgs: any = null;
-  prisma.loanEntry.createMany = async (args: any) => {
-    loanCreateManyCalls.push(args);
-    return { count: args.data.length };
-  };
+  prisma.order.findMany = async () => fetchedOrders;
+
+  const updateCalls: any[] = [];
   prisma.order.updateMany = async (args: any) => {
-    orderUpdateManyArgs = args;
-    return { count: args.where.id.in.length };
-  };
-
-  const app = express();
-  app.use(express.json());
-  app.post('/admin/merchants/loan/settle', (req, res) => {
-    (req as any).userId = 'admin-123';
-    settleLoanOrders(req as any, res);
-  });
-
-  const res = await request(app)
-    .post('/admin/merchants/loan/settle')
-    .send({ subMerchantId: 'sub-2', orderIds: ['ord-5'] });
-
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { processed: 1, totalAmount: 300 });
-  assert.equal(loanCreateManyCalls.length, 1);
-  assert.equal(loanCreateManyCalls[0].data.length, 1);
-  assert.equal(loanCreateManyCalls[0].data[0].subMerchantId, 'sub-2');
-  assert.equal(loanCreateManyCalls[0].data[0].amount, 300);
-  assert.deepEqual(orderUpdateManyArgs.where, {
-    id: { in: ['ord-5'] },
-    subMerchantId: 'sub-2',
-    status: 'PAID',
-  });
-  assert.equal(orderUpdateManyArgs.data.status, 'LN_SETTLE');
-  assert.equal(orderUpdateManyArgs.data.pendingAmount, 0);
-  assert.ok(orderUpdateManyArgs.data.loanedAt instanceof Date);
-  assert.deepEqual(prisma.__lastTransactionOptions, { timeout: 20000 });
-  assert.deepEqual(loggedAction, [
-    'admin-123',
-    'loanSettle',
-    'sub-2',
-    { orderIds: ['ord-5'], processed: 1, totalAmount: 300 },
-  ]);
-});
-
-test('settleLoanOrders handles large batches with chunked createMany calls', async () => {
-  loggedAction = null;
-  const orderIds = ['ord-a', 'ord-b', 'ord-c', 'ord-d', 'ord-e'];
-  prisma.order.findMany = async () =>
-    orderIds.map((id, index) => ({
-      id,
-      pendingAmount: 100 + index,
-      subMerchantId: 'sub-99',
-    }));
-
-  const loanCreateManyCalls: any[] = [];
-  let updateArgs: any = null;
-  prisma.loanEntry.createMany = async (args: any) => {
-    loanCreateManyCalls.push(args);
-    return { count: args.data.length };
-  };
-  prisma.order.updateMany = async (args: any) => {
-    updateArgs = args;
-    return { count: orderIds.length };
-  };
-
-  const app = express();
-  app.use(express.json());
-  app.post('/admin/merchants/loan/settle', (req, res) => {
-    settleLoanOrders(req as any, res);
-  });
-
-  const res = await request(app)
-    .post('/admin/merchants/loan/settle')
-    .send({ subMerchantId: 'sub-99', orderIds });
-
-  assert.equal(res.status, 200);
-  assert.equal(res.body.processed, 5);
-  assert.equal(res.body.totalAmount, 5 * 100 + 10); // 100+101+102+103+104 = 510
-  assert.equal(loanCreateManyCalls.length, 3);
-  assert.deepEqual(
-    loanCreateManyCalls.map((call) => call.data.map((entry: any) => entry.orderId)),
-    [['ord-a', 'ord-b'], ['ord-c', 'ord-d'], ['ord-e']],
-  );
-  assert.ok(updateArgs);
-  assert.deepEqual(updateArgs.where, {
-    id: { in: orderIds },
-    subMerchantId: 'sub-99',
-    status: 'PAID',
-  });
-  assert.equal(updateArgs.data.pendingAmount, 0);
-  assert.equal(updateArgs.data.status, 'LN_SETTLE');
-});
-
-test('settleLoanOrders aborts when order status changes mid process', async () => {
-  loggedAction = null;
-  const orderIds = ['ord-1', 'ord-2'];
-  prisma.order.findMany = async () =>
-    orderIds.map((id) => ({ id, pendingAmount: 100, subMerchantId: 'sub-3' }));
-
-  let loanCreateManyCalled = false;
-  prisma.loanEntry.createMany = async (_args: any) => {
-    loanCreateManyCalled = true;
-    return { count: 0 };
-  };
-  prisma.order.updateMany = async (_args: any) => {
+    updateCalls.push(args);
     return { count: 1 };
   };
 
+  const upsertCalls: any[] = [];
+  prisma.loanEntry.upsert = async (args: any) => {
+    upsertCalls.push(args);
+    return {};
+  };
+
   const app = express();
   app.use(express.json());
-  app.post('/admin/merchants/loan/settle', (req, res) => {
-    settleLoanOrders(req as any, res);
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-123';
+    next();
+  });
+  app.post('/admin/merchants/loan/mark-settled', (req, res) => {
+    markLoanOrdersSettled(req as any, res);
   });
 
   const res = await request(app)
-    .post('/admin/merchants/loan/settle')
-    .send({ subMerchantId: 'sub-3', orderIds });
+    .post('/admin/merchants/loan/mark-settled')
+    .send({ orderIds, note: 'Manual adjust' });
 
-  assert.equal(res.status, 409);
-  assert.equal(res.body.error, 'Some orders were updated by another process. Please retry.');
-  assert.equal(loanCreateManyCalled, false);
-  assert.equal(loggedAction, null);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.ok.sort(), ['ord-paid-1', 'ord-paid-2', 'ord-settled'].sort());
+  assert.deepEqual(res.body.fail.sort(), ['ord-failed', 'ord-missing'].sort());
+  assert.equal(res.body.errors.length, 2);
+
+  assert.equal(updateCalls.length, 2);
+  assert.deepEqual(updateCalls.map(call => call.where.id).sort(), ['ord-paid-1', 'ord-paid-2'].sort());
+  for (const call of updateCalls) {
+    assert.equal(call.data.status, 'LN_SETTLED');
+    assert.equal(call.data.pendingAmount, null);
+    assert.equal(call.data.settlementStatus, null);
+    assert.deepEqual(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
+    assert.equal(call.data.metadata.lastLoanSettlement.note, 'Manual adjust');
+  }
+
+  assert.equal(upsertCalls.length, 1);
+  assert.equal(upsertCalls[0].create.orderId, 'ord-paid-1');
+  assert.equal(upsertCalls[0].create.metadata.note, 'Manual adjust');
+
+  assert.ok(loggedAction);
+  assert.equal(loggedAction[0], 'admin-123');
+  assert.equal(loggedAction[1], 'loanMarkSettled');
+  assert.deepEqual(loggedAction[3].ok.sort(), ['ord-paid-1', 'ord-paid-2', 'ord-settled'].sort());
 });
+
+test('markLoanOrdersSettled handles invalid input gracefully', async () => {
+  prisma.order.findMany = async () => [];
+  prisma.order.updateMany = async () => ({ count: 0 });
+  prisma.loanEntry.upsert = async () => ({})
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-1';
+    next();
+  });
+  app.post('/admin/merchants/loan/mark-settled', (req, res) => {
+    markLoanOrdersSettled(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/mark-settled')
+    .send({ orderIds: ['missing-1'] });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.ok, []);
+  assert.deepEqual(res.body.fail, ['missing-1']);
+  assert.equal(res.body.errors[0].orderId, 'missing-1');
+});
+

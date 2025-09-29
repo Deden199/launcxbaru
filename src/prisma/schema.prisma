@@ -229,6 +229,7 @@ model Order {
   pgRefId          String?
   pgClientRef      String?
   providerPayload  Json?
+  metadata         Json?
   paymentReceivedTime  DateTime?      // full.payment_received_time
   settlementTime       DateTime?      // full.settlement_time
   trxExpirationTime    DateTime?      // full.trx_expiration_time

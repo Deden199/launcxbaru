@@ -1,0 +1,19 @@
+export const ORDER_STATUS = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  PAID: 'PAID',
+  LN_SETTLED: 'LN_SETTLED',
+  SUCCESS: 'SUCCESS',
+  DONE: 'DONE',
+  SETTLED: 'SETTLED',
+  FAILED: 'FAILED',
+  EXPIRED: 'EXPIRED',
+  CANCELLED: 'CANCELLED',
+  COMPLETED: 'COMPLETED',
+  REFUNDED: 'REFUNDED',
+  TEST: 'TEST',
+} as const;
+
+export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
+
+export const LOAN_SETTLED_METADATA_REASON = 'loan_adjustment';
