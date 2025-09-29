@@ -66,16 +66,33 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
   }
 
   const pageNum = Math.max(1, parseInt(String(page), 10) || 1)
-  const requestedPageSize = parseInt(String(size), 10)
-  const pageSize = Number.isFinite(requestedPageSize) && requestedPageSize > 0 ? requestedPageSize : 25
+  const requestedPageSize = Number(size)
 
-  if (pageSize > 1500) {
-    console.warn(
-      '[getEligibleSettlements] Requested page size exceeds limit',
-      { requestedSize: pageSize, subMerchantId }
-    )
+  if (!Number.isFinite(requestedPageSize) || !Number.isInteger(requestedPageSize)) {
+    console.warn('[getEligibleSettlements] Invalid page size received', {
+      rawSize: size,
+      subMerchantId,
+    })
+    return res.status(400).json({ error: 'size must be a positive integer' })
+  }
+
+  if (requestedPageSize <= 0) {
+    console.warn('[getEligibleSettlements] Non-positive page size received', {
+      requestedSize: requestedPageSize,
+      subMerchantId,
+    })
+    return res.status(400).json({ error: 'size must be a positive integer' })
+  }
+
+  if (requestedPageSize > 1500) {
+    console.warn('[getEligibleSettlements] Requested page size exceeds limit', {
+      requestedSize: requestedPageSize,
+      subMerchantId,
+    })
     return res.status(400).json({ error: 'size must be 1500 or less' })
   }
+
+  const pageSize = requestedPageSize
 
   const sortField = typeof sort === 'string' ? sort : '-settlementTime'
   const sortKey = sortField.startsWith('-') ? sortField.slice(1) : sortField
