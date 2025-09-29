@@ -61,6 +61,7 @@ model sub_merchant {
 
   transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
   orders           Order[]             @relation("OrderSubMerchant")
+  loanEntries     LoanEntry[]         @relation("SubMerchantLoanEntries")
 
 
 
@@ -231,12 +232,29 @@ model Order {
   paymentReceivedTime  DateTime?      // full.payment_received_time
   settlementTime       DateTime?      // full.settlement_time
   trxExpirationTime    DateTime?      // full.trx_expiration_time
+  loanedAt         DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+
+  loanEntry        LoanEntry?       @relation("OrderLoanEntry")
 
   @@index([partnerClientId])
   @@index([createdAt])
   @@index([status])
+}
+
+model LoanEntry {
+  id             String        @id @default(uuid()) @map("_id")
+  orderId        String        @unique
+  subMerchantId  String
+  amount         Float
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+
+  order          Order         @relation("OrderLoanEntry", fields: [orderId], references: [id])
+  subMerchant    sub_merchant  @relation("SubMerchantLoanEntries", fields: [subMerchantId], references: [id])
+
+  @@index([subMerchantId])
 }
 
 /// PartnerUser untuk login admin
