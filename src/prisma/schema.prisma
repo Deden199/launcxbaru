@@ -241,6 +241,7 @@ model Order {
   @@index([partnerClientId])
   @@index([createdAt])
   @@index([status])
+  @@index([subMerchantId, createdAt])
 }
 
 model LoanEntry {
