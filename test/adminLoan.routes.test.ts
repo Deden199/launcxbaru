@@ -8,6 +8,7 @@ import request from 'supertest'
 const prisma: any = {
   order: {
     findMany: async () => [],
+    count: async () => 0,
     update: async (_args: any) => ({}),
   },
   loanEntry: {
@@ -61,10 +62,15 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
     },
   ];
 
-  let receivedWhere: any;
+  let receivedFindManyArgs: any;
+  let receivedCountArgs: any;
   prisma.order.findMany = async (args: any) => {
-    receivedWhere = args.where;
+    receivedFindManyArgs = args;
     return orders;
+  };
+  prisma.order.count = async (args: any) => {
+    receivedCountArgs = args;
+    return 42;
   };
 
   const app = express();
@@ -81,10 +87,20 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
     });
 
   assert.equal(res.status, 200);
-  assert.equal(receivedWhere.subMerchantId, 'sub-1');
-  assert.deepEqual(receivedWhere.status, { in: ['PAID', 'LN_SETTLE'] });
-  assert.equal(receivedWhere.createdAt.gte.toISOString(), '2024-04-30T17:00:00.000Z');
-  assert.equal(receivedWhere.createdAt.lte.toISOString(), '2024-05-03T16:59:59.999Z');
+  assert.ok(receivedFindManyArgs);
+  assert.equal(receivedFindManyArgs.where.subMerchantId, 'sub-1');
+  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID', 'LN_SETTLE'] });
+  assert.equal(
+    receivedFindManyArgs.where.createdAt.gte.toISOString(),
+    '2024-04-30T17:00:00.000Z',
+  );
+  assert.equal(
+    receivedFindManyArgs.where.createdAt.lte.toISOString(),
+    '2024-05-03T16:59:59.999Z',
+  );
+  assert.equal(receivedFindManyArgs.take, 50);
+  assert.equal(receivedFindManyArgs.skip, 0);
+  assert.deepEqual(receivedCountArgs, { where: receivedFindManyArgs.where });
   assert.deepEqual(res.body, {
     data: [
       {
@@ -108,6 +124,45 @@ test('getLoanTransactions filters by WIB range and formats response', async () =
         loanCreatedAt: null,
       },
     ],
+    meta: {
+      total: 42,
+      page: 1,
+      pageSize: 50,
+    },
+  });
+});
+
+test('getLoanTransactions enforces maximum page size', async () => {
+  prisma.order.findMany = async (args: any) => {
+    assert.equal(args.take, 100);
+    assert.equal(args.skip, 100);
+    return [];
+  };
+  prisma.order.count = async (args: any) => {
+    assert.equal(args.where.subMerchantId, 'sub-9');
+    return 0;
+  };
+
+  const app = express();
+  app.get('/admin/loan/transactions', (req, res) =>
+    getLoanTransactions(req as any, res),
+  );
+
+  const res = await request(app)
+    .get('/admin/loan/transactions')
+    .query({
+      subMerchantId: 'sub-9',
+      startDate: '2024-05-01',
+      endDate: '2024-05-03',
+      page: 2,
+      pageSize: 500,
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.meta, {
+    total: 0,
+    page: 2,
+    pageSize: 100,
   });
 });
 

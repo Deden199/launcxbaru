@@ -7,10 +7,15 @@ import { AuthRequest } from '../../middleware/auth';
 import { logAdminAction } from '../../util/adminLog';
 import { wibTimestamp } from '../../util/time';
 
+const MAX_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 50;
+
 const loanQuerySchema = z.object({
   subMerchantId: z.string().min(1, 'subMerchantId is required'),
   startDate: z.string().min(1, 'startDate is required'),
   endDate: z.string().min(1, 'endDate is required'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).default(DEFAULT_PAGE_SIZE),
 });
 
 const settleBodySchema = z.object({
@@ -36,38 +41,46 @@ const toEndOfDayWib = (value: string) => {
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
   try {
-    const { subMerchantId, startDate, endDate } = loanQuerySchema.parse(
-      req.query,
-    );
+    const { subMerchantId, startDate, endDate, page, pageSize } =
+      loanQuerySchema.parse(req.query);
 
     const start = toStartOfDayWib(startDate);
     const end = toEndOfDayWib(endDate);
 
-    const orders = await prisma.order.findMany({
-      where: {
-        subMerchantId,
-        status: { in: ['PAID', 'LN_SETTLE'] },
-        createdAt: {
-          gte: start,
-          lte: end,
-        },
+    const safePageSize = Math.min(pageSize, MAX_PAGE_SIZE);
+    const skip = (page - 1) * safePageSize;
+    const where = {
+      subMerchantId,
+      status: { in: ['PAID', 'LN_SETTLE'] },
+      createdAt: {
+        gte: start,
+        lte: end,
       },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        amount: true,
-        pendingAmount: true,
-        status: true,
-        createdAt: true,
-        loanedAt: true,
-        loanEntry: {
-          select: {
-            amount: true,
-            createdAt: true,
+    };
+
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          amount: true,
+          pendingAmount: true,
+          status: true,
+          createdAt: true,
+          loanedAt: true,
+          loanEntry: {
+            select: {
+              amount: true,
+              createdAt: true,
+            },
           },
         },
-      },
-    });
+        take: safePageSize,
+        skip,
+      }),
+      prisma.order.count({ where }),
+    ]);
 
     const data = orders.map((order) => ({
       id: order.id,
@@ -82,7 +95,14 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
         : null,
     }));
 
-    return res.json({ data });
+    return res.json({
+      data,
+      meta: {
+        total,
+        page,
+        pageSize: safePageSize,
+      },
+    });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
