@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
@@ -135,6 +135,8 @@ export default function SettlementAdjustPage() {
 
   const [datePickerRange, setDatePickerRange] = useState<[Date | null, Date | null]>(defaultRange)
 
+  const requestIdRef = useRef(0)
+
   useEffect(() => {
     setDatePickerRange(dateRange)
   }, [dateRange])
@@ -186,6 +188,7 @@ export default function SettlementAdjustPage() {
 
   const fetchRows = useCallback(
     async (targetPage: number) => {
+      const requestId = ++requestIdRef.current
       const [start, end] = dateRange
       if (!start || !end || !selectedSubMerchant) {
         setRows([])
@@ -210,6 +213,7 @@ export default function SettlementAdjustPage() {
 
       try {
         const { data } = await api.get<any>('/admin/settlement/eligible', { params })
+        if (requestId !== requestIdRef.current) return
         const listSource = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
 
         const mapped: SettlementRow[] = []
@@ -250,6 +254,7 @@ export default function SettlementAdjustPage() {
         setTotalCount(typeof data?.total === 'number' ? data.total : mapped.length)
         setPage(mapped.length > 0 || targetPage === 1 ? targetPage : 1)
       } catch (err: any) {
+        if (requestId !== requestIdRef.current) return
         if (err?.response?.status === 404) {
           setRowsError('Endpoint data settlement belum tersedia.')
         } else {
@@ -258,7 +263,9 @@ export default function SettlementAdjustPage() {
         setRows([])
         setTotalCount(0)
       } finally {
-        setLoadingRows(false)
+        if (requestId === requestIdRef.current) {
+          setLoadingRows(false)
+        }
       }
     },
     [dateRange, debouncedSearch, pageSize, selectedSubMerchant, subMerchants]
