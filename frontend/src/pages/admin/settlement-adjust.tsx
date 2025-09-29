@@ -120,7 +120,7 @@ export default function SettlementAdjustPage() {
   const [rowsError, setRowsError] = useState('')
 
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(25)
+  const [pageSize] = useState(1500)
   const [totalCount, setTotalCount] = useState(0)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -624,7 +624,7 @@ export default function SettlementAdjustPage() {
 
           <div className="flex items-center justify-between text-xs text-neutral-500">
             <div>
-              Halaman {page} dari {totalPages}
+              Halaman {page} dari {totalPages} (maks {pageSize.toLocaleString('id-ID')} order/halaman)
             </div>
             <div className="flex items-center gap-2">
               <button
