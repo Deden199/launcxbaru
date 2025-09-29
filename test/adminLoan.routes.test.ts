@@ -229,6 +229,7 @@ test('getLoanTransactions enforces maximum page size', async () => {
 });
 
 test('settleLoanOrders migrates PAID orders to loan entries', async () => {
+  loggedAction = null;
   const orderRecords = [
     {
       id: 'ord-5',
@@ -266,7 +267,11 @@ test('settleLoanOrders migrates PAID orders to loan entries', async () => {
   assert.equal(loanCreateManyCalls[0].data.length, 1);
   assert.equal(loanCreateManyCalls[0].data[0].subMerchantId, 'sub-2');
   assert.equal(loanCreateManyCalls[0].data[0].amount, 300);
-  assert.deepEqual(orderUpdateManyArgs.where, { id: { in: ['ord-5'] } });
+  assert.deepEqual(orderUpdateManyArgs.where, {
+    id: { in: ['ord-5'] },
+    subMerchantId: 'sub-2',
+    status: 'PAID',
+  });
   assert.equal(orderUpdateManyArgs.data.status, 'LN_SETTLE');
   assert.equal(orderUpdateManyArgs.data.pendingAmount, 0);
   assert.ok(orderUpdateManyArgs.data.loanedAt instanceof Date);
@@ -275,11 +280,12 @@ test('settleLoanOrders migrates PAID orders to loan entries', async () => {
     'admin-123',
     'loanSettle',
     'sub-2',
-    { orderIds: ['ord-5'], totalAmount: 300 },
+    { orderIds: ['ord-5'], processed: 1, totalAmount: 300 },
   ]);
 });
 
 test('settleLoanOrders handles large batches with chunked createMany calls', async () => {
+  loggedAction = null;
   const orderIds = ['ord-a', 'ord-b', 'ord-c', 'ord-d', 'ord-e'];
   prisma.order.findMany = async () =>
     orderIds.map((id, index) => ({
@@ -318,7 +324,42 @@ test('settleLoanOrders handles large batches with chunked createMany calls', asy
     [['ord-a', 'ord-b'], ['ord-c', 'ord-d'], ['ord-e']],
   );
   assert.ok(updateArgs);
-  assert.deepEqual(updateArgs.where, { id: { in: orderIds } });
+  assert.deepEqual(updateArgs.where, {
+    id: { in: orderIds },
+    subMerchantId: 'sub-99',
+    status: 'PAID',
+  });
   assert.equal(updateArgs.data.pendingAmount, 0);
   assert.equal(updateArgs.data.status, 'LN_SETTLE');
+});
+
+test('settleLoanOrders aborts when order status changes mid process', async () => {
+  loggedAction = null;
+  const orderIds = ['ord-1', 'ord-2'];
+  prisma.order.findMany = async () =>
+    orderIds.map((id) => ({ id, pendingAmount: 100, subMerchantId: 'sub-3' }));
+
+  let loanCreateManyCalled = false;
+  prisma.loanEntry.createMany = async (_args: any) => {
+    loanCreateManyCalled = true;
+    return { count: 0 };
+  };
+  prisma.order.updateMany = async (_args: any) => {
+    return { count: 1 };
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.post('/admin/merchants/loan/settle', (req, res) => {
+    settleLoanOrders(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/settle')
+    .send({ subMerchantId: 'sub-3', orderIds });
+
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'Some orders were updated by another process. Please retry.');
+  assert.equal(loanCreateManyCalled, false);
+  assert.equal(loggedAction, null);
 });

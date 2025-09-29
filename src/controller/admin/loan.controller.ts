@@ -122,6 +122,13 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
   }
 }
 
+class OrderSettlementConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrderSettlementConflictError';
+  }
+}
+
 export async function settleLoanOrders(req: AuthRequest, res: Response) {
   try {
     const { subMerchantId, orderIds } = settleBodySchema.parse(req.body);
@@ -171,23 +178,31 @@ export async function settleLoanOrders(req: AuthRequest, res: Response) {
     const transactionTimeout =
       Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
 
+    let processedCount = 0;
     await prisma.$transaction(
       async (tx) => {
-        if (loanEntries.length > 0) {
-          for (let i = 0; i < loanEntries.length; i += CREATE_MANY_CHUNK_SIZE) {
-            const chunk = loanEntries.slice(i, i + CREATE_MANY_CHUNK_SIZE);
-            await tx.loanEntry.createMany({ data: chunk });
-          }
-        }
-
-        await tx.order.updateMany({
-          where: { id: { in: orderIds } },
+        const updateResult = await tx.order.updateMany({
+          where: { id: { in: orderIds }, subMerchantId, status: 'PAID' },
           data: {
             status: 'LN_SETTLE',
             pendingAmount: 0,
             loanedAt: now,
           },
         });
+
+        processedCount = updateResult.count;
+        if (updateResult.count !== orderIds.length) {
+          throw new OrderSettlementConflictError(
+            'Some orders were updated by another process. Please retry.',
+          );
+        }
+
+        if (loanEntries.length > 0) {
+          for (let i = 0; i < loanEntries.length; i += CREATE_MANY_CHUNK_SIZE) {
+            const chunk = loanEntries.slice(i, i + CREATE_MANY_CHUNK_SIZE);
+            await tx.loanEntry.createMany({ data: chunk });
+          }
+        }
       },
       { timeout: transactionTimeout },
     );
@@ -195,14 +210,18 @@ export async function settleLoanOrders(req: AuthRequest, res: Response) {
     if (req.userId) {
       await logAdminAction(req.userId, 'loanSettle', subMerchantId, {
         orderIds,
+        processed: processedCount,
         totalAmount,
       });
     }
 
-    return res.json({ processed: orders.length, totalAmount });
+    return res.json({ processed: processedCount, totalAmount });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
+    }
+    if (error instanceof OrderSettlementConflictError) {
+      return res.status(409).json({ error: error.message });
     }
     console.error('[settleLoanOrders]', error);
     return res.status(500).json({ error: 'Failed to settle loans' });
