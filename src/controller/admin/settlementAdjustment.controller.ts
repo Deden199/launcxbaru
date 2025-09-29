@@ -4,6 +4,37 @@ import { AuthRequest } from '../../middleware/auth'
 import { logAdminAction } from '../../util/adminLog'
 import { computeSettlement } from '../../service/feeSettlement'
 
+const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS'])
+
+type OrderReversalRecord = {
+  id: string
+  status: string | null
+  settlementTime: Date | null
+  settlementAmount: number | null
+  amount: number | null
+  fee3rdParty: number | null
+  feeLauncx: number | null
+  metadata: unknown
+  subMerchantId: string | null
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function calculateReversalAmount(
+  order: Pick<OrderReversalRecord, 'settlementAmount' | 'amount' | 'fee3rdParty' | 'feeLauncx'>
+) {
+  if (order.settlementAmount != null) {
+    return Number(order.settlementAmount) || 0
+  }
+  const amount = Number(order.amount ?? 0)
+  const fee3rdParty = Number(order.fee3rdParty ?? 0)
+  const feeLauncx = Number(order.feeLauncx ?? 0)
+  const net = amount - fee3rdParty - feeLauncx
+  return Number.isFinite(net) ? Math.max(net, 0) : 0
+}
+
 export async function adjustSettlements(req: AuthRequest, res: Response) {
   const { transactionIds, dateFrom, dateTo, settlementStatus, settlementTime, feeLauncx } = req.body as any
 
@@ -154,6 +185,144 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'internal error' })
+  }
+}
+
+export async function reverseSettlementToLnSettle(req: AuthRequest, res: Response) {
+  const body = req.body as {
+    orderIds?: unknown
+    subMerchantId?: unknown
+    reason?: unknown
+  }
+
+  const rawIds = Array.isArray(body?.orderIds) ? body.orderIds : []
+  const ids = Array.from(
+    new Set(
+      rawIds
+        .map(id => (typeof id === 'string' ? id.trim() : ''))
+        .filter((id): id is string => Boolean(id))
+    )
+  )
+
+  if (ids.length === 0) {
+    return res.status(400).json({ error: 'orderIds is required' })
+  }
+
+  if (body?.subMerchantId && typeof body.subMerchantId !== 'string') {
+    return res.status(400).json({ error: 'subMerchantId must be a string' })
+  }
+
+  const subMerchantId = typeof body?.subMerchantId === 'string' ? body.subMerchantId : undefined
+  const reasonInput = typeof body?.reason === 'string' ? body.reason.trim() : ''
+  const reason = reasonInput ? reasonInput : undefined
+
+  try {
+    const orders = (await prisma.order.findMany({
+      where: {
+        id: { in: ids },
+        ...(subMerchantId ? { subMerchantId } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        settlementTime: true,
+        settlementAmount: true,
+        amount: true,
+        fee3rdParty: true,
+        feeLauncx: true,
+        metadata: true,
+        subMerchantId: true,
+      },
+    })) as OrderReversalRecord[]
+
+    const orderMap = new Map(orders.map(order => [order.id, order]))
+
+    const errors: { id: string; message: string }[] = []
+    let ok = 0
+    let totalReversalAmount = 0
+    const now = new Date()
+
+    for (const id of ids) {
+      const order = orderMap.get(id)
+      if (!order) {
+        errors.push({ id, message: 'Order tidak ditemukan atau tidak sesuai sub-merchant' })
+        continue
+      }
+
+      if (order.status === 'LN_SETTLE' && !order.settlementTime) {
+        ok += 1
+        continue
+      }
+
+      if (!REVERSAL_ALLOWED_STATUS.has(order.status ?? '')) {
+        errors.push({ id, message: `Status ${order.status ?? 'UNKNOWN'} tidak dapat direversal` })
+        continue
+      }
+
+      if (!order.settlementTime) {
+        errors.push({ id, message: 'Order belum memiliki settlementTime' })
+        continue
+      }
+
+      const metadataSource = isPlainObject(order.metadata) ? { ...order.metadata } : {}
+      const mergedMetadata = {
+        ...metadataSource,
+        reversal: true,
+        previousStatus: order.status,
+        previousSettlementTime: order.settlementTime,
+        previousSettlementAmount: order.settlementAmount ?? null,
+        reason: reason ?? null,
+        reversedAt: now,
+        reversedBy: req.userId ?? null,
+      }
+
+      const updateResult = await prisma.order.updateMany({
+        where: {
+          id: order.id,
+          status: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
+          settlementTime: { not: null },
+          ...(subMerchantId ? { subMerchantId } : {}),
+        },
+        data: {
+          status: 'LN_SETTLE',
+          settlementTime: null,
+          settlementAmount: null,
+          settlementStatus: null,
+          pendingAmount: 0,
+          loanedAt: now,
+          metadata: mergedMetadata,
+        },
+      })
+
+      if (updateResult.count === 0) {
+        errors.push({ id, message: 'Order gagal diperbarui (mungkin sudah diubah)' })
+        continue
+      }
+
+      ok += 1
+      totalReversalAmount += calculateReversalAmount(order)
+    }
+
+    const processed = ids.length
+    const fail = processed - ok
+
+    if (req.userId) {
+      await logAdminAction(req.userId, 'reverseSettlementToLnSettle', null, {
+        orderIds: ids,
+        subMerchantId,
+        reason,
+        processed,
+        ok,
+        fail,
+        totalReversalAmount,
+        errors,
+      })
+    }
+
+    return res.json({ processed, ok, fail, totalReversalAmount, errors })
+  } catch (err) {
+    console.error('reverseSettlementToLnSettle error', err)
+    return res.status(500).json({ error: 'internal error' })
   }
 }
 
