@@ -5,6 +5,7 @@ import { logAdminAction } from '../../util/adminLog'
 import { computeSettlement } from '../../service/feeSettlement'
 
 const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS'])
+const REVERSAL_BATCH_SIZE = 25
 
 const prismaTxTimeoutMs = (() => {
   const rawTimeout = process.env.PRISMA_TX_TIMEOUT_MS
@@ -394,6 +395,12 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
     let ok = 0
     let totalReversalAmount = 0
     const now = new Date()
+    const ordersToReverse: {
+      id: string
+      where: Record<string, unknown>
+      data: Record<string, unknown>
+      reversalAmount: number
+    }[] = []
 
     for (const id of ids) {
       const order = orderMap.get(id)
@@ -428,8 +435,8 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         reversedAt: now,
         reversedBy: req.userId ?? null,
       }
-
-      const updateResult = await prisma.order.updateMany({
+      ordersToReverse.push({
+        id: order.id,
         where: {
           id: order.id,
           status: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
@@ -445,15 +452,32 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           loanedAt: now,
           metadata: mergedMetadata,
         },
+        reversalAmount: calculateReversalAmount(order),
       })
+    }
 
-      if (updateResult.count === 0) {
-        errors.push({ id, message: 'Order gagal diperbarui (mungkin sudah diubah)' })
-        continue
+    for (let i = 0; i < ordersToReverse.length; i += REVERSAL_BATCH_SIZE) {
+      const batch = ordersToReverse.slice(i, i + REVERSAL_BATCH_SIZE)
+      const batchResults = await Promise.all(
+        batch.map(async item => ({
+          id: item.id,
+          result: await prisma.order.updateMany({
+            where: item.where,
+            data: item.data,
+          }),
+          reversalAmount: item.reversalAmount,
+        }))
+      )
+
+      for (const { id, result, reversalAmount } of batchResults) {
+        if (!result || result.count === 0) {
+          errors.push({ id, message: 'Order gagal diperbarui (mungkin sudah diubah)' })
+          continue
+        }
+
+        ok += 1
+        totalReversalAmount += reversalAmount
       }
-
-      ok += 1
-      totalReversalAmount += calculateReversalAmount(order)
     }
 
     const processed = ids.length
