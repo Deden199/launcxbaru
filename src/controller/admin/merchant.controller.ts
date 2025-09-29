@@ -1003,7 +1003,11 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
       return total
     }, 0)
     const settleAgg = orderGroup.reduce((n, g) => {
-      if ([ORDER_STATUS.SUCCESS, ORDER_STATUS.DONE, ORDER_STATUS.SETTLED].includes(g.status)) {
+      if (
+        g.status === ORDER_STATUS.SUCCESS ||
+        g.status === ORDER_STATUS.DONE ||
+        g.status === ORDER_STATUS.SETTLED
+      ) {
         n += g._sum.settlementAmount ?? 0;
       }
       return n;
