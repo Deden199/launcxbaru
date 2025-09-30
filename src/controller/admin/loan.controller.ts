@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import { z } from 'zod';
-import moment from 'moment-timezone';
 
 import { prisma } from '../../core/prisma';
 import { AuthRequest } from '../../middleware/auth';
@@ -8,6 +7,20 @@ import { logAdminAction } from '../../util/adminLog';
 import { wibTimestamp } from '../../util/time';
 import { ORDER_STATUS, LOAN_SETTLED_METADATA_REASON } from '../../types/orderStatus';
 import { emitOrderEvent } from '../../util/orderEvents';
+import {
+  toStartOfDayWib,
+  toEndOfDayWib,
+  normalizeMetadata,
+  applyLoanSettlementUpdates,
+  runLoanSettlementByRange,
+  type MarkSettledSummary,
+  type OrderForLoanSettlement,
+  type LoanSettlementUpdate,
+} from '../../service/loanSettlement';
+import {
+  startLoanSettlementJob as enqueueLoanSettlementJob,
+  getLoanSettlementJob,
+} from '../../worker/loanSettlementJob';
 
 const MAX_CONFIGURED_PAGE_SIZE = 1500;
 const configuredMaxPageSize = Number(process.env.LOAN_MAX_PAGE_SIZE);
@@ -16,20 +29,6 @@ const MAX_PAGE_SIZE =
     ? Math.min(configuredMaxPageSize, MAX_CONFIGURED_PAGE_SIZE)
     : MAX_CONFIGURED_PAGE_SIZE;
 const DEFAULT_PAGE_SIZE = 50;
-
-const DEFAULT_LOAN_CHUNK_SIZE = 25;
-const configuredLoanChunkSize = Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE);
-const LOAN_CREATE_MANY_CHUNK_SIZE =
-  Number.isFinite(configuredLoanChunkSize) && configuredLoanChunkSize >= 1
-    ? Math.floor(configuredLoanChunkSize)
-    : DEFAULT_LOAN_CHUNK_SIZE;
-
-const DEFAULT_LOAN_FETCH_BATCH_SIZE = 100;
-const configuredLoanFetchBatchSize = Number(process.env.LOAN_FETCH_BATCH_SIZE);
-const LOAN_FETCH_BATCH_SIZE =
-  Number.isFinite(configuredLoanFetchBatchSize) && configuredLoanFetchBatchSize >= 1
-    ? Math.floor(configuredLoanFetchBatchSize)
-    : DEFAULT_LOAN_FETCH_BATCH_SIZE;
 
 const loanQuerySchema = z.object({
   subMerchantId: z.string().min(1, 'subMerchantId is required'),
@@ -50,22 +49,6 @@ const markSettledRangeSchema = z.object({
   endDate: z.string().min(1, 'endDate is required'),
   note: z.string().max(500).optional(),
 });
-
-const toStartOfDayWib = (value: string) => {
-  const date = moment.tz(value, 'Asia/Jakarta');
-  if (!date.isValid()) {
-    throw new Error('Invalid startDate');
-  }
-  return date.startOf('day').toDate();
-};
-
-const toEndOfDayWib = (value: string) => {
-  const date = moment.tz(value, 'Asia/Jakarta');
-  if (!date.isValid()) {
-    throw new Error('Invalid endDate');
-  }
-  return date.endOf('day').toDate();
-};
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
   try {
@@ -142,157 +125,6 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
     console.error('[getLoanTransactions]', error);
     return res.status(500).json({ error: 'Failed to fetch loan transactions' });
   }
-}
-
-function normalizeMetadata(value: unknown): Record<string, any> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return { ...(value as Record<string, any>) };
-  }
-  return {};
-}
-
-type MarkSettledSummary = {
-  ok: string[];
-  fail: string[];
-  errors: { orderId: string; message: string }[];
-};
-
-type LoanSettlementEventPayload = {
-  orderId: string;
-  previousStatus: string;
-  adminId?: string;
-  markedAt: string;
-  note?: string;
-};
-
-type OrderForLoanSettlement = {
-  id: string;
-  status: string;
-  pendingAmount: number | null | undefined;
-  settlementAmount: number | null | undefined;
-  settlementStatus: string | null | undefined;
-  metadata: unknown;
-  subMerchantId: string | null | undefined;
-  loanedAt: Date | null;
-};
-
-type LoanSettlementUpdate = {
-  id: string;
-  subMerchantId?: string | null;
-  metadata: Record<string, any>;
-  pendingAmount: number | null | undefined;
-};
-
-async function applyLoanSettlementUpdates({
-  updates,
-  summary,
-  adminId,
-  note,
-  now,
-  markedAtIso,
-}: {
-  updates: LoanSettlementUpdate[];
-  summary: MarkSettledSummary;
-  adminId?: string;
-  note?: string;
-  now: Date;
-  markedAtIso: string;
-}): Promise<LoanSettlementEventPayload[]> {
-  if (updates.length === 0) {
-    return [];
-  }
-
-  const configuredTimeout = Number(process.env.LOAN_TRANSACTION_TIMEOUT);
-  const transactionTimeout =
-    Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
-
-  const events: LoanSettlementEventPayload[] = [];
-  const chunkSize = Math.max(1, LOAN_CREATE_MANY_CHUNK_SIZE);
-
-  for (let start = 0; start < updates.length; start += chunkSize) {
-    const chunk = updates.slice(start, start + chunkSize);
-
-    await prisma.$transaction(
-      async (tx) => {
-        for (const update of chunk) {
-          try {
-            const result = await tx.order.updateMany({
-              where: { id: update.id, status: ORDER_STATUS.PAID },
-              data: {
-                status: ORDER_STATUS.LN_SETTLED,
-                pendingAmount: null,
-                settlementStatus: null,
-                loanedAt: now,
-                metadata: update.metadata,
-              },
-            });
-
-            if (result.count === 0) {
-              if (!summary.fail.includes(update.id)) {
-                summary.fail.push(update.id);
-              }
-              summary.errors.push({
-                orderId: update.id,
-                message: 'Order status changed before loan settlement could be applied',
-              });
-              continue;
-            }
-
-            if (!summary.ok.includes(update.id)) {
-              summary.ok.push(update.id);
-            }
-
-            const amount = Number(update.pendingAmount ?? 0);
-            if (amount > 0 && update.subMerchantId) {
-              await tx.loanEntry.upsert({
-                where: { orderId: update.id },
-                create: {
-                  orderId: update.id,
-                  subMerchantId: update.subMerchantId,
-                  amount,
-                  metadata: {
-                    reason: LOAN_SETTLED_METADATA_REASON,
-                    markedAt: markedAtIso,
-                    ...(adminId ? { markedBy: adminId } : {}),
-                    ...(note ? { note } : {}),
-                  },
-                },
-                update: {
-                  amount,
-                  metadata: {
-                    reason: LOAN_SETTLED_METADATA_REASON,
-                    markedAt: markedAtIso,
-                    ...(adminId ? { markedBy: adminId } : {}),
-                    ...(note ? { note } : {}),
-                  },
-                },
-              });
-            }
-
-            events.push({
-              orderId: update.id,
-              previousStatus: ORDER_STATUS.PAID,
-              adminId,
-              markedAt: markedAtIso,
-              note,
-            });
-          } catch (error: any) {
-            if (!summary.fail.includes(update.id)) {
-              summary.fail.push(update.id);
-            }
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : 'Failed to mark order as loan-settled';
-            summary.errors.push({ orderId: update.id, message });
-          }
-        }
-      },
-      { timeout: transactionTimeout },
-    );
-  }
-
-  return events;
 }
 
 export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
@@ -413,104 +245,13 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
 export async function markLoanOrdersSettledByRange(req: AuthRequest, res: Response) {
   try {
     const parsed = markSettledRangeSchema.parse(req.body);
-    const note = parsed.note?.trim() ? parsed.note.trim() : undefined;
-    const start = toStartOfDayWib(parsed.startDate);
-    const end = toEndOfDayWib(parsed.endDate);
-
-    const summary: MarkSettledSummary = { ok: [], fail: [], errors: [] };
-    const adminId = req.userId ?? undefined;
-    const now = wibTimestamp();
-    const markedAtIso = now.toISOString();
-
-    const batchSize = Math.max(1, LOAN_FETCH_BATCH_SIZE);
-    const allOrderIds: string[] = [];
-    const events: LoanSettlementEventPayload[] = [];
-    let page = 0;
-
-    while (true) {
-      const orders = (await prisma.order.findMany({
-        where: {
-          subMerchantId: parsed.subMerchantId,
-          status: ORDER_STATUS.PAID,
-          createdAt: {
-            gte: start,
-            lte: end,
-          },
-        },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          status: true,
-          pendingAmount: true,
-          settlementAmount: true,
-          settlementStatus: true,
-          metadata: true,
-          subMerchantId: true,
-          loanedAt: true,
-        },
-        take: batchSize,
-        skip: page * batchSize,
-      })) as OrderForLoanSettlement[];
-
-      if (orders.length === 0) {
-        break;
-      }
-
-      const updates: LoanSettlementUpdate[] = [];
-      for (const order of orders) {
-        allOrderIds.push(order.id);
-
-        const metadata = normalizeMetadata(order.metadata);
-        const auditEntry = {
-          reason: LOAN_SETTLED_METADATA_REASON,
-          previousStatus: ORDER_STATUS.PAID,
-          markedBy: adminId ?? 'unknown',
-          markedAt: markedAtIso,
-          ...(note ? { note } : {}),
-        };
-
-        const historyKey = 'loanSettlementHistory';
-        const history = Array.isArray(metadata[historyKey])
-          ? [...metadata[historyKey], auditEntry]
-          : [auditEntry];
-
-        metadata[historyKey] = history;
-        metadata.lastLoanSettlement = auditEntry;
-
-        updates.push({
-          id: order.id,
-          subMerchantId: order.subMerchantId,
-          metadata,
-          pendingAmount: order.pendingAmount,
-        });
-      }
-
-      const batchEvents = await applyLoanSettlementUpdates({
-        updates,
-        summary,
-        adminId,
-        note,
-        now,
-        markedAtIso,
-      });
-
-      events.push(...batchEvents);
-
-      page += 1;
-    }
-
-    if (adminId && allOrderIds.length > 0) {
-      await logAdminAction(adminId, 'loanMarkSettled', undefined, {
-        orderIds: allOrderIds,
-        ok: summary.ok,
-        fail: summary.fail,
-        note,
-      });
-    }
-
-    for (const event of events) {
-      emitOrderEvent('order.loan_settled', event);
-    }
+    const summary = await runLoanSettlementByRange({
+      subMerchantId: parsed.subMerchantId,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      note: parsed.note,
+      adminId: req.userId ?? undefined,
+    });
 
     return res.json(summary);
   } catch (error: any) {
@@ -522,5 +263,57 @@ export async function markLoanOrdersSettledByRange(req: AuthRequest, res: Respon
     }
     console.error('[markLoanOrdersSettledByRange]', error);
     return res.status(500).json({ error: 'Failed to mark loans as settled by range' });
+  }
+}
+
+export async function startLoanSettlementJob(req: AuthRequest, res: Response) {
+  try {
+    const parsed = markSettledRangeSchema.parse(req.body);
+    const jobId = enqueueLoanSettlementJob({
+      subMerchantId: parsed.subMerchantId,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      note: parsed.note,
+      adminId: req.userId ?? undefined,
+    });
+
+    return res.status(202).json({ jobId });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
+    }
+    if (error instanceof Error && error.message.startsWith('Invalid ')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('[startLoanSettlementJob]', error);
+    return res.status(500).json({ error: 'Failed to queue loan settlement job' });
+  }
+}
+
+export function loanSettlementJobStatus(req: AuthRequest, res: Response) {
+  try {
+    const { jobId } = req.params;
+    if (!jobId) {
+      return res.status(400).json({ error: 'jobId is required' });
+    }
+
+    const job = getLoanSettlementJob(jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    return res.json({
+      jobId: job.id,
+      status: job.status,
+      summary: job.summary,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt ?? null,
+      completedAt: job.completedAt ?? null,
+      updatedAt: job.updatedAt,
+      error: job.error ?? null,
+    });
+  } catch (error) {
+    console.error('[loanSettlementJobStatus]', error);
+    return res.status(500).json({ error: 'Failed to fetch loan settlement job status' });
   }
 }

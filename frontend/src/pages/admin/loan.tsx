@@ -35,6 +35,14 @@ type LoanTransaction = {
   loanCreatedAt: string | null
 }
 
+type LoanSettlementSummary = {
+  ok: string[]
+  fail: string[]
+  errors: { orderId: string; message: string }[]
+}
+
+type LoanSettlementJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+
 export interface LoanPageViewProps {
   apiClient?: typeof api
   initialRange?: [Date | null, Date | null]
@@ -101,6 +109,12 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
   const noteRef = useRef<HTMLTextAreaElement | null>(null)
+  const [startingJob, setStartingJob] = useState(false)
+  const [rangeJobId, setRangeJobId] = useState('')
+  const [rangeJobStatus, setRangeJobStatus] = useState<LoanSettlementJobStatus | ''>('')
+  const [rangeJobSummary, setRangeJobSummary] = useState<LoanSettlementSummary | null>(null)
+  const [rangeJobError, setRangeJobError] = useState('')
+  const jobPollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [effectivePageSize, setEffectivePageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
@@ -151,6 +165,14 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       prev.filter(id => displayedTransactions.some(tx => tx.id === id))
     )
   }, [displayedTransactions])
+
+  useEffect(() => {
+    return () => {
+      if (jobPollTimeout.current) {
+        clearTimeout(jobPollTimeout.current)
+      }
+    }
+  }, [])
 
   const selectableIds = useMemo(
     () => displayedTransactions.map(tx => tx.id),
@@ -279,6 +301,147 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     )
   }
 
+  const clearJobPolling = () => {
+    if (jobPollTimeout.current) {
+      clearTimeout(jobPollTimeout.current)
+      jobPollTimeout.current = null
+    }
+  }
+
+  const pollJobStatus = async (jobId: string) => {
+    const scheduleNext = () => {
+      clearJobPolling()
+      jobPollTimeout.current = setTimeout(() => {
+        void pollJobStatus(jobId)
+      }, 1500)
+    }
+
+    try {
+      const { data } = await apiClient.get<{
+        jobId: string
+        status: LoanSettlementJobStatus
+        summary?: LoanSettlementSummary
+        error?: string | null
+      }>(`/admin/merchants/loan/mark-settled/by-range/status/${jobId}`)
+
+      const summary: LoanSettlementSummary = data.summary ?? {
+        ok: [],
+        fail: [],
+        errors: [],
+      }
+      setRangeJobId(data.jobId)
+      setRangeJobSummary(summary)
+      setRangeJobStatus(data.status)
+      setRangeJobError('')
+
+      if (data.status === 'completed') {
+        clearJobPolling()
+        if (summary.ok.length > 0) {
+          setActionMessage(`Berhasil menandai ${summary.ok.length} transaksi sebagai loan-settled.`)
+        } else {
+          setActionMessage('Tidak ada perubahan status yang dilakukan.')
+        }
+
+        if (summary.fail.length > 0) {
+          const detail = summary.errors
+            .map(err => `${err.orderId ?? 'unknown'}: ${err.message}`)
+            .join('; ')
+          setActionError(`Gagal menandai ${summary.fail.length} transaksi: ${detail}`)
+        } else {
+          setActionError('')
+          if (summary.ok.length > 0 && noteRef.current) {
+            noteRef.current.value = ''
+          }
+        }
+
+        void loadTransactions()
+      } else if (data.status === 'failed') {
+        clearJobPolling()
+        const message = data.error ?? 'Job penandaan loan-settled gagal dijalankan.'
+        setRangeJobError(message)
+        setActionError(message)
+        setActionMessage('')
+      } else {
+        setActionMessage('Proses penandaan sedang dijalankan…')
+        setActionError('')
+        scheduleNext()
+      }
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.error ?? 'Gagal memeriksa status job loan-settled'
+      setRangeJobError(message)
+      setActionError(message)
+      setActionMessage('')
+      scheduleNext()
+    }
+  }
+
+  const startRangeSettlement = async () => {
+    setFormError('')
+    setActionError('')
+    setActionMessage('')
+    setRangeJobError('')
+
+    if (!selectedSub) {
+      setFormError('Pilih sub-merchant terlebih dahulu.')
+      return
+    }
+    if (!startDate || !endDate) {
+      setFormError('Pilih rentang tanggal terlebih dahulu.')
+      return
+    }
+
+    const payload: {
+      subMerchantId: string
+      startDate: string
+      endDate: string
+      note?: string
+    } = {
+      subMerchantId: selectedSub,
+      startDate: toWibIso(startDate),
+      endDate: toWibIso(endDate),
+    }
+
+    const trimmedNote = (noteRef.current?.value ?? '').trim()
+    if (trimmedNote) {
+      payload.note = trimmedNote
+    }
+
+    setStartingJob(true)
+    try {
+      const { data } = await apiClient.post<{ jobId?: string }>(
+        '/admin/merchants/loan/mark-settled/by-range/start',
+        payload,
+      )
+
+      const jobId = data?.jobId
+      if (!jobId) {
+        throw new Error('Missing jobId')
+      }
+
+      setRangeJobId(jobId)
+      setRangeJobStatus('queued')
+      setRangeJobSummary({ ok: [], fail: [], errors: [] })
+      setActionMessage('Proses penandaan sedang dijalankan…')
+      setActionError('')
+      clearJobPolling()
+      jobPollTimeout.current = setTimeout(() => {
+        void pollJobStatus(jobId)
+      }, 1000)
+    } catch (err: any) {
+      clearJobPolling()
+      setRangeJobId('')
+      setRangeJobStatus('')
+      setRangeJobSummary(null)
+      const message =
+        err?.response?.data?.error ?? 'Gagal memulai job penandaan loan-settled'
+      setRangeJobError(message)
+      setActionError(message)
+    } finally {
+      setStartingJob(false)
+    }
+  }
+
   const settleSelected = async () => {
     setFormError('')
     setActionError('')
@@ -350,6 +513,18 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     rawTotalCount - hiddenCount
   )
   const hasMore = transactions.length < rawTotalCount
+  const jobInProgress = rangeJobStatus === 'queued' || rangeJobStatus === 'running'
+  const showJobSpinner = startingJob || jobInProgress
+  const jobStatusLabel: Record<LoanSettlementJobStatus, string> = {
+    queued: 'Dalam antrean',
+    running: 'Sedang diproses',
+    completed: 'Selesai',
+    failed: 'Gagal',
+  }
+  const currentJobLabel =
+    rangeJobStatus && rangeJobStatus !== ''
+      ? jobStatusLabel[rangeJobStatus as LoanSettlementJobStatus]
+      : ''
 
   return (
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100 p-4 sm:p-6">
@@ -597,7 +772,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
               <div className="text-xs text-neutral-400 sm:max-w-sm">
                 Hanya transaksi berstatus <strong>PAID</strong> yang dapat ditandai sebagai loan-settled.
               </div>
-              <div className="flex w-full flex-col gap-2 sm:w-72">
+              <div className="flex w-full flex-col gap-3 sm:w-80">
                 <label htmlFor="loan-note" className="text-sm font-medium text-neutral-200">
                   Catatan (opsional)
                 </label>
@@ -612,16 +787,55 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                 <p className="text-xs text-neutral-500">
                   Catatan akan tersimpan dalam metadata audit untuk referensi tim finance.
                 </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={startRangeSettlement}
+                    disabled={
+                      showJobSpinner || loadingSubs || loadingTx || !selectedSub || !startDate || !endDate
+                    }
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-3 py-2.5 text-sm font-medium text-indigo-100 transition hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {showJobSpinner ? <Loader2 className="animate-spin" size={16} /> : null}
+                    Mulai Penandaan Rentang
+                  </button>
+                  <button
+                    type="button"
+                    onClick={settleSelected}
+                    disabled={submitting || selectedOrders.length === 0}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
+                    Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
+                  </button>
+                </div>
+                {rangeJobStatus && rangeJobStatus !== '' ? (
+                  <div className="space-y-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-300">
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-neutral-400">
+                      <span>Status job</span>
+                      <span className="font-semibold text-neutral-100">{currentJobLabel}</span>
+                    </div>
+                    {rangeJobId ? (
+                      <div className="text-[11px] text-neutral-500">ID: {rangeJobId}</div>
+                    ) : null}
+                    {rangeJobSummary ? (
+                      <div className="flex flex-wrap gap-3 text-neutral-300">
+                        <span>
+                          Berhasil:{' '}
+                          <strong>{rangeJobSummary.ok.length.toLocaleString('id-ID')}</strong>
+                        </span>
+                        <span>
+                          Gagal:{' '}
+                          <strong>{rangeJobSummary.fail.length.toLocaleString('id-ID')}</strong>
+                        </span>
+                      </div>
+                    ) : null}
+                    {rangeJobError ? (
+                      <div className="text-[11px] text-rose-300">{rangeJobError}</div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-              <button
-                type="button"
-                onClick={settleSelected}
-                disabled={submitting || selectedOrders.length === 0}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
-                Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
-              </button>
             </div>
           </div>
         </section>

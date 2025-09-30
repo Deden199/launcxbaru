@@ -83,6 +83,10 @@ const apiMock = createApiMock()
 const BALANCES_PATH = '/admin/merchants/all/balances'
 const LOAN_TRANSACTIONS_PATH = '/admin/merchants/loan/transactions'
 const LOAN_MARK_SETTLED_PATH = '/admin/merchants/loan/mark-settled'
+const LOAN_MARK_SETTLED_RANGE_START_PATH =
+  '/admin/merchants/loan/mark-settled/by-range/start'
+const LOAN_MARK_SETTLED_STATUS_PREFIX =
+  '/admin/merchants/loan/mark-settled/by-range/status/'
 
 const defaultProps: LoanPageViewProps = {
   apiClient: apiMock as unknown as LoanPageViewProps['apiClient'],
@@ -270,6 +274,128 @@ test('submits selected transactions to settle API', async () => {
       apiMock.getCalls.filter(call => call[0] === LOAN_TRANSACTIONS_PATH).length >= 2,
     )
   })
+})
+
+test('starts loan settlement job and polls until completion', async () => {
+  const start = new Date('2024-01-02T00:00:00Z')
+  const end = new Date('2024-01-03T00:00:00Z')
+
+  let loanFetchCount = 0
+  let statusCallCount = 0
+  const statusResponses = [
+    {
+      status: 'completed' as const,
+      summary: {
+        ok: ['order-1', 'order-2'],
+        fail: ['order-3'],
+        errors: [{ orderId: 'order-3', message: 'Sudah settled' }],
+      },
+    },
+  ]
+
+  apiMock.setGetImplementation(async (url: string, config?: any) => {
+    if (url === BALANCES_PATH) {
+      return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
+    }
+    if (url === LOAN_TRANSACTIONS_PATH) {
+      loanFetchCount += 1
+      return {
+        data: {
+          data: [],
+          meta: {
+            total: 0,
+            page: config?.params?.page ?? 1,
+            pageSize: DEFAULT_LOAN_PAGE_SIZE,
+          },
+        },
+      }
+    }
+    if (url.startsWith(LOAN_MARK_SETTLED_STATUS_PREFIX)) {
+      const response =
+        statusResponses[Math.min(statusCallCount, statusResponses.length - 1)]
+      statusCallCount += 1
+      return {
+        data: {
+          jobId: 'job-123',
+          status: response.status,
+          summary: response.summary,
+          error: null,
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  let capturedPayload: any = null
+  apiMock.setPostImplementation(async (url: string, payload: any) => {
+    if (url === LOAN_MARK_SETTLED_RANGE_START_PATH) {
+      capturedPayload = { ...payload }
+      return { data: { jobId: 'job-123' } }
+    }
+    throw new Error(`Unhandled POST ${url}`)
+  })
+
+  const { findByLabelText, getByRole, findByText } = render(
+    <LoanPageView {...defaultProps} initialRange={[start, end]} />,
+  )
+
+  const select = (await findByLabelText('Sub-merchant')) as HTMLSelectElement
+  fireEvent.change(select, { target: { value: 'sub-1' } })
+
+  const noteField = (await findByLabelText('Catatan (opsional)')) as HTMLTextAreaElement
+  fireEvent.change(noteField, { target: { value: ' Bulk job ' } })
+
+  const startButton = getByRole('button', { name: 'Mulai Penandaan Rentang' })
+  fireEvent.click(startButton)
+
+  await waitFor(() => {
+    assert.equal(apiMock.postCalls.length, 1)
+  })
+
+  assert.equal(apiMock.postCalls[0][0], LOAN_MARK_SETTLED_RANGE_START_PATH)
+  assert.ok(capturedPayload)
+  assert.deepEqual(capturedPayload, {
+    subMerchantId: 'sub-1',
+    startDate: toWibIso(start),
+    endDate: toWibIso(end),
+    note: 'Bulk job',
+  })
+
+  await findByText('Berhasil menandai 2 transaksi sebagai loan-settled.', undefined, {
+    timeout: 5000,
+  })
+  await findByText('Gagal menandai 1 transaksi: order-3: Sudah settled', undefined, {
+    timeout: 5000,
+  })
+  const statusLabel = await findByText('Status job', undefined, { timeout: 5000 })
+  await findByText('Selesai', undefined, { timeout: 5000 })
+
+  const summaryContainer = statusLabel.parentElement?.parentElement
+  const summaryTexts = Array.from(summaryContainer?.querySelectorAll('span') ?? []).map(span =>
+    span.textContent?.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim(),
+  )
+
+  assert.ok(summaryTexts.includes('Berhasil: 2'))
+  assert.ok(summaryTexts.includes('Gagal: 1'))
+
+  await waitFor(
+    () => {
+      assert.ok(
+        apiMock.getCalls.some(call =>
+          String(call[0]).startsWith(LOAN_MARK_SETTLED_STATUS_PREFIX),
+        ),
+      )
+    },
+    { timeout: 5000 },
+  )
+
+  await waitFor(
+    () => {
+      assert.ok(loanFetchCount >= 1)
+      assert.ok(statusCallCount >= 1)
+    },
+    { timeout: 5000 },
+  )
 })
 
 test('bulk settle submits every selectable order id', async () => {
