@@ -522,9 +522,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     failed: 'Gagal',
   }
   const currentJobLabel =
-    rangeJobStatus && rangeJobStatus !== ''
-      ? jobStatusLabel[rangeJobStatus as LoanSettlementJobStatus]
-      : ''
+    rangeJobStatus !== '' ? jobStatusLabel[rangeJobStatus] : ''
 
   return (
     <div className="dark min-h-screen bg-neutral-950 text-neutral-100 p-4 sm:p-6">
@@ -809,7 +807,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
                   </button>
                 </div>
-                {rangeJobStatus && rangeJobStatus !== '' ? (
+                {rangeJobStatus !== '' ? (
                   <div className="space-y-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-300">
                     <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-neutral-400">
                       <span>Status job</span>
