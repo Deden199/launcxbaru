@@ -1,18 +1,21 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 import { AlertTriangle, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react'
 import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
 
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
+
+if (typeof window !== 'undefined') {
+  void import('react-datepicker/dist/react-datepicker.css')
+}
 
 const WIB = 'Asia/Jakarta'
 const DEFAULT_PAGE_SIZE = 1500
@@ -64,11 +67,11 @@ function formatCurrency(value: number) {
   return value.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })
 }
 
-function toWibStart(date: Date) {
+export function toWibStart(date: Date) {
   return dayjs(date).tz(WIB, true).startOf('day')
 }
 
-function toWibExclusiveEnd(date: Date) {
+export function toWibExclusiveEnd(date: Date) {
   return dayjs(date).tz(WIB, true).startOf('day').add(1, 'day')
 }
 
@@ -84,6 +87,324 @@ function computeReversalPreview(
   const fee3rdParty = Number(row.fee3rdParty ?? 0)
   const net = amount - feeLauncx - fee3rdParty
   return Number.isFinite(net) ? Math.max(net, 0) : 0
+}
+
+type SettlementAdjustJobStatus = 'idle' | 'starting' | 'queued' | 'running' | 'completed' | 'failed'
+
+type SettlementAdjustJobSummary = {
+  processed?: number
+  total?: number
+  updatedCount?: number
+  updatedIds?: string[]
+  message?: string
+  errors?: { id?: string; message?: string }[]
+}
+
+const JOB_STATUS_LABEL: Record<Exclude<SettlementAdjustJobStatus, 'idle' | 'starting'>, string> = {
+  queued: 'Dalam antrean',
+  running: 'Sedang diproses',
+  completed: 'Selesai',
+  failed: 'Gagal',
+}
+
+const POLL_INTERVAL_MS = 2000
+
+function normaliseJobStatus(rawStatus: unknown): SettlementAdjustJobStatus {
+  const value = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : ''
+  if (value === 'queued' || value === 'pending') return 'queued'
+  if (value === 'running' || value === 'in_progress' || value === 'processing') return 'running'
+  if (value === 'completed' || value === 'done' || value === 'success') return 'completed'
+  if (value === 'failed' || value === 'error') return 'failed'
+  return 'running'
+}
+
+function extractNumber(...candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+function extractStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value
+    .map(item => (typeof item === 'string' ? item : item != null ? String(item) : null))
+    .filter((item): item is string => Boolean(item))
+}
+
+export interface SettlementAdjustJobControlProps {
+  selectedSubMerchant: string
+  dateRange: [Date | null, Date | null]
+  onJobFinished?: () => void
+  apiClient?: typeof api
+}
+
+export function SettlementAdjustJobControl({
+  selectedSubMerchant,
+  dateRange,
+  onJobFinished,
+  apiClient = api,
+}: SettlementAdjustJobControlProps) {
+  const [jobId, setJobId] = useState('')
+  const [jobStatus, setJobStatus] = useState<SettlementAdjustJobStatus>('idle')
+  const [jobError, setJobError] = useState('')
+  const [jobSummary, setJobSummary] = useState<SettlementAdjustJobSummary>({})
+  const pollTimerRef = useRef<number | null>(null)
+
+  const [startDate, endDate] = dateRange
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current != null) {
+      window.clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }, [])
+
+  const pollStatus = useCallback(
+    async (targetJobId: string) => {
+      if (!targetJobId) return
+      try {
+        const { data } = await apiClient.get<Record<string, any>>(
+          `/admin/settlement/adjust/status/${targetJobId}`
+        )
+
+        const statusSource =
+          data?.status ?? data?.jobStatus ?? data?.state ?? data?.job_state ?? 'running'
+        const normalised = normaliseJobStatus(statusSource)
+
+        const processed = extractNumber(
+          data?.processed,
+          data?.progress?.processed,
+          data?.summary?.processed,
+          data?.result?.processed
+        )
+        const total = extractNumber(
+          data?.total,
+          data?.progress?.total,
+          data?.summary?.total,
+          data?.result?.total
+        )
+        const updatedCount = extractNumber(
+          data?.updatedCount,
+          data?.result?.updatedCount,
+          data?.summary?.updatedCount,
+          data?.processed
+        )
+        const updatedIds =
+          extractStringArray(data?.updatedIds) ?? extractStringArray(data?.result?.updatedIds)
+        const errors = Array.isArray(data?.errors)
+          ? data.errors.map((err: any) => ({
+              id: err?.id ?? err?.orderId ?? err?.order_id ?? undefined,
+              message:
+                typeof err?.message === 'string'
+                  ? err.message
+                  : typeof err === 'string'
+                  ? err
+                  : undefined,
+            }))
+          : undefined
+
+        setJobStatus(normalised)
+        setJobSummary({
+          processed,
+          total,
+          updatedCount,
+          updatedIds,
+          message: typeof data?.message === 'string' ? data.message : undefined,
+          errors,
+        })
+
+        if (normalised === 'completed') {
+          stopPolling()
+          setJobError('')
+          onJobFinished?.()
+        } else if (normalised === 'failed') {
+          stopPolling()
+          const errorMessage =
+            data?.error ??
+            data?.message ??
+            data?.details ??
+            'Job settlement adjust gagal dijalankan.'
+          setJobError(typeof errorMessage === 'string' ? errorMessage : 'Job settlement adjust gagal.')
+        } else {
+          setJobError('')
+        }
+      } catch (err: any) {
+        stopPolling()
+        setJobStatus('failed')
+        setJobError(
+          err?.response?.data?.error ??
+            err?.message ??
+            'Gagal memeriksa status job settlement adjust'
+        )
+      }
+    },
+    [apiClient, onJobFinished, stopPolling]
+  )
+
+  const schedulePolling = useCallback(
+    (targetJobId: string) => {
+      stopPolling()
+      pollTimerRef.current = window.setInterval(() => {
+        void pollStatus(targetJobId)
+      }, POLL_INTERVAL_MS)
+    },
+    [pollStatus, stopPolling]
+  )
+
+  useEffect(() => {
+    return () => {
+      stopPolling()
+    }
+  }, [stopPolling])
+
+  const startJob = useCallback(async () => {
+    setJobError('')
+    setJobSummary({})
+
+    if (!selectedSubMerchant) {
+      setJobStatus('failed')
+      setJobError('Pilih sub-merchant terlebih dahulu.')
+      return
+    }
+
+    if (!startDate || !endDate) {
+      setJobStatus('failed')
+      setJobError('Pilih rentang tanggal settlement terlebih dahulu.')
+      return
+    }
+
+    const payload = {
+      subMerchantId: selectedSubMerchant,
+      toWibStart: toWibStart(startDate).toISOString(),
+      toWibExclusiveEnd: toWibExclusiveEnd(endDate).toISOString(),
+    }
+
+    setJobStatus('starting')
+
+    try {
+      const { data } = await apiClient.post<{ jobId?: string; id?: string }>(
+        '/admin/settlement/adjust/start',
+        payload
+      )
+
+      const nextJobId = data?.jobId ?? data?.id ?? ''
+      if (!nextJobId) {
+        throw new Error('Job ID tidak ditemukan pada respons backend')
+      }
+
+      setJobId(nextJobId)
+      setJobStatus('queued')
+      setJobSummary({ message: 'Job settlement adjust telah dimulai.' })
+      stopPolling()
+      void pollStatus(nextJobId)
+      schedulePolling(nextJobId)
+    } catch (err: any) {
+      stopPolling()
+      setJobStatus('failed')
+      setJobId('')
+      setJobError(
+        err?.response?.data?.error ??
+          err?.message ??
+          'Gagal memulai job settlement adjust'
+      )
+    }
+  }, [apiClient, endDate, pollStatus, schedulePolling, selectedSubMerchant, startDate, stopPolling])
+
+  const isRunning = jobStatus === 'starting' || jobStatus === 'queued' || jobStatus === 'running'
+  const canStart = Boolean(selectedSubMerchant && startDate && endDate) && !isRunning
+  const statusLabel =
+    jobStatus === 'idle' || jobStatus === 'starting'
+      ? 'Belum berjalan'
+      : JOB_STATUS_LABEL[jobStatus] ?? 'Tidak diketahui'
+
+  const progressText = useMemo(() => {
+    if (jobSummary.processed != null && jobSummary.total != null) {
+      return `${jobSummary.processed.toLocaleString('id-ID')} / ${jobSummary.total.toLocaleString(
+        'id-ID'
+      )}`
+    }
+    if (jobSummary.processed != null) {
+      return `${jobSummary.processed.toLocaleString('id-ID')} diproses`
+    }
+    if (jobSummary.total != null) {
+      return `${jobSummary.total.toLocaleString('id-ID')} target`
+    }
+    return ''
+  }, [jobSummary.processed, jobSummary.total])
+
+  return (
+    <div className="mt-6 space-y-3 rounded-2xl border border-indigo-900/40 bg-indigo-950/20 p-4 text-sm text-neutral-100">
+      <div className="flex flex-col gap-1">
+        <div className="text-xs uppercase tracking-wide text-neutral-400">Penandaan Otomatis</div>
+        <p className="text-neutral-300">
+          Mulai job untuk menandai transaksi settlement sebagai selesai agar workflow reversal dapat
+          melihat update terbaru.
+        </p>
+      </div>
+      <button
+        onClick={startJob}
+        disabled={!canStart}
+        className={`inline-flex items-center gap-2 self-start rounded-xl px-4 py-2 text-sm font-semibold transition ${
+          canStart
+            ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+            : 'cursor-not-allowed bg-neutral-800 text-neutral-500'
+        }`}
+      >
+        {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        {isRunning ? 'Memproses…' : 'Mulai Penandaan Settlement'}
+      </button>
+      {jobId && (
+        <div className="rounded-xl border border-indigo-900/40 bg-indigo-950/40 p-3 text-xs text-indigo-100">
+          <div className="font-semibold text-indigo-200">Job ID: {jobId}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-[13px] text-indigo-100/90">
+            <span>Status: {statusLabel}</span>
+            {progressText ? <span>Progres: {progressText}</span> : null}
+            {jobSummary.message ? <span>{jobSummary.message}</span> : null}
+          </div>
+          {jobSummary.updatedCount != null && jobStatus === 'completed' && (
+            <div className="mt-2 text-[13px] text-emerald-200">
+              {jobSummary.updatedCount.toLocaleString('id-ID')} transaksi settlement diperbarui.
+            </div>
+          )}
+          {jobSummary.updatedIds && jobSummary.updatedIds.length > 0 && (
+            <div className="mt-2 space-y-1 text-[11px] text-indigo-100/80">
+              <div className="uppercase tracking-wide text-indigo-300">Order yang diperbarui</div>
+              <ul className="grid grid-cols-1 gap-1 font-mono text-[11px] sm:grid-cols-2">
+                {jobSummary.updatedIds.map(id => (
+                  <li key={id}>{id}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {jobSummary.errors && jobSummary.errors.length > 0 && (
+            <div className="mt-2 space-y-1 text-[11px] text-amber-200">
+              <div className="uppercase tracking-wide text-amber-300">Error detail</div>
+              <ul className="space-y-1">
+                {jobSummary.errors.map((err, index) => (
+                  <li key={`${err.id ?? 'error'}-${index}`}>
+                    <span className="font-mono text-amber-100">{err.id ?? '—'}</span>: {err.message ?? 'Terjadi kesalahan'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+      {jobError && (
+        <div className="rounded-xl border border-rose-900/40 bg-rose-950/40 p-3 text-xs text-rose-200">
+          {jobError}
+        </div>
+      )}
+      {!jobId && jobStatus === 'failed' && !jobError && (
+        <div className="rounded-xl border border-rose-900/40 bg-rose-950/40 p-3 text-xs text-rose-200">
+          Job settlement adjust gagal dijalankan.
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function SettlementAdjustPage() {
@@ -510,6 +831,12 @@ export default function SettlementAdjustPage() {
               <span className="text-[11px] text-neutral-500">Pencarian berdasarkan Order ID atau RRN, otomatis setelah berhenti mengetik.</span>
             </div>
           </div>
+
+          <SettlementAdjustJobControl
+            selectedSubMerchant={selectedSubMerchant}
+            dateRange={dateRange}
+            onJobFinished={() => fetchRows(1)}
+          />
         </section>
 
         <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
