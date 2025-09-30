@@ -2,29 +2,17 @@ import { Response } from 'express'
 import { prisma } from '../../core/prisma'
 import { AuthRequest } from '../../middleware/auth'
 import { logAdminAction } from '../../util/adminLog'
-import { computeSettlement } from '../../service/feeSettlement'
+import {
+  applySettlementAdjustments,
+  runSettlementAdjustmentJob,
+} from '../../service/settlementAdjustmentJob'
+import {
+  getSettlementAdjustmentJob,
+  startSettlementAdjustmentWorker,
+} from '../../worker/settlementAdjustmentJob'
 
 const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS'])
 const REVERSAL_BATCH_SIZE = 25
-
-const prismaTxTimeoutMs = (() => {
-  const rawTimeout = process.env.PRISMA_TX_TIMEOUT_MS
-  if (rawTimeout == null || rawTimeout === '') {
-    return undefined
-  }
-
-  const parsedTimeout = Number(rawTimeout)
-  if (!Number.isFinite(parsedTimeout) || parsedTimeout <= 0) {
-    console.warn('[settlementAdjustment] Ignoring invalid PRISMA_TX_TIMEOUT_MS value', {
-      rawTimeout,
-    })
-    return undefined
-  }
-
-  return parsedTimeout
-})()
-
-const prismaTxOptions = prismaTxTimeoutMs ? { timeout: prismaTxTimeoutMs } : undefined
 
 type OrderReversalRecord = {
   id: string
@@ -190,7 +178,15 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
 }
 
 export async function adjustSettlements(req: AuthRequest, res: Response) {
-  const { transactionIds, dateFrom, dateTo, settlementStatus, settlementTime, feeLauncx } = req.body as any
+  const {
+    transactionIds,
+    dateFrom,
+    dateTo,
+    settlementStatus,
+    settlementTime,
+    feeLauncx,
+    subMerchantId,
+  } = req.body as any
 
   if (!settlementStatus) {
     return res.status(400).json({ error: 'settlementStatus required' })
@@ -202,144 +198,185 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
     return res.status(400).json({ error: 'provide either transactionIds or date range, not both' })
   }
 
-  const orderWhere: any = { status: 'PAID' }
-  const trxWhere: any = { status: 'SUCCESS' }
-  if (hasIds) {
-    orderWhere.id = { in: transactionIds }
-    trxWhere.id = { in: transactionIds }
-  } else if (hasDateRange) {
-    const createdAt: any = {}
-    if (dateFrom) createdAt.gte = new Date(dateFrom)
-    if (dateTo) createdAt.lte = new Date(dateTo)
-    orderWhere.createdAt = createdAt
-    trxWhere.createdAt = createdAt
-  } else {
+  if (!hasIds && !hasDateRange) {
     return res.status(400).json({ error: 'transactionIds or date range required' })
   }
 
   try {
-    const orders = await prisma.order.findMany({
-      where: orderWhere,
-      select: {
-        id: true,
-        amount: true,
-        fee3rdParty: true,
-        feeLauncx: true,
+    if (hasIds) {
+      const orderWhere: any = { status: 'PAID', id: { in: transactionIds } }
+      const trxWhere: any = { status: 'SUCCESS', id: { in: transactionIds } }
+      if (typeof subMerchantId === 'string' && subMerchantId.trim()) {
+        orderWhere.subMerchantId = subMerchantId.trim()
+        trxWhere.subMerchantId = subMerchantId.trim()
       }
-    })
 
-    const oldTrx = await prisma.transaction_request.findMany({
-      where: trxWhere,
-      select: {
-        id: true,
-        amount: true,
-        settlementAmount: true,
-      }
-    })
+      const [orders, oldTrx] = await Promise.all([
+        prisma.order.findMany({
+          where: orderWhere,
+          select: {
+            id: true,
+            amount: true,
+            fee3rdParty: true,
+            feeLauncx: true,
+            subMerchantId: true,
+          },
+        }),
+        prisma.transaction_request.findMany({
+          where: trxWhere,
+          select: {
+            id: true,
+            amount: true,
+            settlementAmount: true,
+            subMerchantId: true,
+          },
+        }),
+      ])
 
-    const feeInput = feeLauncx
-    const getFeePct = (id: string, existingFee?: number | null, baseAmount?: number) => {
-      if (typeof feeInput === 'number') return feeInput
-      if (feeInput && typeof feeInput === 'object') {
-        const val = feeInput[id]
-        if (typeof val === 'number') return val
-      }
-      if (existingFee != null && baseAmount) {
-        return (existingFee / baseAmount) * 100
-      }
-      return 0
-    }
-
-    const updates: { id: string; model: 'order' | 'trx'; settlementAmount: number }[] = []
-    const totalItems = orders.length + oldTrx.length
-    console.log(`Adjusting settlements for ${totalItems} records`)
-    let processed = 0
-    const logProgress = () => {
-      processed++
-      if (processed % 50 === 0 || processed === totalItems) {
-        console.log(`Processed ${processed}/${totalItems}`)
-      }
-    }
-
-    const isFinalSettlement = ['SETTLED', 'DONE', 'SUCCESS', 'COMPLETED'].includes(settlementStatus)
-
-    const batchSize = 200
-    const records = [
-      ...orders.map(o => ({ type: 'order' as const, data: o })),
-      ...oldTrx.map(t => ({ type: 'trx' as const, data: t })),
-    ]
-
-    for (let i = 0; i < records.length; i += batchSize) {
-      const batch = records.slice(i, i + batchSize)
-      const batchUpdates = await prisma.$transaction(
-        async tx => {
-          const bu: { id: string; model: 'order' | 'trx'; settlementAmount: number }[] = []
-          for (const item of batch) {
-            if (item.type === 'order') {
-              const o = item.data
-              const netAmount = o.amount - (o.fee3rdParty ?? 0)
-              const feePct = getFeePct(o.id, o.feeLauncx ?? undefined, netAmount)
-              const { fee, settlement } = computeSettlement(netAmount, { percent: feePct })
-              const result = await tx.order.updateMany({
-                where: { id: o.id, status: 'PAID' },
-                data: {
-                  settlementStatus,
-                  ...(settlementTime && { settlementTime: new Date(settlementTime) }),
-                  feeLauncx: fee,
-                  settlementAmount: settlement,
-                },
-              })
-              if (result.count > 0) {
-                if (isFinalSettlement) {
-                  await tx.order.updateMany({
-                    where: { id: o.id },
-                    data: { status: 'SETTLED', pendingAmount: null },
-                  })
-                }
-                bu.push({ id: o.id, model: 'order', settlementAmount: settlement })
-              }
-            } else {
-              const t = item.data
-              const netAmount = t.settlementAmount ?? t.amount
-              const feePct = getFeePct(t.id)
-              const { settlement } = computeSettlement(netAmount, { percent: feePct })
-              await tx.transaction_request.update({
-                where: { id: t.id },
-                data: {
-                  ...(settlementTime && { settlementAt: new Date(settlementTime) }),
-                  settlementAmount: settlement,
-                },
-              })
-              bu.push({ id: t.id, model: 'trx', settlementAmount: settlement })
-            }
-          }
-          return bu
-        },
-        prismaTxOptions
+      const result = await applySettlementAdjustments(
+        { orders, transactions: oldTrx },
+        { settlementStatus, settlementTime, feeConfig: feeLauncx, targetSubMerchantId: subMerchantId }
       )
-      updates.push(...batchUpdates)
-      batchUpdates.forEach(() => logProgress())
+
+      if (req.userId) {
+        await logAdminAction(req.userId, 'adjustSettlements', null, {
+          transactionIds,
+          settlementStatus,
+          settlementTime,
+          feeLauncx,
+          updated: [
+            ...result.updatedOrderIds.map(id => ({ id, model: 'order' })),
+            ...result.updatedTransactionIds.map(id => ({ id, model: 'trx' })),
+          ],
+        })
+      }
+
+      return res.json({
+        data: {
+          updated: result.updatedOrderIds.length + result.updatedTransactionIds.length,
+          ids: [...result.updatedOrderIds, ...result.updatedTransactionIds],
+        },
+      })
     }
 
-    console.log(`Settlement adjustment completed for ${processed} records`)
+    if (typeof subMerchantId !== 'string' || !subMerchantId.trim()) {
+      return res.status(400).json({ error: 'subMerchantId is required for date range adjustment' })
+    }
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom and dateTo are required for date range adjustment' })
+    }
+
+    const summary = await runSettlementAdjustmentJob(
+      {
+        subMerchantId: subMerchantId.trim(),
+        settlementStatus,
+        start: dateFrom,
+        end: dateTo,
+        feeConfig: feeLauncx,
+        settlementTime,
+      },
+      {
+        onProgress: progress => {
+          if (progress.total > 0 && progress.processed % 100 === 0) {
+            console.log('[adjustSettlements] progress', progress)
+          }
+        },
+      }
+    )
+
+    const updatedIds = [...summary.updatedOrderIds, ...summary.updatedTransactionIds]
 
     if (req.userId) {
       await logAdminAction(req.userId, 'adjustSettlements', null, {
-        transactionIds,
+        subMerchantId: subMerchantId.trim(),
         dateFrom,
         dateTo,
         settlementStatus,
         settlementTime,
         feeLauncx,
-        updated: updates.map(u => ({ id: u.id, model: u.model, settlementAmount: u.settlementAmount })),
+        updated: [
+          ...summary.updatedOrderIds.map(id => ({ id, model: 'order' })),
+          ...summary.updatedTransactionIds.map(id => ({ id, model: 'trx' })),
+        ],
       })
     }
 
-    res.json({ data: { updated: updates.length, ids: updates.map(u => u.id) } })
+    return res.json({
+      data: {
+        updated: updatedIds.length,
+        ids: updatedIds,
+        totals: {
+          orders: summary.totalOrders,
+          transactions: summary.totalTransactions,
+        },
+        range: {
+          start: summary.startBoundary.toISOString(),
+          end: summary.endBoundary.toISOString(),
+        },
+      },
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'internal error' })
   }
+}
+
+export async function startSettlementAdjustmentJob(req: AuthRequest, res: Response) {
+  const body = req.body as {
+    subMerchantId?: unknown
+    settled_from?: unknown
+    settled_to?: unknown
+    settlementStatus?: unknown
+    feeLauncx?: unknown
+    settlementTime?: unknown
+  }
+
+  const subMerchantId = typeof body.subMerchantId === 'string' ? body.subMerchantId.trim() : ''
+  if (!subMerchantId) {
+    return res.status(400).json({ error: 'subMerchantId is required' })
+  }
+
+  const settledFrom = typeof body.settled_from === 'string' ? body.settled_from : undefined
+  const settledTo = typeof body.settled_to === 'string' ? body.settled_to : undefined
+
+  if (!settledFrom || !settledTo) {
+    return res.status(400).json({ error: 'settled_from and settled_to are required' })
+  }
+
+  const settlementStatus = typeof body.settlementStatus === 'string' ? body.settlementStatus : ''
+  if (!settlementStatus) {
+    return res.status(400).json({ error: 'settlementStatus is required' })
+  }
+
+  try {
+    const job = startSettlementAdjustmentWorker({
+      subMerchantId,
+      settlementStatus,
+      start: settledFrom,
+      end: settledTo,
+      feeConfig: body.feeLauncx as any,
+      settlementTime: body.settlementTime as any,
+      adminId: req.userId ?? undefined,
+    })
+    return res.status(202).json(job)
+  } catch (err) {
+    console.error('[startSettlementAdjustmentJob]', err)
+    return res.status(500).json({ error: 'internal error' })
+  }
+}
+
+export async function settlementAdjustmentStatus(req: AuthRequest, res: Response) {
+  const jobId = req.params.jobId
+  if (!jobId) {
+    return res.status(400).json({ error: 'jobId is required' })
+  }
+
+  const job = getSettlementAdjustmentJob(jobId)
+  if (!job) {
+    return res.status(404).json({ error: 'job not found' })
+  }
+
+  return res.json(job)
 }
 
 export async function reverseSettlementToLnSettle(req: AuthRequest, res: Response) {
