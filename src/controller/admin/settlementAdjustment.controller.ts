@@ -24,6 +24,7 @@ type OrderReversalRecord = {
   feeLauncx: number | null
   metadata: unknown
   subMerchantId: string | null
+  partnerClientId: string | null
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -423,6 +424,7 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         feeLauncx: true,
         metadata: true,
         subMerchantId: true,
+        partnerClientId: true,
       },
     })) as OrderReversalRecord[]
 
@@ -437,8 +439,8 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
       where: Record<string, unknown>
       data: Record<string, unknown>
       reversalAmount: number
+      partnerClientId: string | null
     }[] = []
-
     for (const id of ids) {
       const order = orderMap.get(id)
       if (!order) {
@@ -472,6 +474,8 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         reversedAt: now,
         reversedBy: req.userId ?? null,
       }
+      const reversalAmount = calculateReversalAmount(order)
+
       ordersToReverse.push({
         id: order.id,
         where: {
@@ -489,31 +493,86 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           loanedAt: now,
           metadata: mergedMetadata,
         },
-        reversalAmount: calculateReversalAmount(order),
+        reversalAmount,
+        partnerClientId: order.partnerClientId,
       })
     }
 
+    const partnerBalanceAdjustments = new Map<string, number>()
+
     for (let i = 0; i < ordersToReverse.length; i += REVERSAL_BATCH_SIZE) {
       const batch = ordersToReverse.slice(i, i + REVERSAL_BATCH_SIZE)
-      const batchResults = await Promise.all(
-        batch.map(async item => ({
-          id: item.id,
-          result: await prisma.order.updateMany({
-            where: item.where,
-            data: item.data,
-          }),
-          reversalAmount: item.reversalAmount,
-        }))
-      )
+      const batchOutcome = await prisma.$transaction(async tx => {
+        const batchResults = await Promise.all(
+          batch.map(async item => ({
+            item,
+            result: await tx.order.updateMany({
+              where: item.where,
+              data: item.data,
+            }),
+          }))
+        )
 
-      for (const { id, result, reversalAmount } of batchResults) {
-        if (!result || result.count === 0) {
-          errors.push({ id, message: 'Order gagal diperbarui (mungkin sudah diubah)' })
-          continue
+        const successfulItems = batchResults
+          .filter(({ result }) => result && result.count > 0)
+          .map(({ item }) => item)
+
+        const updateErrors = batchResults
+          .filter(({ result }) => !result || result.count === 0)
+          .map(({ item }) => ({
+            id: item.id,
+            message: 'Order gagal diperbarui (mungkin sudah diubah)',
+          }))
+
+        const missingPartnerOrders: string[] = []
+        const partnerAdjustments = new Map<string, number>()
+        for (const item of successfulItems) {
+          if (item.partnerClientId) {
+            const total = partnerAdjustments.get(item.partnerClientId) ?? 0
+            partnerAdjustments.set(item.partnerClientId, total + item.reversalAmount)
+          } else {
+            missingPartnerOrders.push(item.id)
+          }
         }
 
+        await Promise.all(
+          Array.from(partnerAdjustments.entries()).map(([partnerClientId, amount]) =>
+            tx.partnerClient.update({
+              where: { id: partnerClientId },
+              data: { balance: { decrement: amount } },
+            })
+          )
+        )
+
+        return {
+          successfulItems,
+          updateErrors,
+          missingPartnerOrders,
+          partnerAdjustments: Array.from(partnerAdjustments.entries()).map(
+            ([partnerClientId, amount]) => ({ partnerClientId, amount })
+          ),
+        }
+      })
+
+      for (const item of batchOutcome.successfulItems) {
         ok += 1
-        totalReversalAmount += reversalAmount
+        totalReversalAmount += item.reversalAmount
+      }
+
+      for (const err of batchOutcome.updateErrors) {
+        errors.push(err)
+      }
+
+      for (const missingId of batchOutcome.missingPartnerOrders) {
+        errors.push({
+          id: missingId,
+          message: 'Order berhasil direversal tetapi tidak memiliki partnerClientId untuk penyesuaian saldo',
+        })
+      }
+
+      for (const adjustment of batchOutcome.partnerAdjustments) {
+        const total = partnerBalanceAdjustments.get(adjustment.partnerClientId) ?? 0
+        partnerBalanceAdjustments.set(adjustment.partnerClientId, total + adjustment.amount)
       }
     }
 
@@ -530,10 +589,22 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         fail,
         totalReversalAmount,
         errors,
+        partnerBalanceAdjustments: Array.from(partnerBalanceAdjustments.entries()).map(
+          ([partnerClientId, amount]) => ({ partnerClientId, amount })
+        ),
       })
     }
 
-    return res.json({ processed, ok, fail, totalReversalAmount, errors })
+    return res.json({
+      processed,
+      ok,
+      fail,
+      totalReversalAmount,
+      errors,
+      partnerBalanceAdjustments: Array.from(partnerBalanceAdjustments.entries()).map(
+        ([partnerClientId, amount]) => ({ partnerClientId, amount })
+      ),
+    })
   } catch (err) {
     console.error('reverseSettlementToLnSettle error', err)
     return res.status(500).json({ error: 'internal error' })
