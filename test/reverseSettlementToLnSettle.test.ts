@@ -78,7 +78,7 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
   prisma.order.findMany = async () =>
     ids.map(id => ({
       id,
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: 100,
       amount: 200,
@@ -195,9 +195,8 @@ test('eligible settlements include PAID orders flagged as settled', { concurrenc
   assert.equal(res.body.data[0]?.settlementStatus, 'SETTLED')
   assert.equal(typeof res.body.data[0]?.settlementTime, 'string')
 
-  assert.equal(Array.isArray(capturedWhere?.settlementStatus?.in), true)
-  assert.equal(capturedWhere?.settlementStatus?.in.includes('SETTLED'), true)
-  assert.equal(capturedWhere?.status, undefined)
+  assert.deepEqual(capturedWhere?.status?.in, ['PAID', 'DONE', 'SUCCESS'])
+  assert.equal(capturedWhere?.settlementStatus, undefined)
   assert.equal(capturedSelect?.settlementStatus, true)
 })
 
@@ -265,7 +264,7 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
   prisma.order.findMany = async () => [
     {
       id: 'eligible',
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: 80,
       amount: 100,
@@ -291,7 +290,7 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
     },
     {
       id: 'missing-settlement',
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: null,
       settlementAmount: null,
       amount: 100,
@@ -304,7 +303,7 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
     },
     {
       id: 'invalid-status',
-      status: 'PAID',
+      status: 'PENDING',
       settlementTime: now,
       settlementAmount: 70,
       amount: 100,
@@ -351,7 +350,7 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
   const errorMessages = new Map(res.body.errors.map((err: any) => [err.id, err.message]))
   assert.equal(
     errorMessages.get('invalid-status'),
-    'Status PAID tidak dapat direversal'
+    'Status PENDING tidak dapat direversal'
   )
   assert.equal(
     errorMessages.get('missing-settlement'),
@@ -376,7 +375,7 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
   prisma.order.findMany = async () => [
     {
       id: 'order-1',
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: null,
       amount: 150,
@@ -389,7 +388,7 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
     },
     {
       id: 'order-2',
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: 60,
       amount: 0,
@@ -402,7 +401,7 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
     },
     {
       id: 'order-3',
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: 40,
       amount: 0,
@@ -463,7 +462,7 @@ test('persists loan entry metadata alongside reversal updates', { concurrency: 1
   prisma.order.findMany = async () => [
     {
       id: orderId,
-      status: 'SETTLED',
+      status: 'SUCCESS',
       settlementTime: now,
       settlementAmount: null,
       amount: 150,
