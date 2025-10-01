@@ -25,6 +25,11 @@ type OrderReversalRecord = {
   metadata: unknown
   subMerchantId: string | null
   partnerClientId: string | null
+  loanEntry?: {
+    amount: number | null
+    metadata: unknown
+    subMerchantId: string
+  } | null
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -425,6 +430,13 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         metadata: true,
         subMerchantId: true,
         partnerClientId: true,
+        loanEntry: {
+          select: {
+            amount: true,
+            metadata: true,
+            subMerchantId: true,
+          },
+        },
       },
     })) as OrderReversalRecord[]
 
@@ -440,6 +452,8 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
       data: Record<string, unknown>
       reversalAmount: number
       partnerClientId: string | null
+      subMerchantId: string | null
+      existingLoanEntry: OrderReversalRecord['loanEntry']
     }[] = []
     for (const id of ids) {
       const order = orderMap.get(id)
@@ -476,6 +490,9 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
       }
       const reversalAmount = calculateReversalAmount(order)
 
+      const resolvedSubMerchantId =
+        order.subMerchantId ?? order.loanEntry?.subMerchantId ?? null
+
       ordersToReverse.push({
         id: order.id,
         where: {
@@ -489,12 +506,14 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           settlementTime: null,
           settlementAmount: null,
           settlementStatus: null,
-          pendingAmount: 0,
+          pendingAmount: null,
           loanedAt: now,
           metadata: mergedMetadata,
         },
         reversalAmount,
         partnerClientId: order.partnerClientId,
+        subMerchantId: resolvedSubMerchantId,
+        existingLoanEntry: order.loanEntry ?? null,
       })
     }
 
@@ -525,6 +544,7 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           }))
 
         const missingPartnerOrders: string[] = []
+        const loanEntryErrors: { id: string; message: string }[] = []
         const partnerAdjustments = new Map<string, number>()
         for (const item of successfulItems) {
           if (item.partnerClientId) {
@@ -533,6 +553,46 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           } else {
             missingPartnerOrders.push(item.id)
           }
+        }
+
+        for (const item of successfulItems) {
+          if (!item.subMerchantId) {
+            loanEntryErrors.push({
+              id: item.id,
+              message: 'Order berhasil direversal tetapi tidak memiliki subMerchantId untuk loan entry',
+            })
+            continue
+          }
+
+          const baseLoanMetadata = isPlainObject(item.existingLoanEntry?.metadata)
+            ? { ...item.existingLoanEntry!.metadata }
+            : {}
+
+          const loanMetadata = {
+            ...baseLoanMetadata,
+            lastAction: 'reverseSettlementToLnSettle',
+            reversal: {
+              amount: item.reversalAmount,
+              reason: reason ?? null,
+              reversedAt: now.toISOString(),
+              reversedBy: req.userId ?? null,
+            },
+          }
+
+          await tx.loanEntry.upsert({
+            where: { orderId: item.id },
+            update: {
+              amount: item.reversalAmount,
+              subMerchantId: item.subMerchantId,
+              metadata: loanMetadata,
+            },
+            create: {
+              orderId: item.id,
+              amount: item.reversalAmount,
+              subMerchantId: item.subMerchantId,
+              metadata: loanMetadata,
+            },
+          })
         }
 
         await Promise.all(
@@ -551,6 +611,7 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           partnerAdjustments: Array.from(partnerAdjustments.entries()).map(
             ([partnerClientId, amount]) => ({ partnerClientId, amount })
           ),
+          loanEntryErrors,
         }
       })
 
@@ -568,6 +629,10 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           id: missingId,
           message: 'Order berhasil direversal tetapi tidak memiliki partnerClientId untuk penyesuaian saldo',
         })
+      }
+
+      for (const loanErr of batchOutcome.loanEntryErrors) {
+        errors.push(loanErr)
       }
 
       for (const adjustment of batchOutcome.partnerAdjustments) {

@@ -14,6 +14,9 @@ const prismaMock: any = {
   partnerClient: {
     update: async () => ({}),
   },
+  loanEntry: {
+    upsert: async () => ({}),
+  },
 }
 
 prismaMock.$transaction = async (arg: any) => {
@@ -66,8 +69,9 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
       fee3rdParty: 50,
       feeLauncx: 50,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: 'partner-a',
+      loanEntry: null,
     }))
 
   let concurrent = 0
@@ -85,6 +89,12 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
   let totalBalanceDecrement = 0
   prisma.partnerClient.update = async ({ data }: any) => {
     totalBalanceDecrement += Number(data?.balance?.decrement ?? 0)
+    return {}
+  }
+
+  let loanUpserts = 0
+  prisma.loanEntry.upsert = async () => {
+    loanUpserts += 1
     return {}
   }
 
@@ -107,6 +117,7 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
   assert.deepEqual(res.body.partnerBalanceAdjustments, [
     { partnerClientId: 'partner-a', amount: totalOrders * 100 },
   ])
+  assert.equal(loanUpserts, totalOrders)
 })
 
 test('rejects ineligible statuses and missing settlement time', { concurrency: 1 }, async () => {
@@ -124,8 +135,9 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
       fee3rdParty: 10,
       feeLauncx: 10,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: null,
+      loanEntry: null,
     },
     {
       id: 'already-ln-settle',
@@ -136,8 +148,9 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
       fee3rdParty: 0,
       feeLauncx: 0,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: null,
+      loanEntry: null,
     },
     {
       id: 'missing-settlement',
@@ -148,8 +161,9 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
       fee3rdParty: 0,
       feeLauncx: 0,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: null,
+      loanEntry: null,
     },
     {
       id: 'invalid-status',
@@ -160,8 +174,9 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
       fee3rdParty: 10,
       feeLauncx: 20,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: null,
+      loanEntry: null,
     },
   ]
 
@@ -175,6 +190,12 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
     throw new Error('should not update partner balance when no partnerClientId')
   }
 
+  const loanEntryPayloads: any[] = []
+  prisma.loanEntry.upsert = async (args: any) => {
+    loanEntryPayloads.push(args)
+    return {}
+  }
+
   const app = createApp()
   const res = await request(app)
     .post('/settlement/reverse')
@@ -186,6 +207,9 @@ test('rejects ineligible statuses and missing settlement time', { concurrency: 1
   assert.equal(res.body.fail, ids.length - 2)
   assert.equal(res.body.totalReversalAmount, 80)
   assert.deepEqual(updatedIds, ['eligible'])
+
+  assert.equal(loanEntryPayloads.length, 1)
+  assert.equal(loanEntryPayloads[0]?.create?.amount, 80)
 
   const errorMessages = new Map(res.body.errors.map((err: any) => [err.id, err.message]))
   assert.equal(
@@ -222,8 +246,9 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
       fee3rdParty: 25,
       feeLauncx: 5,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: 'partner-1',
+      loanEntry: null,
     },
     {
       id: 'order-2',
@@ -234,8 +259,9 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
       fee3rdParty: 0,
       feeLauncx: 0,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-1',
       partnerClientId: 'partner-1',
+      loanEntry: null,
     },
     {
       id: 'order-3',
@@ -246,8 +272,9 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
       fee3rdParty: 0,
       feeLauncx: 0,
       metadata: {},
-      subMerchantId: null,
+      subMerchantId: 'sub-merchant-2',
       partnerClientId: 'partner-2',
+      loanEntry: null,
     },
   ]
 
@@ -258,6 +285,12 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
     const id = where.id
     const decrement = Number(data?.balance?.decrement ?? 0)
     balanceUpdates[id] = (balanceUpdates[id] ?? 0) + decrement
+    return {}
+  }
+
+  const loanEntryPayloads: any[] = []
+  prisma.loanEntry.upsert = async (args: any) => {
+    loanEntryPayloads.push(args)
     return {}
   }
 
@@ -282,4 +315,78 @@ test('decrements partner balance by reversed amount', { concurrency: 1 }, async 
       .map(([partnerClientId, amount]) => ({ partnerClientId, amount }))
       .sort((a, b) => a.partnerClientId.localeCompare(b.partnerClientId))
   )
+  assert.equal(loanEntryPayloads.length, ids.length)
+})
+
+test('persists loan entry metadata alongside reversal updates', { concurrency: 1 }, async () => {
+  const orderId = 'order-loan-1'
+  const now = new Date()
+  const prisma = require.cache[prismaPath].exports.prisma
+
+  prisma.order.findMany = async () => [
+    {
+      id: orderId,
+      status: 'SETTLED',
+      settlementTime: now,
+      settlementAmount: null,
+      amount: 150,
+      fee3rdParty: 15,
+      feeLauncx: 5,
+      metadata: {},
+      subMerchantId: 'sub-loan-1',
+      partnerClientId: 'partner-loan-1',
+      loanEntry: {
+        amount: 120,
+        metadata: { previous: true },
+        subMerchantId: 'sub-loan-1',
+      },
+    },
+  ]
+
+  const updateArgs: any[] = []
+  prisma.order.updateMany = async (args: any) => {
+    updateArgs.push(args)
+    return { count: 1 }
+  }
+
+  let loanEntryArgs: any = null
+  prisma.loanEntry.upsert = async (args: any) => {
+    loanEntryArgs = args
+    return {}
+  }
+
+  let balanceAdjustment = 0
+  prisma.partnerClient.update = async ({ data }: any) => {
+    balanceAdjustment += Number(data?.balance?.decrement ?? 0)
+    return {}
+  }
+
+  const app = createApp()
+  const res = await request(app)
+    .post('/settlement/reverse')
+    .send({ orderIds: [orderId], reason: 'manual review' })
+
+  const expectedAmount = 150 - 15 - 5
+
+  assert.equal(res.status, 200)
+  assert.equal(res.body.ok, 1)
+  assert.equal(res.body.fail, 0)
+  assert.equal(res.body.totalReversalAmount, expectedAmount)
+
+  assert.equal(updateArgs.length, 1)
+  assert.equal(updateArgs[0]?.data?.status, 'LN_SETTLE')
+  assert.equal(updateArgs[0]?.data?.pendingAmount, null)
+
+  assert.ok(loanEntryArgs)
+  assert.equal(loanEntryArgs?.where?.orderId, orderId)
+  assert.equal(loanEntryArgs?.update?.amount, expectedAmount)
+  assert.equal(loanEntryArgs?.update?.subMerchantId, 'sub-loan-1')
+  assert.equal(loanEntryArgs?.update?.metadata?.previous, true)
+  assert.equal(loanEntryArgs?.update?.metadata?.lastAction, 'reverseSettlementToLnSettle')
+  assert.equal(loanEntryArgs?.update?.metadata?.reversal?.amount, expectedAmount)
+  assert.equal(loanEntryArgs?.update?.metadata?.reversal?.reason, 'manual review')
+  assert.equal(loanEntryArgs?.update?.metadata?.reversal?.reversedBy, 'admin1')
+  assert.equal(typeof loanEntryArgs?.update?.metadata?.reversal?.reversedAt, 'string')
+
+  assert.equal(balanceAdjustment, expectedAmount)
 })
