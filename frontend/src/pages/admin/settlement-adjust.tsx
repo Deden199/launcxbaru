@@ -61,10 +61,6 @@ type ToastState =
   | null
 
 // Pakai strategy: 'fixed' agar tidak terpengaruh transform/overflow parent
-const DATEPICKER_POPPER = {
-  strategy: 'fixed' as const,
-}
-
 function formatCurrency(value: number) {
   return value.toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })
 }
@@ -416,7 +412,7 @@ export default function SettlementAdjustPage() {
 
   // Pastikan portal untuk DatePicker tersedia di <body>
   useEffect(() => {
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
     let portal = document.getElementById(DATEPICKER_PORTAL_ID)
     if (!portal) {
       portal = document.createElement('div')
@@ -821,12 +817,7 @@ export default function SettlementAdjustPage() {
                 // === FIX: render calendar ke portal di <body> agar tidak ketutup ===
                 withPortal
                 portalId={DATEPICKER_PORTAL_ID}
-                // Strategy fixed + modifiers biar gak kena overflow/transform parent
-                popperProps={DATEPICKER_POPPER}
-                popperModifiers={[
-                  { name: 'computeStyles', options: { adaptive: false } },
-                  { name: 'preventOverflow', options: { rootBoundary: 'document' } },
-                ]}
+                popperProps={{ strategy: 'fixed' }}
                 popperClassName="datepicker-popper"
                 calendarClassName="dp-dark"
                 className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
