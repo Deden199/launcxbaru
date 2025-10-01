@@ -424,7 +424,7 @@ test('bulk settle submits every selectable order id', async () => {
               id: 'order-2',
               amount: 20000,
               pendingAmount: 20000,
-              status: 'PAID',
+              status: 'SUCCESS',
               createdAt: new Date('2024-01-02T04:00:00Z').toISOString(),
               loanedAt: null,
               loanAmount: null,
@@ -453,8 +453,13 @@ test('bulk settle submits every selectable order id', async () => {
   await findByText('order-1')
   await findByText('order-2')
 
-  const toggleAll = (await findByLabelText('Pilih semua transaksi PAID')) as HTMLInputElement
+  const toggleAll = (await findByLabelText(
+    'Pilih semua transaksi PAID/SUCCESS/DONE/SETTLED'
+  )) as HTMLInputElement
+  const successCheckbox = (await findByLabelText('Pilih transaksi order-2')) as HTMLInputElement
+  assert.equal(successCheckbox.disabled, false)
   fireEvent.click(toggleAll)
+  assert.equal(successCheckbox.checked, true)
 
   const settleButton = await findByRole('button', { name: 'Tandai Loan Settled (2)' })
   fireEvent.click(settleButton)

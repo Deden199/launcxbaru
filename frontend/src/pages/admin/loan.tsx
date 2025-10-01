@@ -24,15 +24,61 @@ export const MAX_LOAN_PAGE_SIZE = 1500
 export const DEFAULT_LOAN_PAGE_SIZE = MAX_LOAN_PAGE_SIZE
 const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000, MAX_LOAN_PAGE_SIZE]
 
+const SUPPORTED_LOAN_STATUSES = ['PAID', 'SUCCESS', 'DONE', 'SETTLED', 'LN_SETTLED'] as const
+const SELECTABLE_LOAN_STATUSES = ['PAID', 'SUCCESS', 'DONE', 'SETTLED'] as const
+const SELECTABLE_LOAN_STATUS_LABEL = SELECTABLE_LOAN_STATUSES.join('/')
+const SELECTABLE_LOAN_STATUS_TEXT =
+  SELECTABLE_LOAN_STATUSES.length > 1
+    ? `${SELECTABLE_LOAN_STATUSES.slice(0, -1).join(', ')} atau ${
+        SELECTABLE_LOAN_STATUSES[SELECTABLE_LOAN_STATUSES.length - 1]
+      }`
+    : SELECTABLE_LOAN_STATUSES[0]
+
+type LoanTransactionStatus = (typeof SUPPORTED_LOAN_STATUSES)[number]
+
+const isSupportedLoanStatus = (value: unknown): value is LoanTransactionStatus =>
+  typeof value === 'string' && SUPPORTED_LOAN_STATUSES.includes(value as LoanTransactionStatus)
+
+const isSelectableLoanStatus = (status: LoanTransactionStatus) =>
+  SELECTABLE_LOAN_STATUSES.includes(status as (typeof SELECTABLE_LOAN_STATUSES)[number])
+
 type LoanTransaction = {
   id: string
   amount: number
   pendingAmount: number
-  status: 'PAID' | 'LN_SETTLED'
+  status: LoanTransactionStatus
   createdAt: string
   loanedAt: string | null
   loanAmount: number | null
   loanCreatedAt: string | null
+}
+
+const LOAN_STATUS_BADGE_META: Record<LoanTransactionStatus, { label: string; className: string; title?: string }> = {
+  PAID: {
+    label: 'Paid',
+    className: 'bg-indigo-950/40 text-indigo-300 border border-indigo-900/40',
+  },
+  SUCCESS: {
+    label: 'Success',
+    className: 'bg-sky-950/40 text-sky-200 border border-sky-900/40',
+    title: 'Success: transaksi sukses oleh gateway dan siap diproses loan-settled.',
+  },
+  DONE: {
+    label: 'Done',
+    className: 'bg-emerald-950/40 text-emerald-200 border border-emerald-900/40',
+    title: 'Done: transaksi selesai dan siap ditandai sebagai loan-settled.',
+  },
+  SETTLED: {
+    label: 'Settled',
+    className: 'bg-teal-950/40 text-teal-200 border border-teal-900/40',
+    title: 'Settled: transaksi diselesaikan oleh sistem settlement dan siap loan-settled.',
+  },
+  LN_SETTLED: {
+    label: 'Loan Settled',
+    className: 'bg-purple-950/40 text-purple-200 border border-purple-900/40',
+    title:
+      'Loan-settled: transaksi ditandai sebagai pelunasan pinjaman/manual, tidak ikut proses settlement.',
+  },
 }
 
 type LoanSettlementSummary = {
@@ -60,27 +106,14 @@ const formatDateTime = (value: string | null) =>
     : '-'
 
 function LoanStatusBadge({ status }: { status: LoanTransaction['status'] }) {
-  const meta =
-    status === 'LN_SETTLED'
-      ? {
-          label: 'Loan Settled',
-          className:
-            'bg-purple-950/40 text-purple-200 border border-purple-900/40',
-          title:
-            'Loan-settled: transaksi ditandai sebagai pelunasan pinjaman/manual, tidak ikut proses settlement.',
-        }
-      : {
-          label: 'Paid',
-          className: 'bg-indigo-950/40 text-indigo-300 border border-indigo-900/40',
-          title: undefined,
-        }
+  const metaEntry = LOAN_STATUS_BADGE_META[status] ?? LOAN_STATUS_BADGE_META.PAID
 
   return (
     <span
-      title={meta.title}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase ${meta.className}`}
+      title={metaEntry.title}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase ${metaEntry.className}`}
     >
-      {meta.label}
+      {metaEntry.label}
     </span>
   )
 }
@@ -156,7 +189,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   }, [apiClient])
 
   const displayedTransactions = useMemo(
-    () => transactions.filter(tx => tx.status === 'PAID'),
+    () => transactions.filter(tx => isSelectableLoanStatus(tx.status)),
     [transactions]
   )
 
@@ -227,16 +260,23 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       })
 
       const rawList = Array.isArray(data.data) ? data.data : []
-      const mapped: LoanTransaction[] = rawList.map((raw) => ({
-        id: raw.id,
-        amount: raw.amount ?? 0,
-        pendingAmount: raw.pendingAmount ?? 0,
-        status: raw.status === 'LN_SETTLED' ? 'LN_SETTLED' : 'PAID',
-        createdAt: raw.createdAt,
-        loanedAt: raw.loanedAt ?? null,
-        loanAmount: raw.loanAmount ?? null,
-        loanCreatedAt: raw.loanCreatedAt ?? null,
-      }))
+      const mapped: LoanTransaction[] = rawList.map((raw) => {
+        const rawStatus: unknown = raw.status
+        const status: LoanTransactionStatus = isSupportedLoanStatus(rawStatus)
+          ? rawStatus
+          : 'PAID'
+
+        return {
+          id: raw.id,
+          amount: raw.amount ?? 0,
+          pendingAmount: raw.pendingAmount ?? 0,
+          status,
+          createdAt: raw.createdAt,
+          loanedAt: raw.loanedAt ?? null,
+          loanAmount: raw.loanAmount ?? null,
+          loanCreatedAt: raw.loanCreatedAt ?? null,
+        }
+      })
 
       setTransactions(prev => (append ? [...prev, ...mapped] : mapped))
       setRawTotalCount(prev => data.meta?.total ?? (append ? prev : mapped.length))
@@ -451,7 +491,9 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       return
     }
     if (selectedOrders.length === 0) {
-      setFormError('Pilih minimal satu transaksi berstatus PAID.')
+      setFormError(
+        `Pilih minimal satu transaksi berstatus ${SELECTABLE_LOAN_STATUS_TEXT}.`
+      )
       return
     }
 
@@ -686,7 +728,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     <th className="px-3 py-2 text-left">
                       <input
                         type="checkbox"
-                        aria-label="Pilih semua transaksi PAID"
+                        aria-label={`Pilih semua transaksi ${SELECTABLE_LOAN_STATUS_LABEL}`}
                         checked={selectableIds.length > 0 && selectedOrders.length === selectableIds.length}
                         onChange={event => toggleAll(event.target.checked)}
                         disabled={selectableIds.length === 0}
@@ -718,7 +760,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     </tr>
                   ) : (
                     displayedTransactions.map(tx => {
-                      const disabled = tx.status !== 'PAID'
+                      const disabled = !isSelectableLoanStatus(tx.status)
                       const checked = selectedOrders.includes(tx.id)
                       return (
                         <tr key={tx.id} className="border-b border-neutral-800 last:border-0">
@@ -768,7 +810,16 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="text-xs text-neutral-400 sm:max-w-sm">
-                Hanya transaksi berstatus <strong>PAID</strong> yang dapat ditandai sebagai loan-settled.
+                Hanya transaksi berstatus{' '}
+                {SELECTABLE_LOAN_STATUSES.length > 1 ? (
+                  <>
+                    <strong>{SELECTABLE_LOAN_STATUSES.slice(0, -1).join(', ')}</strong> atau{' '}
+                    <strong>{SELECTABLE_LOAN_STATUSES.slice(-1)[0]}</strong>
+                  </>
+                ) : (
+                  <strong>{SELECTABLE_LOAN_STATUSES[0]}</strong>
+                )}{' '}
+                yang dapat ditandai sebagai loan-settled.
               </div>
               <div className="flex w-full flex-col gap-3 sm:w-80">
                 <label htmlFor="loan-note" className="text-sm font-medium text-neutral-200">
