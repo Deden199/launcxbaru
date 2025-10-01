@@ -36,6 +36,15 @@ export const toEndOfDayWib = (value: string) => {
   return date.endOf('day').toDate()
 }
 
+export const LOAN_ADJUSTABLE_STATUSES = [
+  ORDER_STATUS.PAID,
+  ORDER_STATUS.SUCCESS,
+  ORDER_STATUS.DONE,
+  ORDER_STATUS.SETTLED,
+] as const
+
+export type LoanAdjustableStatus = (typeof LOAN_ADJUSTABLE_STATUSES)[number]
+
 export type MarkSettledSummary = {
   ok: string[]
   fail: string[]
@@ -56,6 +65,7 @@ export type OrderForLoanSettlement = {
   pendingAmount: number | null | undefined
   settlementAmount: number | null | undefined
   settlementStatus: string | null | undefined
+  settlementTime: Date | null | undefined
   metadata: unknown
   subMerchantId: string | null | undefined
   loanedAt: Date | null
@@ -67,6 +77,8 @@ export type LoanSettlementUpdate = {
   subMerchantId?: string | null
   metadata: Record<string, any>
   pendingAmount: number | null | undefined
+  originalStatus: string
+  settlementAmount: number | null | undefined
 }
 
 export function normalizeMetadata(value: unknown): Record<string, any> {
@@ -110,11 +122,13 @@ export async function applyLoanSettlementUpdates({
         for (const update of chunk) {
           try {
             const result = await tx.order.updateMany({
-              where: { id: update.id, status: ORDER_STATUS.PAID },
+              where: { id: update.id, status: update.originalStatus },
               data: {
                 status: ORDER_STATUS.LN_SETTLED,
                 pendingAmount: null,
                 settlementStatus: null,
+                settlementTime: null,
+                settlementAmount: null,
                 loanedAt: now,
                 metadata: update.metadata,
               },
@@ -135,8 +149,13 @@ export async function applyLoanSettlementUpdates({
               summary.ok.push(update.id)
             }
 
-            const amount = Number(update.pendingAmount ?? 0)
-            if (amount > 0 && update.subMerchantId) {
+            let amount = Number(update.pendingAmount ?? 0)
+            if ((!Number.isFinite(amount) || amount <= 0) && update.settlementAmount != null) {
+              const fallback = Number(update.settlementAmount)
+              amount = Number.isFinite(fallback) ? fallback : 0
+            }
+
+            if (Number.isFinite(amount) && amount > 0 && update.subMerchantId) {
               await tx.loanEntry.upsert({
                 where: { orderId: update.id },
                 create: {
@@ -164,7 +183,7 @@ export async function applyLoanSettlementUpdates({
 
             events.push({
               orderId: update.id,
-              previousStatus: ORDER_STATUS.PAID,
+              previousStatus: update.originalStatus,
               adminId,
               markedAt: markedAtIso,
               note,
@@ -217,7 +236,7 @@ export async function runLoanSettlementByRange({
     const orders = (await prisma.order.findMany({
       where: {
         subMerchantId,
-        status: ORDER_STATUS.PAID,
+        status: { in: LOAN_ADJUSTABLE_STATUSES },
         createdAt: {
           gte: start,
           lte: end,
@@ -244,6 +263,7 @@ export async function runLoanSettlementByRange({
         pendingAmount: true,
         settlementAmount: true,
         settlementStatus: true,
+        settlementTime: true,
         metadata: true,
         subMerchantId: true,
         loanedAt: true,
@@ -264,7 +284,7 @@ export async function runLoanSettlementByRange({
       const metadata = normalizeMetadata(order.metadata)
       const auditEntry = {
         reason: LOAN_SETTLED_METADATA_REASON,
-        previousStatus: ORDER_STATUS.PAID,
+        previousStatus: order.status,
         markedBy: adminId ?? 'unknown',
         markedAt: markedAtIso,
         ...(trimmedNote ? { note: trimmedNote } : {}),
@@ -283,6 +303,8 @@ export async function runLoanSettlementByRange({
         subMerchantId: order.subMerchantId,
         metadata,
         pendingAmount: order.pendingAmount,
+        originalStatus: order.status,
+        settlementAmount: order.settlementAmount,
       })
     }
 

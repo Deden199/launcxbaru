@@ -11,6 +11,8 @@ import {
   toStartOfDayWib,
   toEndOfDayWib,
   normalizeMetadata,
+  LOAN_ADJUSTABLE_STATUSES,
+  type LoanAdjustableStatus,
   applyLoanSettlementUpdates,
   runLoanSettlementByRange,
   type MarkSettledSummary,
@@ -60,7 +62,7 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
 
     const safePageSize = Math.min(pageSize, MAX_PAGE_SIZE);
     const skip = (page - 1) * safePageSize;
-    const statusValues = [ORDER_STATUS.PAID, ORDER_STATUS.LN_SETTLED];
+    const statusValues = [...LOAN_ADJUSTABLE_STATUSES, ORDER_STATUS.LN_SETTLED];
     const where = {
       subMerchantId,
       status: { in: statusValues },
@@ -141,6 +143,7 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         pendingAmount: true,
         settlementAmount: true,
         settlementStatus: true,
+        settlementTime: true,
         metadata: true,
         subMerchantId: true,
         loanedAt: true,
@@ -158,6 +161,9 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
     const markedAtIso = now.toISOString();
     const adminId = req.userId ?? undefined;
 
+    const isLoanAdjustableStatus = (status: string): status is LoanAdjustableStatus =>
+      (LOAN_ADJUSTABLE_STATUSES as readonly string[]).includes(status);
+
     for (const id of orderIds) {
       const order = ordersById.get(id);
       if (!order) {
@@ -173,7 +179,7 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         continue;
       }
 
-      if (order.status !== ORDER_STATUS.PAID) {
+      if (!isLoanAdjustableStatus(order.status)) {
         summary.fail.push(id);
         summary.errors.push({
           orderId: id,
@@ -185,7 +191,7 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
       const metadata = normalizeMetadata(order.metadata);
       const auditEntry = {
         reason: LOAN_SETTLED_METADATA_REASON,
-        previousStatus: ORDER_STATUS.PAID,
+        previousStatus: order.status,
         markedBy: adminId ?? 'unknown',
         markedAt: markedAtIso,
         ...(note ? { note } : {}),
@@ -204,6 +210,8 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         subMerchantId: order.subMerchantId,
         metadata,
         pendingAmount: order.pendingAmount,
+        originalStatus: order.status,
+        settlementAmount: order.settlementAmount,
       });
     }
 
