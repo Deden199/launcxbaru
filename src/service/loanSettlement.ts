@@ -236,7 +236,7 @@ export async function runLoanSettlementByRange({
     const orders = (await prisma.order.findMany({
       where: {
         subMerchantId,
-        status: { in: LOAN_ADJUSTABLE_STATUSES },
+        status: { in: [...LOAN_ADJUSTABLE_STATUSES] },
         createdAt: {
           gte: start,
           lte: end,
