@@ -123,7 +123,7 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
 
   const where: any = {
     subMerchantId: subMerchantId.trim(),
-    status: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
+    settlementStatus: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
     settlementTime: {
       not: null,
       gte: fromDate,
@@ -150,6 +150,7 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
           id: true,
           subMerchantId: true,
           status: true,
+          settlementStatus: true,
           settlementTime: true,
           settlementAmount: true,
           amount: true,
@@ -164,6 +165,7 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
       id: row.id,
       subMerchantId: row.subMerchantId,
       status: row.status,
+      settlementStatus: row.settlementStatus,
       settlementTime: row.settlementTime?.toISOString() ?? null,
       settlementAmount: row.settlementAmount ?? null,
       amount: row.amount ?? null,
