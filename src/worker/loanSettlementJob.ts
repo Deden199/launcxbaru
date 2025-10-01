@@ -28,37 +28,44 @@ export interface LoanSettlementJob {
   completedAt?: string
 }
 
+const DEFAULT_LOAN_SETTLEMENT_CONCURRENCY = 2
+const configuredConcurrency = Number(process.env.LOAN_SETTLEMENT_CONCURRENCY)
+const LOAN_SETTLEMENT_CONCURRENCY =
+  Number.isFinite(configuredConcurrency) && configuredConcurrency >= 1
+    ? Math.max(1, Math.floor(configuredConcurrency))
+    : DEFAULT_LOAN_SETTLEMENT_CONCURRENCY
+
 const jobs = new Map<string, LoanSettlementJob>()
 const queue: LoanSettlementJob[] = []
-let current: LoanSettlementJob | null = null
+const activeJobs = new Set<LoanSettlementJob>()
 
 const getNowIso = () => wibTimestamp().toISOString()
 
 function runNext() {
-  if (current || queue.length === 0) return
+  while (activeJobs.size < LOAN_SETTLEMENT_CONCURRENCY && queue.length > 0) {
+    const job = queue.shift()!
+    activeJobs.add(job)
+    job.status = 'running'
+    job.startedAt = getNowIso()
+    job.updatedAt = job.startedAt
 
-  const job = queue.shift()!
-  current = job
-  job.status = 'running'
-  job.startedAt = getNowIso()
-  job.updatedAt = job.startedAt
-
-  runLoanSettlementByRange(job.payload)
-    .then(summary => {
-      job.summary = summary
-      job.status = 'completed'
-      job.completedAt = getNowIso()
-      job.updatedAt = job.completedAt
-    })
-    .catch(error => {
-      job.status = 'failed'
-      job.error = error instanceof Error ? error.message : String(error)
-      job.updatedAt = getNowIso()
-    })
-    .finally(() => {
-      current = null
-      runNext()
-    })
+    runLoanSettlementByRange(job.payload)
+      .then(summary => {
+        job.summary = summary
+        job.status = 'completed'
+        job.completedAt = getNowIso()
+        job.updatedAt = job.completedAt
+      })
+      .catch(error => {
+        job.status = 'failed'
+        job.error = error instanceof Error ? error.message : String(error)
+        job.updatedAt = getNowIso()
+      })
+      .finally(() => {
+        activeJobs.delete(job)
+        runNext()
+      })
+  }
 }
 
 export function startLoanSettlementJob(payload: LoanSettlementJobPayload) {
