@@ -11,7 +11,12 @@ import {
   startSettlementAdjustmentWorker,
 } from '../../worker/settlementAdjustmentJob'
 
-const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS', 'LN_SETTLED'])
+const REVERSAL_ELIGIBLE_ORDER_STATUSES = ['PAID', 'DONE', 'SUCCESS'] as const
+const REVERSAL_ALLOWED_STATUS = new Set<string>([
+  ...REVERSAL_ELIGIBLE_ORDER_STATUSES,
+  'LN_SETTLED',
+  'SETTLED',
+])
 const REVERSAL_BATCH_SIZE = 25
 
 type OrderReversalRecord = {
@@ -123,7 +128,7 @@ export async function getEligibleSettlements(req: AuthRequest, res: Response) {
 
   const where: any = {
     subMerchantId: subMerchantId.trim(),
-    settlementStatus: { in: Array.from(REVERSAL_ALLOWED_STATUS) },
+    status: { in: Array.from(REVERSAL_ELIGIBLE_ORDER_STATUSES) },
     settlementTime: {
       not: null,
       gte: fromDate,
