@@ -269,13 +269,26 @@ export async function markLoanOrdersSettledByRange(req: AuthRequest, res: Respon
 export async function startLoanSettlementJob(req: AuthRequest, res: Response) {
   try {
     const parsed = markSettledRangeSchema.parse(req.body);
+    const trimmedNote = parsed.note?.trim() ? parsed.note.trim() : undefined;
+    const adminId = req.userId ?? undefined;
+
     const jobId = enqueueLoanSettlementJob({
       subMerchantId: parsed.subMerchantId,
       startDate: parsed.startDate,
       endDate: parsed.endDate,
-      note: parsed.note,
-      adminId: req.userId ?? undefined,
+      note: trimmedNote,
+      adminId,
     });
+
+    if (adminId) {
+      await logAdminAction(adminId, 'loanMarkSettledRangeJobStart', undefined, {
+        jobId,
+        subMerchantId: parsed.subMerchantId,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        ...(trimmedNote ? { note: trimmedNote } : {}),
+      });
+    }
 
     return res.status(202).json({ jobId });
   } catch (error: any) {
