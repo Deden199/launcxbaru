@@ -10,6 +10,7 @@ const prismaMock: any = {
   order: {
     findMany: async () => [],
     updateMany: async () => ({ count: 0 }),
+    count: async () => 0,
   },
   partnerClient: {
     update: async () => ({}),
@@ -44,7 +45,10 @@ require.cache[prismaPath] = {
 import * as adminLog from '../src/util/adminLog'
 ;(adminLog as any).logAdminAction = async () => {}
 
-const { reverseSettlementToLnSettle } = require('../src/controller/admin/settlementAdjustment.controller')
+const {
+  reverseSettlementToLnSettle,
+  getEligibleSettlements,
+} = require('../src/controller/admin/settlementAdjustment.controller')
 
 function createApp() {
   const app = express()
@@ -52,6 +56,15 @@ function createApp() {
   app.post('/settlement/reverse', (req, res) => {
     ;(req as any).userId = 'admin1'
     reverseSettlementToLnSettle(req as any, res)
+  })
+  return app
+}
+
+function createEligibleApp() {
+  const app = express()
+  app.get('/admin/settlement/eligible', (req, res) => {
+    ;(req as any).userId = 'admin1'
+    getEligibleSettlements(req as any, res)
   })
   return app
 }
@@ -135,6 +148,57 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
     { subMerchantId: 'sub-merchant-1', amount: totalOrders * 100 },
   ])
   assert.equal(loanUpserts, totalOrders)
+})
+
+test('eligible settlements include PAID orders flagged as settled', { concurrency: 1 }, async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  const start = new Date('2024-01-01T00:00:00.000Z')
+  const end = new Date('2024-01-03T00:00:00.000Z')
+
+  let capturedWhere: any = null
+  let capturedSelect: any = null
+
+  prisma.order.findMany = async (args: any) => {
+    capturedWhere = args?.where
+    capturedSelect = args?.select
+    return [
+      {
+        id: 'order-eligible',
+        subMerchantId: 'sub-merchant-eligible',
+        status: 'PAID',
+        settlementStatus: 'SETTLED',
+        settlementTime: new Date('2024-01-02T03:04:05.000Z'),
+        settlementAmount: 150,
+        amount: 200,
+        fee3rdParty: 25,
+        feeLauncx: 25,
+      },
+    ]
+  }
+
+  prisma.order.count = async () => 1
+
+  const app = createEligibleApp()
+  const res = await request(app)
+    .get('/admin/settlement/eligible')
+    .query({
+      subMerchantId: 'sub-merchant-eligible',
+      settled_from: start.toISOString(),
+      settled_to: end.toISOString(),
+    })
+
+  assert.equal(res.status, 200)
+  assert.ok(Array.isArray(res.body.data))
+  assert.equal(res.body.data.length, 1)
+  assert.equal(res.body.data[0]?.id, 'order-eligible')
+  assert.equal(res.body.data[0]?.status, 'PAID')
+  assert.equal(res.body.data[0]?.settlementStatus, 'SETTLED')
+  assert.equal(typeof res.body.data[0]?.settlementTime, 'string')
+
+  assert.equal(Array.isArray(capturedWhere?.settlementStatus?.in), true)
+  assert.equal(capturedWhere?.settlementStatus?.in.includes('SETTLED'), true)
+  assert.equal(capturedWhere?.status, undefined)
+  assert.equal(capturedSelect?.settlementStatus, true)
 })
 
 test('allows reversing LN_SETTLED orders and debits partner balance', { concurrency: 1 }, async () => {

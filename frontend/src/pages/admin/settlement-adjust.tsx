@@ -39,6 +39,7 @@ type SettlementRow = {
   subMerchantId: string
   subMerchantName?: string | null
   status: string
+  settlementStatus: string
   settlementTime: string
   settlementAmount?: number | null
   amount?: number | null
@@ -576,6 +577,9 @@ export default function SettlementAdjustPage() {
             subMerchantId,
             subMerchantName: subMerchantNameMap[subMerchantId] ?? null,
             status: String(raw?.status ?? ''),
+            settlementStatus: String(
+              raw?.settlementStatus ?? raw?.settlement_status ?? raw?.status ?? ''
+            ),
             settlementTime: settlementTime.toISOString(),
             settlementAmount: settlementAmount != null ? Number(settlementAmount) : null,
             amount: amount != null ? Number(amount) : null,
@@ -963,7 +967,7 @@ export default function SettlementAdjustPage() {
                         <td className="px-3 py-2 text-xs uppercase">
                           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-900/40 bg-emerald-950/40 px-3 py-1 text-emerald-200">
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                            {row.status || 'SETTLED'}
+                            {row.settlementStatus || row.status || 'SETTLED'}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-sm text-neutral-200">{settlementFormatted}</td>
