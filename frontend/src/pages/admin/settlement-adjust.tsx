@@ -19,6 +19,7 @@ if (typeof window !== 'undefined') {
 
 const WIB = 'Asia/Jakarta'
 const DEFAULT_PAGE_SIZE = 1500
+const DATEPICKER_PORTAL_ID = 'datepicker-portal'
 
 function parseJwt(token: string) {
   try {
@@ -59,6 +60,7 @@ type ToastState =
   | { type: 'warning'; title: string; message: string; detail?: string }
   | null
 
+// Pakai strategy: 'fixed' agar tidak terpengaruh transform/overflow parent
 const DATEPICKER_POPPER = {
   strategy: 'fixed' as const,
 }
@@ -412,6 +414,17 @@ export default function SettlementAdjustPage() {
 
   const [isAdmin, setIsAdmin] = useState(false)
 
+  // Pastikan portal untuk DatePicker tersedia di <body>
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    let portal = document.getElementById(DATEPICKER_PORTAL_ID)
+    if (!portal) {
+      portal = document.createElement('div')
+      portal.id = DATEPICKER_PORTAL_ID
+      document.body.appendChild(portal)
+    }
+  }, [])
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) return
@@ -579,7 +592,7 @@ export default function SettlementAdjustPage() {
 
         if (requestId === requestIdRef.current && targetPage > 1 && mapped.length === 0 && reportedTotal && reportedTotal > 0) {
           setPage(1)
-          // API occasionally reports more pages than are actually available, so refetch page 1 to avoid a blank table.
+          // Kadang API ngelaporin halaman > real; refetch page 1 biar tabel gak kosong.
           window.setTimeout(() => {
             if (requestId === requestIdRef.current) {
               fetchRows(1)
@@ -805,8 +818,15 @@ export default function SettlementAdjustPage() {
                 shouldCloseOnSelect={false}
                 maxDate={new Date()}
                 dateFormat="dd MMM yyyy"
+                // === FIX: render calendar ke portal di <body> agar tidak ketutup ===
                 withPortal
+                portalId={DATEPICKER_PORTAL_ID}
+                // Strategy fixed + modifiers biar gak kena overflow/transform parent
                 popperProps={DATEPICKER_POPPER}
+                popperModifiers={[
+                  { name: 'computeStyles', options: { adaptive: false } },
+                  { name: 'preventOverflow', options: { rootBoundary: 'document' } },
+                ]}
                 popperClassName="datepicker-popper"
                 calendarClassName="dp-dark"
                 className="h-11 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/40"
@@ -876,7 +896,7 @@ export default function SettlementAdjustPage() {
           )}
 
           {rowsError && (
-            <div className="rounded-xl border border-rose-900/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+            <div className="rounded-2xl border border-rose-900/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
               {rowsError}
             </div>
           )}
@@ -1060,7 +1080,11 @@ export default function SettlementAdjustPage() {
       )}
 
       <style jsx global>{`
-        .datepicker-popper.react-datepicker-popper { z-index: 2147483647 !important; }
+        /* Pastikan popper selalu di atas & bebas dari overflow parent */
+        .datepicker-popper.react-datepicker-popper { 
+          z-index: 2147483647 !important; 
+          position: fixed !important;
+        }
         .dp-dark.react-datepicker {
           background-color: #0a0a0a; border: 1px solid #262626; color: #e5e5e5;
         }
