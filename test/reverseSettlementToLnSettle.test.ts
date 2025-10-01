@@ -120,6 +120,55 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
   assert.equal(loanUpserts, totalOrders)
 })
 
+test('allows reversing LN_SETTLED orders and debits partner balance', { concurrency: 1 }, async () => {
+  const orderId = 'ln-settled-order'
+  const now = new Date()
+  const prisma = require.cache[prismaPath].exports.prisma
+
+  prisma.order.findMany = async () => [
+    {
+      id: orderId,
+      status: 'LN_SETTLED',
+      settlementTime: now,
+      settlementAmount: 125,
+      amount: 0,
+      fee3rdParty: 0,
+      feeLauncx: 0,
+      metadata: {},
+      subMerchantId: 'sub-merchant-ln',
+      partnerClientId: 'partner-ln',
+      loanEntry: null,
+    },
+  ]
+
+  const updateArgs: any[] = []
+  prisma.order.updateMany = async (args: any) => {
+    updateArgs.push(args)
+    return { count: 1 }
+  }
+
+  let partnerDebit = 0
+  prisma.partnerClient.update = async ({ data }: any) => {
+    partnerDebit += Number(data?.balance?.decrement ?? 0)
+    return {}
+  }
+
+  const app = createApp()
+  const res = await request(app)
+    .post('/settlement/reverse')
+    .send({ orderIds: [orderId] })
+
+  assert.equal(res.status, 200)
+  assert.equal(res.body.ok, 1)
+  assert.equal(res.body.fail, 0)
+  assert.equal(res.body.totalReversalAmount, 125)
+  assert.equal(partnerDebit, 125)
+
+  assert.equal(updateArgs.length, 1)
+  assert.equal(updateArgs[0]?.where?.status?.in.includes('LN_SETTLED'), true)
+  assert.equal(updateArgs[0]?.data?.status, 'LN_SETTLE')
+})
+
 test('rejects ineligible statuses and missing settlement time', { concurrency: 1 }, async () => {
   const ids = ['eligible', 'already-ln-settle', 'missing-settlement', 'invalid-status', 'missing-order']
   const now = new Date()
