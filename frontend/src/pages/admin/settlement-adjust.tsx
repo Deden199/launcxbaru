@@ -284,7 +284,7 @@ export function SettlementAdjustJobControl({
 
     try {
       const { data } = await apiClient.post<{ jobId?: string; id?: string }>(
-        '/admin/settlement/adjust/start',
+        '/admin/settlement/adjust/job',
         payload
       )
 

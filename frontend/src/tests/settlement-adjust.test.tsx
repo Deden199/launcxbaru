@@ -87,7 +87,7 @@ function createApiMock() {
 
 const apiMock = createApiMock()
 
-const ADJUST_START_PATH = '/admin/settlement/adjust/start'
+const ADJUST_JOB_PATH = '/admin/settlement/adjust/job'
 const ADJUST_STATUS_PREFIX = '/admin/settlement/adjust/status/'
 
 const defaultProps: Pick<SettlementAdjustJobControlProps, 'apiClient'> = {
@@ -109,7 +109,7 @@ test('starts settlement adjust job and displays completion summary', async () =>
   let capturedPayload: any = null
 
   apiMock.setPostImplementation(async (url: string, payload: any) => {
-    if (url === ADJUST_START_PATH) {
+    if (url === ADJUST_JOB_PATH) {
       capturedPayload = payload
       return { data: { jobId: 'job-123' } }
     }
