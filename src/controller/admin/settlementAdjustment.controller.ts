@@ -518,6 +518,7 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
     }
 
     const partnerBalanceAdjustments = new Map<string, number>()
+    const clientBalanceAdjustments = new Map<string, number>()
 
     for (let i = 0; i < ordersToReverse.length; i += REVERSAL_BATCH_SIZE) {
       const batch = ordersToReverse.slice(i, i + REVERSAL_BATCH_SIZE)
@@ -544,8 +545,10 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           }))
 
         const missingPartnerOrders: string[] = []
+        const missingClientBalanceOrders: string[] = []
         const loanEntryErrors: { id: string; message: string }[] = []
         const partnerAdjustments = new Map<string, number>()
+        const clientAdjustments = new Map<string, number>()
         for (const item of successfulItems) {
           if (item.partnerClientId) {
             const total = partnerAdjustments.get(item.partnerClientId) ?? 0
@@ -553,13 +556,21 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           } else {
             missingPartnerOrders.push(item.id)
           }
+
+          if (item.subMerchantId) {
+            const total = clientAdjustments.get(item.subMerchantId) ?? 0
+            clientAdjustments.set(item.subMerchantId, total + item.reversalAmount)
+          } else {
+            missingClientBalanceOrders.push(item.id)
+          }
         }
 
         for (const item of successfulItems) {
           if (!item.subMerchantId) {
             loanEntryErrors.push({
               id: item.id,
-              message: 'Order berhasil direversal tetapi tidak memiliki subMerchantId untuk loan entry',
+              message:
+                'Order berhasil direversal tetapi tidak memiliki subMerchantId untuk loan entry atau penyesuaian saldo client',
             })
             continue
           }
@@ -604,6 +615,19 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
           )
         )
 
+        await Promise.all(
+          Array.from(clientAdjustments.entries()).map(([subMerchantId, amount]) =>
+            tx.clientBalance.update({
+              where: { subMerchantId },
+              data: {
+                availableBalance: {
+                  decrement: amount,
+                },
+              },
+            })
+          )
+        )
+
         return {
           successfulItems,
           updateErrors,
@@ -612,6 +636,11 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
             ([partnerClientId, amount]) => ({ partnerClientId, amount })
           ),
           loanEntryErrors,
+          clientAdjustments: Array.from(clientAdjustments.entries()).map(([subMerchantId, amount]) => ({
+            subMerchantId,
+            amount,
+          })),
+          missingClientBalanceOrders,
         }
       })
 
@@ -639,6 +668,18 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         const total = partnerBalanceAdjustments.get(adjustment.partnerClientId) ?? 0
         partnerBalanceAdjustments.set(adjustment.partnerClientId, total + adjustment.amount)
       }
+
+      for (const missingClientBalanceId of batchOutcome.missingClientBalanceOrders) {
+        errors.push({
+          id: missingClientBalanceId,
+          message: 'Order berhasil direversal tetapi tidak memiliki subMerchantId untuk penyesuaian saldo client',
+        })
+      }
+
+      for (const adjustment of batchOutcome.clientAdjustments) {
+        const total = clientBalanceAdjustments.get(adjustment.subMerchantId) ?? 0
+        clientBalanceAdjustments.set(adjustment.subMerchantId, total + adjustment.amount)
+      }
     }
 
     const processed = ids.length
@@ -657,6 +698,9 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
         partnerBalanceAdjustments: Array.from(partnerBalanceAdjustments.entries()).map(
           ([partnerClientId, amount]) => ({ partnerClientId, amount })
         ),
+        clientBalanceAdjustments: Array.from(clientBalanceAdjustments.entries()).map(
+          ([subMerchantId, amount]) => ({ subMerchantId, amount })
+        ),
       })
     }
 
@@ -668,6 +712,9 @@ export async function reverseSettlementToLnSettle(req: AuthRequest, res: Respons
       errors,
       partnerBalanceAdjustments: Array.from(partnerBalanceAdjustments.entries()).map(
         ([partnerClientId, amount]) => ({ partnerClientId, amount })
+      ),
+      clientBalanceAdjustments: Array.from(clientBalanceAdjustments.entries()).map(
+        ([subMerchantId, amount]) => ({ subMerchantId, amount })
       ),
     })
   } catch (err) {

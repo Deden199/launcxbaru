@@ -14,6 +14,9 @@ const prismaMock: any = {
   partnerClient: {
     update: async () => ({}),
   },
+  clientBalance: {
+    update: async () => ({}),
+  },
   loanEntry: {
     upsert: async () => ({}),
   },
@@ -92,6 +95,14 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
     return {}
   }
 
+  let clientBalanceDecrement = 0
+  let clientBalanceUpdates = 0
+  prisma.clientBalance.update = async ({ data }: any) => {
+    clientBalanceUpdates += 1
+    clientBalanceDecrement += Number(data?.availableBalance?.decrement ?? 0)
+    return {}
+  }
+
   let loanUpserts = 0
   prisma.loanEntry.upsert = async () => {
     loanUpserts += 1
@@ -114,8 +125,14 @@ test('processes hundreds of reversals in limited batches', { concurrency: 1 }, a
     `expected max concurrent updates to be limited to 25, got ${maxConcurrent}`
   )
   assert.equal(totalBalanceDecrement, totalOrders * 100)
+  assert.equal(clientBalanceDecrement, totalOrders * 100)
+  const expectedClientBalanceUpdates = Math.ceil(totalOrders / 25)
+  assert.equal(clientBalanceUpdates, expectedClientBalanceUpdates)
   assert.deepEqual(res.body.partnerBalanceAdjustments, [
     { partnerClientId: 'partner-a', amount: totalOrders * 100 },
+  ])
+  assert.deepEqual(res.body.clientBalanceAdjustments, [
+    { subMerchantId: 'sub-merchant-1', amount: totalOrders * 100 },
   ])
   assert.equal(loanUpserts, totalOrders)
 })
@@ -153,6 +170,12 @@ test('allows reversing LN_SETTLED orders and debits partner balance', { concurre
     return {}
   }
 
+  let clientBalanceDebit = 0
+  prisma.clientBalance.update = async ({ data }: any) => {
+    clientBalanceDebit += Number(data?.availableBalance?.decrement ?? 0)
+    return {}
+  }
+
   const app = createApp()
   const res = await request(app)
     .post('/settlement/reverse')
@@ -163,6 +186,7 @@ test('allows reversing LN_SETTLED orders and debits partner balance', { concurre
   assert.equal(res.body.fail, 0)
   assert.equal(res.body.totalReversalAmount, 125)
   assert.equal(partnerDebit, 125)
+  assert.equal(clientBalanceDebit, 125)
 
   assert.equal(updateArgs.length, 1)
   assert.equal(updateArgs[0]?.where?.status?.in.includes('LN_SETTLED'), true)
@@ -397,6 +421,8 @@ test('persists loan entry metadata alongside reversal updates', { concurrency: 1
     updateArgs.push(args)
     return { count: 1 }
   }
+
+  prisma.clientBalance.update = async () => ({})
 
   let loanEntryArgs: any = null
   prisma.loanEntry.upsert = async (args: any) => {
