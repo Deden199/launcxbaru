@@ -144,6 +144,7 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         metadata: true,
         subMerchantId: true,
         loanedAt: true,
+        createdAt: true,
       },
     })) as OrderForLoanSettlement[];
 
