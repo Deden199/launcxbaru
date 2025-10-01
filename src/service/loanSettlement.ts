@@ -59,6 +59,7 @@ export type OrderForLoanSettlement = {
   metadata: unknown
   subMerchantId: string | null | undefined
   loanedAt: Date | null
+  createdAt: Date
 }
 
 export type LoanSettlementUpdate = {
@@ -211,7 +212,7 @@ export async function runLoanSettlementByRange({
 
   const allOrderIds: string[] = []
 
-  let page = 0
+  let cursor: { createdAt: Date; id: string } | null = null
   while (true) {
     const orders = (await prisma.order.findMany({
       where: {
@@ -221,8 +222,22 @@ export async function runLoanSettlementByRange({
           gte: start,
           lte: end,
         },
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                {
+                  createdAt: cursor.createdAt,
+                  id: { gt: cursor.id },
+                },
+              ],
+            }
+          : {}),
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
       select: {
         id: true,
         status: true,
@@ -232,12 +247,13 @@ export async function runLoanSettlementByRange({
         metadata: true,
         subMerchantId: true,
         loanedAt: true,
+        createdAt: true,
       },
       take: batchSize,
-      skip: page * batchSize,
     })) as OrderForLoanSettlement[]
 
     if (orders.length === 0) {
+      cursor = null
       break
     }
 
@@ -283,7 +299,13 @@ export async function runLoanSettlementByRange({
       emitOrderEvent('order.loan_settled', event)
     }
 
-    page += 1
+    if (orders.length < batchSize) {
+      cursor = null
+      break
+    }
+
+    const lastOrder = orders[orders.length - 1]
+    cursor = { createdAt: lastOrder.createdAt, id: lastOrder.id }
   }
 
   if (adminId && allOrderIds.length > 0) {
