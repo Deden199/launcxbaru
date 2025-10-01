@@ -62,6 +62,7 @@ model sub_merchant {
   transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
   orders           Order[]             @relation("OrderSubMerchant")
   loanEntries     LoanEntry[]         @relation("SubMerchantLoanEntries")
+  balanceRecords  SubMerchantBalance[] @relation("SubMerchantBalanceSubMerchant")
 
 
 
@@ -355,6 +356,18 @@ model WithdrawRequest {
   @@index([createdAt])
   @@index([status])
 
+}
+
+model SubMerchantBalance {
+  id               String        @id @default(auto()) @map("_id") @db.ObjectId
+  subMerchantId    String        @unique
+  availableBalance Float         @default(0.0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  subMerchant sub_merchant @relation("SubMerchantBalanceSubMerchant", fields: [subMerchantId], references: [id])
+
+  @@map("sub_merchant_balance")
 }
 /// Queue for partner callback deliverys
 model CallbackJob {
