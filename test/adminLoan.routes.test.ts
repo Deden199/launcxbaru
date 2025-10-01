@@ -103,7 +103,9 @@ test('getLoanTransactions returns PAID and LN_SETTLED orders', async () => {
   assert.equal(res.status, 200);
   assert.ok(receivedFindManyArgs);
   assert.equal(receivedFindManyArgs.where.subMerchantId, 'sub-1');
-  assert.deepEqual(receivedFindManyArgs.where.status, { in: ['PAID', 'LN_SETTLED'] });
+  assert.deepEqual(receivedFindManyArgs.where.status, {
+    in: ['PAID', 'SUCCESS', 'DONE', 'SETTLED', 'LN_SETTLED'],
+  });
   assert.equal(
     receivedFindManyArgs.where.createdAt.gte.toISOString(),
     '2024-04-30T17:00:00.000Z',
@@ -183,7 +185,15 @@ test('getLoanTransactions enforces maximum page size', async () => {
 test('markLoanOrdersSettled updates PAID orders and returns summary', async () => {
   loggedAction = null;
   resetTransactionTracking();
-  const orderIds = ['ord-paid-1', 'ord-settled', 'ord-failed', 'ord-missing', 'ord-paid-2'];
+  const orderIds = [
+    'ord-paid-1',
+    'ord-success',
+    'ord-done',
+    'ord-settled',
+    'ord-failed',
+    'ord-missing',
+    'ord-paid-2',
+  ];
   const fetchedOrders = [
     {
       id: 'ord-paid-1',
@@ -191,8 +201,31 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       pendingAmount: 150,
       settlementAmount: null,
       settlementStatus: 'PENDING',
+      settlementTime: new Date('2023-12-30T00:00:00Z'),
       subMerchantId: 'sub-1',
       metadata: { loanSettlementHistory: [] },
+      loanedAt: null,
+    },
+    {
+      id: 'ord-success',
+      status: 'SUCCESS',
+      pendingAmount: null,
+      settlementAmount: 250,
+      settlementStatus: 'PENDING',
+      settlementTime: new Date('2023-12-29T00:00:00Z'),
+      subMerchantId: 'sub-1',
+      metadata: {},
+      loanedAt: null,
+    },
+    {
+      id: 'ord-done',
+      status: 'DONE',
+      pendingAmount: null,
+      settlementAmount: 0,
+      settlementStatus: 'PENDING',
+      settlementTime: new Date('2023-12-28T00:00:00Z'),
+      subMerchantId: 'sub-1',
+      metadata: {},
       loanedAt: null,
     },
     {
@@ -201,6 +234,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       pendingAmount: null,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       subMerchantId: 'sub-1',
       metadata: {},
       loanedAt: new Date('2023-12-31T00:00:00Z'),
@@ -211,6 +245,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       pendingAmount: 10,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       subMerchantId: 'sub-2',
       metadata: null,
       loanedAt: null,
@@ -219,8 +254,9 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       id: 'ord-paid-2',
       status: 'PAID',
       pendingAmount: 0,
-      settlementAmount: null,
+      settlementAmount: 125,
       settlementStatus: null,
+      settlementTime: null,
       subMerchantId: 'sub-1',
       metadata: null,
       loanedAt: null,
@@ -256,32 +292,60 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
     .send({ orderIds, note: 'Manual adjust' });
 
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.ok.sort(), ['ord-paid-1', 'ord-paid-2', 'ord-settled'].sort());
+  assert.deepEqual(
+    res.body.ok.sort(),
+    ['ord-paid-1', 'ord-success', 'ord-done', 'ord-paid-2', 'ord-settled'].sort(),
+  );
   assert.deepEqual(res.body.fail.sort(), ['ord-failed', 'ord-missing'].sort());
   assert.equal(res.body.errors.length, 2);
 
-  assert.equal(prisma.__transactionCallCount, 1);
-  assert.equal(prisma.__transactionOptions.length, 1);
-  assert.deepEqual(prisma.__transactionOptions[0], { timeout: 20000 });
+  const chunkSize = Math.max(1, Number(process.env.LOAN_CREATE_MANY_CHUNK_SIZE ?? '1'));
+  const expectedTransactions = Math.ceil(updateCalls.length / chunkSize);
+  assert.equal(prisma.__transactionCallCount, expectedTransactions);
+  assert.equal(prisma.__transactionOptions.length, expectedTransactions);
+  for (const opt of prisma.__transactionOptions) {
+    assert.deepEqual(opt, { timeout: 20000 });
+  }
 
-  assert.equal(updateCalls.length, 2);
-  assert.deepEqual(updateCalls.map(call => call.where.id).sort(), ['ord-paid-1', 'ord-paid-2'].sort());
+  assert.equal(updateCalls.length, 4);
+  assert.deepEqual(
+    updateCalls.map(call => call.where.id).sort(),
+    ['ord-paid-1', 'ord-paid-2', 'ord-success', 'ord-done'].sort(),
+  );
   for (const call of updateCalls) {
+    assert.equal(['PAID', 'SUCCESS', 'DONE', 'SETTLED'].includes(call.where.status), true);
     assert.equal(call.data.status, 'LN_SETTLED');
     assert.equal(call.data.pendingAmount, null);
     assert.equal(call.data.settlementStatus, null);
+    assert.equal(call.data.settlementTime, null);
+    assert.equal(call.data.settlementAmount, null);
     assert.deepEqual(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
     assert.equal(call.data.metadata.lastLoanSettlement.note, 'Manual adjust');
+    assert.equal(call.data.metadata.lastLoanSettlement.previousStatus, call.where.status);
   }
 
-  assert.equal(upsertCalls.length, 1);
-  assert.equal(upsertCalls[0].create.orderId, 'ord-paid-1');
-  assert.equal(upsertCalls[0].create.metadata.note, 'Manual adjust');
+  assert.equal(upsertCalls.length, 3);
+  const upsertSummary = upsertCalls.map(call => ({
+    orderId: call.create.orderId,
+    amount: call.create.amount,
+    note: call.create.metadata.note,
+  }));
+  assert.deepEqual(
+    upsertSummary.sort((a, b) => a.orderId.localeCompare(b.orderId)),
+    [
+      { orderId: 'ord-paid-1', amount: 150, note: 'Manual adjust' },
+      { orderId: 'ord-paid-2', amount: 125, note: 'Manual adjust' },
+      { orderId: 'ord-success', amount: 250, note: 'Manual adjust' },
+    ],
+  );
 
   assert.ok(loggedAction);
   assert.equal(loggedAction[0], 'admin-123');
   assert.equal(loggedAction[1], 'loanMarkSettled');
-  assert.deepEqual(loggedAction[3].ok.sort(), ['ord-paid-1', 'ord-paid-2', 'ord-settled'].sort());
+  assert.deepEqual(
+    loggedAction[3].ok.sort(),
+    ['ord-paid-1', 'ord-success', 'ord-done', 'ord-paid-2', 'ord-settled'].sort(),
+  );
 });
 
 test('markLoanOrdersSettled processes batches larger than the chunk size', async () => {
@@ -398,24 +462,30 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
   loggedAction = null;
   resetTransactionTracking();
 
-  const paidOrders = Array.from({ length: 5 }).map((_, index) => ({
+  const statuses = ['PAID', 'SUCCESS', 'DONE', 'SETTLED', 'PAID'];
+  const paidOrders = statuses.map((status, index) => ({
     id: `range-ord-${index + 1}`,
-    status: 'PAID',
-    pendingAmount: index % 2 === 0 ? 100 * (index + 1) : 0,
-    settlementAmount: null,
+    status,
+    pendingAmount: index % 2 === 0 ? 100 * (index + 1) : null,
+    settlementAmount: index % 2 === 0 ? null : 75 * (index + 1),
     settlementStatus: 'PENDING',
+    settlementTime: new Date(`2023-12-${20 + index}T00:00:00.000Z`),
     subMerchantId: 'sub-range-1',
     metadata: index === 0 ? { loanSettlementHistory: [] } : {},
     loanedAt: null,
   }));
 
+  let fetchIndex = 0;
   prisma.order.findMany = async (args: any) => {
     assert.equal(args.where.subMerchantId, 'sub-range-1');
-    assert.equal(args.where.status, 'PAID');
+    assert.deepEqual(args.where.status, { in: ['PAID', 'SUCCESS', 'DONE', 'SETTLED'] });
     assert.ok(args.where.createdAt.gte instanceof Date);
     assert.ok(args.where.createdAt.lte instanceof Date);
-    const { skip, take } = args;
-    return paidOrders.slice(skip, skip + take);
+    const take = typeof args.take === 'number' ? args.take : paidOrders.length;
+    const start = fetchIndex;
+    const end = Math.min(fetchIndex + take, paidOrders.length);
+    fetchIndex = end;
+    return paidOrders.slice(start, end);
   };
 
   const updateCalls: any[] = [];
@@ -472,17 +542,21 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
   const updatedIds = updateCalls.map((call) => call.where.id).sort();
   assert.deepEqual(updatedIds, paidOrders.map((order) => order.id).sort());
   for (const call of updateCalls) {
-    assert.equal(call.where.status, 'PAID');
+    assert.ok(['PAID', 'SUCCESS', 'DONE', 'SETTLED'].includes(call.where.status));
     assert.equal(call.data.status, 'LN_SETTLED');
     assert.equal(call.data.metadata.lastLoanSettlement.note, 'Range adjust');
     assert.equal(call.data.metadata.lastLoanSettlement.markedBy, 'admin-range');
+    assert.equal(call.data.metadata.lastLoanSettlement.previousStatus, call.where.status);
+    assert.equal(call.data.settlementStatus, null);
+    assert.equal(call.data.settlementTime, null);
+    assert.equal(call.data.settlementAmount, null);
   }
 
   const upsertedIds = upsertCalls.map((call) => call.where.orderId).sort();
   assert.deepEqual(
     upsertedIds,
     paidOrders
-      .filter((order) => Number(order.pendingAmount ?? 0) > 0)
+      .filter((order) => Number(order.pendingAmount ?? 0) > 0 || Number(order.settlementAmount ?? 0) > 0)
       .map((order) => order.id)
       .sort(),
   );

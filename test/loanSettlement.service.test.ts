@@ -10,6 +10,7 @@ type MockOrder = {
   pendingAmount: number | null
   settlementAmount: number | null
   settlementStatus: string | null
+  settlementTime: Date | null
   metadata: Record<string, unknown>
   loanedAt: Date | null
   createdAt: Date
@@ -135,6 +136,10 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
     metadata: { ...order.metadata },
   }))
 
+  prismaMock.__orders = clonedOrders
+  prismaMock.__loanEntries = [] as any[]
+  prismaMock.__updates = [] as any[]
+
   prismaMock.order.findMany = async (args: any) => {
     assert.ok(args)
     assert.equal(args.skip, undefined)
@@ -145,8 +150,16 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
         return false
       }
 
-      if (where?.status && order.status !== where.status) {
-        return false
+      if (where?.status) {
+        if (typeof where.status === 'string') {
+          if (order.status !== where.status) {
+            return false
+          }
+        } else if (where.status && typeof where.status === 'object' && Array.isArray(where.status.in)) {
+          if (!where.status.in.includes(order.status)) {
+            return false
+          }
+        }
       }
 
       if (where?.createdAt?.gte && order.createdAt < where.createdAt.gte) {
@@ -170,6 +183,7 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       pendingAmount: order.pendingAmount,
       settlementAmount: order.settlementAmount,
       settlementStatus: order.settlementStatus,
+      settlementTime: order.settlementTime,
       metadata: { ...order.metadata },
       subMerchantId: order.subMerchantId,
       loanedAt: order.loanedAt,
@@ -183,6 +197,8 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       return { count: 0 }
     }
 
+    prismaMock.__updates.push({ where: { ...where }, data })
+
     if (Object.prototype.hasOwnProperty.call(data, 'status')) {
       record.status = data.status
     }
@@ -193,6 +209,18 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
 
     if (Object.prototype.hasOwnProperty.call(data, 'loanedAt')) {
       record.loanedAt = data.loanedAt
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'settlementStatus')) {
+      record.settlementStatus = data.settlementStatus
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'settlementAmount')) {
+      record.settlementAmount = data.settlementAmount
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'settlementTime')) {
+      record.settlementTime = data.settlementTime
     }
 
     if (Object.prototype.hasOwnProperty.call(data, 'metadata')) {
@@ -208,8 +236,10 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       return update
     }
     if (record.loanedAt) {
+      prismaMock.__loanEntries.push({ ...update, orderId: where.orderId })
       return update
     }
+    prismaMock.__loanEntries.push({ ...create, orderId: where.orderId })
     return create
   }
 
@@ -280,6 +310,7 @@ test('cursor pagination returns the same order sequence as the previous offset i
       pendingAmount: 100,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime()),
@@ -291,6 +322,7 @@ test('cursor pagination returns the same order sequence as the previous offset i
       pendingAmount: 200,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime() + 60_000),
@@ -302,6 +334,7 @@ test('cursor pagination returns the same order sequence as the previous offset i
       pendingAmount: 300,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime() + 120_000),
@@ -313,6 +346,7 @@ test('cursor pagination returns the same order sequence as the previous offset i
       pendingAmount: 400,
       settlementAmount: null,
       settlementStatus: null,
+      settlementTime: null,
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime() + 180_000),
@@ -355,6 +389,7 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
       metadata: {},
       loanedAt: null,
       createdAt,
+      settlementTime: null,
     },
     {
       id: 'order-2',
@@ -366,6 +401,7 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
       metadata: {},
       loanedAt: null,
       createdAt,
+      settlementTime: null,
     },
     {
       id: 'order-3',
@@ -377,6 +413,7 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
       metadata: {},
       loanedAt: null,
       createdAt,
+      settlementTime: null,
     },
     {
       id: 'order-4',
@@ -388,6 +425,7 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
       metadata: {},
       loanedAt: null,
       createdAt,
+      settlementTime: null,
     },
   ]
 
@@ -412,5 +450,111 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
   assert.deepEqual(summary.ok, sortedIds)
   assert.deepEqual(summary.fail, [])
   assert.deepEqual(summary.errors, [])
+})
+
+test('runLoanSettlementByRange updates eligible statuses and creates loan entries using pending or settlement amounts', async t => {
+  const baseCreatedAt = new Date('2024-02-01T00:00:00.000Z')
+  const orders: MockOrder[] = [
+    {
+      id: 'order-paid',
+      subMerchantId: 'sub-loan',
+      status: ORDER_STATUS.PAID,
+      pendingAmount: 150,
+      settlementAmount: null,
+      settlementStatus: 'READY',
+      settlementTime: new Date('2024-02-01T05:00:00.000Z'),
+      metadata: {},
+      loanedAt: null,
+      createdAt: baseCreatedAt,
+    },
+    {
+      id: 'order-success',
+      subMerchantId: 'sub-loan',
+      status: ORDER_STATUS.SUCCESS,
+      pendingAmount: null,
+      settlementAmount: 250,
+      settlementStatus: 'READY',
+      settlementTime: new Date('2024-02-01T06:00:00.000Z'),
+      metadata: {},
+      loanedAt: null,
+      createdAt: new Date(baseCreatedAt.getTime() + 60_000),
+    },
+    {
+      id: 'order-done',
+      subMerchantId: 'sub-loan',
+      status: ORDER_STATUS.DONE,
+      pendingAmount: null,
+      settlementAmount: 0,
+      settlementStatus: 'READY',
+      settlementTime: new Date('2024-02-01T07:00:00.000Z'),
+      metadata: {},
+      loanedAt: null,
+      createdAt: new Date(baseCreatedAt.getTime() + 120_000),
+    },
+    {
+      id: 'order-settled',
+      subMerchantId: 'sub-loan',
+      status: ORDER_STATUS.SETTLED,
+      pendingAmount: null,
+      settlementAmount: 500,
+      settlementStatus: 'READY',
+      settlementTime: new Date('2024-02-01T08:00:00.000Z'),
+      metadata: {},
+      loanedAt: null,
+      createdAt: new Date(baseCreatedAt.getTime() + 180_000),
+    },
+  ]
+
+  const { runLoanSettlementByRange, prismaMock, restore } = (() => {
+    const { service, prismaMock, restoreModules } = loadLoanSettlementService()
+    mockPrismaOrders(prismaMock, orders)
+    return { runLoanSettlementByRange: service.runLoanSettlementByRange, prismaMock, restore: restoreModules }
+  })()
+
+  process.env.LOAN_FETCH_BATCH_SIZE = '10'
+
+  t.after(() => {
+    restore()
+    delete process.env.LOAN_FETCH_BATCH_SIZE
+  })
+
+  const summary = await runLoanSettlementByRange({
+    subMerchantId: 'sub-loan',
+    startDate: '2024-02-01',
+    endDate: '2024-02-02',
+    note: 'Range loan adjust',
+    adminId: 'admin-loan',
+  })
+
+  assert.deepEqual(summary.fail, [])
+  assert.equal(summary.errors.length, 0)
+  assert.deepEqual(summary.ok.sort(), orders.map(order => order.id).sort())
+
+  const updatedOrders = prismaMock.__orders.filter((order: MockOrder) => order.status === ORDER_STATUS.LN_SETTLED)
+  assert.equal(updatedOrders.length, orders.length)
+  for (const order of updatedOrders) {
+    const original = orders.find(o => o.id === order.id)!
+    assert.equal(order.pendingAmount, null)
+    assert.equal(order.settlementStatus, null)
+    assert.equal(order.settlementAmount, null)
+    assert.equal(order.settlementTime, null)
+    assert.ok(order.loanedAt instanceof Date)
+    assert.ok(order.metadata.lastLoanSettlement)
+    assert.equal(order.metadata.lastLoanSettlement.note, 'Range loan adjust')
+    assert.equal(order.metadata.lastLoanSettlement.markedBy, 'admin-loan')
+    assert.equal(order.metadata.lastLoanSettlement.previousStatus, original.status)
+  }
+
+  const loanEntries = prismaMock.__loanEntries
+  const loanEntrySummary = loanEntries
+    .filter((entry: any) => entry.amount > 0)
+    .map((entry: any) => ({ orderId: entry.orderId, amount: entry.amount }))
+    .sort((a: any, b: any) => a.orderId.localeCompare(b.orderId))
+
+  assert.deepEqual(loanEntrySummary, [
+    { orderId: 'order-paid', amount: 150 },
+    { orderId: 'order-settled', amount: 500 },
+    { orderId: 'order-success', amount: 250 },
+  ])
 })
 
