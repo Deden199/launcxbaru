@@ -11,7 +11,7 @@ import {
   startSettlementAdjustmentWorker,
 } from '../../worker/settlementAdjustmentJob'
 
-const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS'])
+const REVERSAL_ALLOWED_STATUS = new Set(['SETTLED', 'DONE', 'SUCCESS', 'LN_SETTLED'])
 const REVERSAL_BATCH_SIZE = 25
 
 type OrderReversalRecord = {
