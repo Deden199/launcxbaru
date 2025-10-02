@@ -6,6 +6,9 @@ type OrderLoanSettledEvent = {
   adminId?: string;
   markedAt: string;
   note?: string;
+  loanAmount?: number | null;
+  loanSettlementJobId?: string;
+  loanFlagged?: boolean;
 };
 
 type OrderLoanSettlementRevertedEvent = {
