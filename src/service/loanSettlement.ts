@@ -714,6 +714,7 @@ export async function runLoanSettlementByRange({
   note,
   adminId,
   loanSettlementJobId,
+  dryRun,
 }: {
   subMerchantId: string
   startDate: string
@@ -721,6 +722,7 @@ export async function runLoanSettlementByRange({
   note?: string
   adminId?: string
   loanSettlementJobId?: string
+  dryRun?: boolean
 }): Promise<MarkSettledSummary> {
   const trimmedNote = note?.trim() ? note.trim() : undefined
   const start = toStartOfDayWib(startDate)
@@ -730,6 +732,7 @@ export async function runLoanSettlementByRange({
   const now = wibTimestamp()
   const markedAtIso = now.toISOString()
   const batchSize = Math.max(1, LOAN_FETCH_BATCH_SIZE)
+  const isDryRun = Boolean(dryRun)
 
   const allOrderIds: string[] = []
 
@@ -810,8 +813,31 @@ export async function runLoanSettlementByRange({
     }
 
     const updates: LoanSettlementUpdate[] = []
+    let dryRunProcessed = 0
+    let dryRunAmount = 0
+
     for (const order of orders) {
       allOrderIds.push(order.id)
+
+      if (isDryRun) {
+        if (!summary.ok.includes(order.id)) {
+          summary.ok.push(order.id)
+        }
+
+        const resolvedAmount = Number(order.pendingAmount ?? 0)
+        let normalizedAmount = Number.isFinite(resolvedAmount) ? resolvedAmount : 0
+        if ((!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) && order.settlementAmount != null) {
+          const fallback = Number(order.settlementAmount)
+          normalizedAmount = Number.isFinite(fallback) ? fallback : 0
+        }
+
+        if (normalizedAmount > 0) {
+          dryRunAmount += normalizedAmount
+        }
+
+        dryRunProcessed += 1
+        continue
+      }
 
       const metadata = normalizeMetadata(order.metadata)
       const auditEntry = createLoanSettlementAuditEntry({
@@ -852,18 +878,30 @@ export async function runLoanSettlementByRange({
       })
     }
 
-    const events = await applyLoanSettlementUpdates({
-      updates,
-      summary,
-      adminId,
-      note: trimmedNote,
-      now,
-      markedAtIso,
-      loanSettlementJobId,
-    })
+    if (isDryRun) {
+      if (loanSettlementJobId && dryRunProcessed > 0) {
+        await prisma.loanSettlementJob.update({
+          where: { id: loanSettlementJobId },
+          data: {
+            totalOrder: { increment: dryRunProcessed },
+            ...(dryRunAmount > 0 ? { totalLoanAmount: { increment: dryRunAmount } } : {}),
+          },
+        })
+      }
+    } else {
+      const events = await applyLoanSettlementUpdates({
+        updates,
+        summary,
+        adminId,
+        note: trimmedNote,
+        now,
+        markedAtIso,
+        loanSettlementJobId,
+      })
 
-    for (const event of events) {
-      emitOrderEvent('order.loan_settled', event)
+      for (const event of events) {
+        emitOrderEvent('order.loan_settled', event)
+      }
     }
 
     if (orders.length < batchSize) {
@@ -875,7 +913,7 @@ export async function runLoanSettlementByRange({
     cursor = { createdAt: lastOrder.createdAt, id: lastOrder.id }
   }
 
-  if (adminId && allOrderIds.length > 0) {
+  if (!isDryRun && adminId && allOrderIds.length > 0) {
     await logAdminAction(adminId, 'loanMarkSettled', undefined, {
       orderIds: allOrderIds,
       ok: summary.ok,
