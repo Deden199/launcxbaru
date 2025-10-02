@@ -35,6 +35,7 @@ export interface Withdrawal {
   createdAt: string
   completedAt?: string
   wallet: string
+  sourceProvider?: string
 }
 
 export type WithdrawalUpdate = Partial<

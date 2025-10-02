@@ -24,6 +24,12 @@ router.get('/providers',       ctrl.listProviders)
 router.get('/:clientId/dashboard', ctrl.getClientDashboardAdmin)
 router.get('/:clientId/withdrawals', ctrl.getClientWithdrawalsAdmin)
 router.get('/:clientId/subwallets',  ctrl.getClientSubWallets)
+router.post(
+  '/:clientId/withdrawals/manual',
+  validator.manualClientWithdrawValidation,
+  validator.handleValidationErrors,
+  ctrl.createClientManualWithdrawal,
+)
 router.post('/:clientId/reconcile-balance', ctrl.reconcileClientBalance)
 router.patch(
   '/:clientId/balance',

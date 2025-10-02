@@ -115,12 +115,14 @@ export default function WithdrawalHistory(_: any) {
     if (!withdrawals?.length) return
     const headers = [
       'Date','Ref ID','Account Name','Alias','Account No.','Bank Code','Bank Name','Branch',
-      'Wallet/Submerchant','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At',
+      'Wallet/Submerchant','Source','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At',
     ]
     const rows = withdrawals.map((w) => [
       new Date(w.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }),
       w.refId ?? '', w.accountName ?? '', w.accountNameAlias ?? '', w.accountNumber ?? '',
-      w.bankCode ?? '', w.bankName ?? '', w.branchName ?? '', w.wallet ?? '',
+      w.bankCode ?? '', w.bankName ?? '', w.branchName ?? '',
+      w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet ?? '',
+      w.sourceProvider ?? '',
       (w.amount - (w.netAmount ?? 0)).toString(),
       w.amount.toString(),
       w.netAmount?.toString() ?? '',
@@ -258,9 +260,9 @@ export default function WithdrawalHistory(_: any) {
               <table className="min-w-[1200px] w-full text-sm">
                 <thead className="sticky top-0 z-10">
                   <tr className="border-b bg-neutral-50/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80">
-                    {[
+                    {[ 
                       'Date','Ref ID','Account Name','Alias','Account No.','Bank Code','Bank Name','Branch',
-                      'Wallet/Submerchant','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At','Actions',
+                      'Wallet/Submerchant','Source','Withdrawal Fee','Amount','Net Amount','PG Fee','PG Trx ID','In Process','Status','Completed At','Actions',
                     ].map((h) => (
                       <th key={h} className="px-3 py-2 text-left font-medium text-neutral-700 dark:text-neutral-300">
                         {h}
@@ -284,7 +286,8 @@ export default function WithdrawalHistory(_: any) {
                       <td className="px-3 py-2">{w.bankCode}</td>
                       <td className="px-3 py-2">{w.bankName}</td>
                       <td className="px-3 py-2">{w.branchName ?? '-'}</td>
-                      <td className="px-3 py-2">{w.wallet}</td>
+                      <td className="px-3 py-2">{w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet}</td>
+                      <td className="px-3 py-2">{w.sourceProvider ?? '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {(w.amount - (w.netAmount ?? 0)).toLocaleString('id-ID', { style: 'currency', currency: 'IDR' })}
                       </td>

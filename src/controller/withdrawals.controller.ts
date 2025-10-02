@@ -190,6 +190,7 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
         status:        true,
         createdAt:     true,
         completedAt:   true,
+        sourceProvider: true,
         subMerchant: { select: { name: true, provider: true } },
 
       },
@@ -213,7 +214,11 @@ export async function listWithdrawals(req: ClientAuthRequest, res: Response) {
     status:        w.status,
     createdAt:     w.createdAt.toISOString(),
     completedAt:   w.completedAt?.toISOString() ?? null,
-    wallet:        w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+    wallet:
+      w.sourceProvider === 'manual'
+        ? 'Manual Entry'
+        : w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+    sourceProvider: w.sourceProvider,
 
   }));
 
