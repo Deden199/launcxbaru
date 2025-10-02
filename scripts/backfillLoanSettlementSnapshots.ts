@@ -1,4 +1,3 @@
-import { prisma } from '../src/core/prisma';
 import { ORDER_STATUS } from '../src/types/orderStatus';
 
 const args = process.argv.slice(2);
@@ -43,30 +42,30 @@ const cloneMetadata = (value: unknown): Record<string, any> | null => {
 const cloneArray = (value: any): any[] =>
   Array.isArray(value) ? value.map(item => (item && typeof item === 'object' ? JSON.parse(JSON.stringify(item)) : item)) : [];
 
+const parseLoanEntrySnapshot = (source: any): RawLoanEntry => {
+  if (!source || typeof source !== 'object') {
+    return null;
+  }
+  const record = source as Record<string, any>;
+  const id = typeof record.id === 'string' ? record.id : null;
+  const subMerchantId = typeof record.subMerchantId === 'string' ? record.subMerchantId : null;
+  const amount = toNullableNumber(record.amount);
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? { ...(record.metadata as Record<string, any>) }
+      : null;
+  if (id === null && subMerchantId === null && amount === null && metadata === null) {
+    return null;
+  }
+  return { id, subMerchantId, amount, metadata };
+};
+
 const normalizeLoanEntrySnapshot = (
   value: any,
   fallback: RawLoanEntry,
 ): { snapshot: Record<string, any> | null; changed: boolean } => {
-  const parse = (source: any): Record<string, any> | null => {
-    if (!source || typeof source !== 'object') {
-      return null;
-    }
-    const record = source as Record<string, any>;
-    const id = typeof record.id === 'string' ? record.id : null;
-    const subMerchantId = typeof record.subMerchantId === 'string' ? record.subMerchantId : null;
-    const amount = toNullableNumber(record.amount);
-    const metadata =
-      record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-        ? { ...(record.metadata as Record<string, any>) }
-        : null;
-    if (id === null && subMerchantId === null && amount === null && metadata === null) {
-      return null;
-    }
-    return { id, subMerchantId, amount, metadata };
-  };
-
-  const primary = parse(value);
-  const fallbackParsed = parse(fallback);
+  const primary = parseLoanEntrySnapshot(value);
+  const fallbackParsed = parseLoanEntrySnapshot(fallback);
 
   if (!primary && !fallbackParsed) {
     return { snapshot: null, changed: Boolean(value) };
@@ -86,6 +85,75 @@ const normalizeLoanEntrySnapshot = (
 
   const changed = !jsonEqual(primary ?? null, snapshot);
   return { snapshot, changed };
+};
+
+const getPreviousLoanEntrySnapshot = (loanEntry: RawLoanEntry): RawLoanEntry => {
+  if (!loanEntry || typeof loanEntry !== 'object') {
+    return null;
+  }
+
+  const metadata = (loanEntry as Record<string, any>).metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  return parseLoanEntrySnapshot((metadata as Record<string, any>).previousLoanEntry);
+};
+
+const createSnapshotSkeleton = (entry: Record<string, any>, order: OrderRecord): Record<string, any> => {
+  const resolveStatus =
+    typeof entry.previousStatus === 'string'
+      ? entry.previousStatus
+      : typeof entry.status === 'string'
+      ? entry.status
+      : null;
+  const resolvePending = toNullableNumber(
+    Object.prototype.hasOwnProperty.call(entry, 'previousPendingAmount')
+      ? entry.previousPendingAmount
+      : entry.pendingAmount,
+  );
+  const resolveSettlementStatus =
+    typeof entry.previousSettlementStatus === 'string'
+      ? entry.previousSettlementStatus
+      : typeof entry.settlementStatus === 'string'
+      ? entry.settlementStatus
+      : null;
+  const resolveSettlementAmount = toNullableNumber(
+    Object.prototype.hasOwnProperty.call(entry, 'previousSettlementAmount')
+      ? entry.previousSettlementAmount
+      : entry.settlementAmount,
+  );
+  const resolveSettlementTime =
+    typeof entry.previousSettlementTime === 'string'
+      ? entry.previousSettlementTime
+      : typeof entry.settlementTime === 'string'
+      ? entry.settlementTime
+      : null;
+  const resolveLoanedAt =
+    typeof entry.loanedAt === 'string'
+      ? entry.loanedAt
+      : entry.loanedAt instanceof Date
+      ? entry.loanedAt.toISOString()
+      : null;
+
+  const previousLoanEntry =
+    getPreviousLoanEntrySnapshot(order.loanEntry) ?? parseLoanEntrySnapshot(order.loanEntry);
+
+  return {
+    status: resolveStatus,
+    previousStatus: resolveStatus,
+    pendingAmount: resolvePending,
+    previousPendingAmount: resolvePending,
+    settlementStatus: resolveSettlementStatus,
+    previousSettlementStatus: resolveSettlementStatus,
+    settlementAmount: resolveSettlementAmount,
+    previousSettlementAmount: resolveSettlementAmount,
+    settlementTime: resolveSettlementTime,
+    previousSettlementTime: resolveSettlementTime,
+    ...(resolveLoanedAt ? { loanedAt: resolveLoanedAt } : {}),
+    loanEntry: previousLoanEntry,
+    previousLoanEntry: previousLoanEntry,
+  };
 };
 
 const ensureSnapshot = (
@@ -168,7 +236,15 @@ const ensureSnapshot = (
     changed = true;
   }
 
-  const loanEntryResult = normalizeLoanEntrySnapshot(snapshot.loanEntry, orderLoanEntry);
+  const fallbackLoanEntry =
+    getPreviousLoanEntrySnapshot(orderLoanEntry) ?? parseLoanEntrySnapshot(orderLoanEntry);
+  const loanEntryCandidate =
+    snapshot.loanEntry !== undefined && snapshot.loanEntry !== null
+      ? snapshot.loanEntry
+      : snapshot.previousLoanEntry !== undefined && snapshot.previousLoanEntry !== null
+      ? snapshot.previousLoanEntry
+      : fallbackLoanEntry;
+  const loanEntryResult = normalizeLoanEntrySnapshot(loanEntryCandidate, fallbackLoanEntry);
   if (!jsonEqual(snapshot.loanEntry ?? null, loanEntryResult.snapshot)) {
     snapshot.loanEntry = loanEntryResult.snapshot;
     changed = true;
@@ -195,12 +271,15 @@ const backfillHistoryEntry = (
   const entry = { ...(entryValue as Record<string, any>) };
   let changed = false;
 
-  if (entry.snapshot) {
-    const { snapshot, changed: snapshotChanged } = ensureSnapshot(entry.snapshot, order.loanEntry);
-    if (snapshotChanged) {
-      entry.snapshot = snapshot;
-      changed = true;
-    }
+  const hasSnapshot = Boolean(entry.snapshot && typeof entry.snapshot === 'object');
+  const snapshotInput = hasSnapshot ? entry.snapshot : createSnapshotSkeleton(entry, order);
+  const { snapshot, changed: snapshotChanged } = ensureSnapshot(snapshotInput, order.loanEntry);
+  if (!hasSnapshot || !jsonEqual(entry.snapshot ?? null, snapshot)) {
+    entry.snapshot = snapshot;
+    changed = true;
+  } else if (snapshotChanged) {
+    entry.snapshot = snapshot;
+    changed = true;
   }
 
   const snapshotStatus =
@@ -215,7 +294,7 @@ const backfillHistoryEntry = (
   return { entry, changed };
 };
 
-const backfillOrderMetadata = (order: OrderRecord): { metadata: Record<string, any>; changed: boolean } => {
+export const backfillOrderMetadata = (order: OrderRecord): { metadata: Record<string, any>; changed: boolean } => {
   const metadata = cloneMetadata(order.metadata);
   if (!metadata) {
     return { metadata: {}, changed: false };
@@ -246,72 +325,75 @@ const backfillOrderMetadata = (order: OrderRecord): { metadata: Record<string, a
 };
 
 async function main() {
+  const { prisma } = await import('../src/core/prisma');
   let processed = 0;
   let updated = 0;
   let cursor: string | null = null;
 
-  while (true) {
-    const orders = (await prisma.order.findMany({
-      where: { status: ORDER_STATUS.LN_SETTLED },
-      orderBy: { id: 'asc' },
-      take: batchSize,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        metadata: true,
-        loanEntry: {
-          select: {
-            id: true,
-            subMerchantId: true,
-            amount: true,
-            metadata: true,
+  try {
+    while (true) {
+      const orders = (await prisma.order.findMany({
+        where: { status: ORDER_STATUS.LN_SETTLED },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: {
+          id: true,
+          metadata: true,
+          loanEntry: {
+            select: {
+              id: true,
+              subMerchantId: true,
+              amount: true,
+              metadata: true,
+            },
           },
         },
-      },
-    })) as OrderRecord[];
+      })) as OrderRecord[];
 
-    if (orders.length === 0) {
-      break;
-    }
+      if (orders.length === 0) {
+        break;
+      }
 
-    for (const order of orders) {
-      processed += 1;
-      const { metadata, changed } = backfillOrderMetadata(order);
-      if (changed) {
-        updated += 1;
-        if (dryRun) {
-          console.log(`[DRY-RUN] Would backfill loan snapshot for order ${order.id}`);
-        } else {
-          await prisma.order.update({ where: { id: order.id }, data: { metadata } });
-          console.log(`[UPDATE] Backfilled loan snapshot for order ${order.id}`);
+      for (const order of orders) {
+        processed += 1;
+        const { metadata, changed } = backfillOrderMetadata(order);
+        if (changed) {
+          updated += 1;
+          if (dryRun) {
+            console.log(`[DRY-RUN] Would backfill loan snapshot for order ${order.id}`);
+          } else {
+            await prisma.order.update({ where: { id: order.id }, data: { metadata } });
+            console.log(`[UPDATE] Backfilled loan snapshot for order ${order.id}`);
+          }
+        }
+
+        if (limit && processed >= limit) {
+          break;
         }
       }
 
       if (limit && processed >= limit) {
         break;
       }
+
+      cursor = orders[orders.length - 1].id;
     }
 
-    if (limit && processed >= limit) {
-      break;
+    console.log(`Processed ${processed} loan-settled orders.`);
+    if (dryRun) {
+      console.log(`Dry-run complete. ${updated} orders would be updated.`);
+    } else {
+      console.log(`Updated ${updated} orders with normalized loan settlement snapshots.`);
     }
-
-    cursor = orders[orders.length - 1].id;
-  }
-
-  console.log(`Processed ${processed} loan-settled orders.`);
-  if (dryRun) {
-    console.log(`Dry-run complete. ${updated} orders would be updated.`);
-  } else {
-    console.log(`Updated ${updated} orders with normalized loan settlement snapshots.`);
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
-main()
-  .catch(err => {
+if (require.main === module) {
+  main().catch(err => {
     console.error(err);
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });
+}
