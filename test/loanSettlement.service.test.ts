@@ -15,9 +15,99 @@ type MockOrder = {
   loanedAt: Date | null
   createdAt: Date
   loanEntry?: {
+    id?: string | null
+    subMerchantId?: string | null
     amount: number | null
     metadata?: Record<string, unknown> | null
   } | null
+}
+
+const toNullableNumber = (value: any): number | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
+const cloneMetadataObject = (value: any) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, any>) } : null
+
+const getExpectedLoanEntrySnapshot = (order: Pick<MockOrder, 'loanEntry'>) =>
+  order.loanEntry && typeof order.loanEntry === 'object'
+    ? {
+        id: typeof order.loanEntry.id === 'string' ? order.loanEntry.id : null,
+        subMerchantId:
+          typeof order.loanEntry.subMerchantId === 'string' ? order.loanEntry.subMerchantId : null,
+        amount: toNullableNumber(order.loanEntry.amount),
+        metadata: cloneMetadataObject(order.loanEntry.metadata),
+      }
+    : null
+
+const expectSnapshotMatchesOrder = (snapshot: any, order: Partial<MockOrder>) => {
+  assert.ok(snapshot)
+
+  const status = typeof order.status === 'string' ? order.status : null
+  const pendingAmount = toNullableNumber(order.pendingAmount)
+  const settlementStatus = typeof order.settlementStatus === 'string' ? order.settlementStatus : null
+  const settlementAmount = toNullableNumber(order.settlementAmount)
+  const settlementTime = order.settlementTime instanceof Date ? order.settlementTime.toISOString() : null
+  const loanedAt = order.loanedAt instanceof Date ? order.loanedAt.toISOString() : null
+  const expectedLoanEntry = getExpectedLoanEntrySnapshot({ loanEntry: order.loanEntry ?? null })
+
+  assert.equal(snapshot.status, status)
+  assert.equal(snapshot.previousStatus, status)
+  assert.equal(snapshot.pendingAmount, pendingAmount)
+  assert.equal(snapshot.previousPendingAmount, pendingAmount)
+  assert.equal(snapshot.settlementStatus, settlementStatus)
+  assert.equal(snapshot.previousSettlementStatus, settlementStatus)
+  assert.equal(snapshot.settlementAmount, settlementAmount)
+  assert.equal(snapshot.previousSettlementAmount, settlementAmount)
+  assert.equal(snapshot.settlementTime, settlementTime)
+  assert.equal(snapshot.previousSettlementTime, settlementTime)
+  assert.equal(snapshot.loanedAt ?? null, loanedAt)
+  assert.deepEqual(snapshot.loanEntry ?? null, expectedLoanEntry)
+  assert.deepEqual(snapshot.previousLoanEntry ?? null, expectedLoanEntry)
+}
+
+const expectPreviousLoanEntryMetadata = (actual: any, expected: ReturnType<typeof getExpectedLoanEntrySnapshot>) => {
+  if (!expected) {
+    assert.equal(actual ?? null, null)
+    return
+  }
+
+  assert.ok(actual)
+  assert.equal(actual.id ?? null, expected.id ?? null)
+  assert.equal(actual.subMerchantId ?? null, expected.subMerchantId ?? null)
+  assert.equal(actual.amount ?? null, expected.amount ?? null)
+  assert.deepEqual(actual.metadata ?? null, expected.metadata ?? null)
+
+  if (expected.amount != null) {
+    assert.equal(actual.originalAmount ?? null, expected.amount)
+  } else {
+    assert.equal(actual.originalAmount ?? null, null)
+  }
+
+  const expectedMetadata = expected.metadata ?? {}
+  if (expectedMetadata && typeof expectedMetadata === 'object') {
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'markedAt')) {
+      assert.equal(actual.markedAt ?? null, expectedMetadata.markedAt ?? null)
+    } else {
+      assert.equal(actual.markedAt ?? null, null)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'reason')) {
+      assert.equal(actual.reason ?? null, expectedMetadata.reason ?? null)
+    } else {
+      assert.equal(actual.reason ?? null, null)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'markedBy')) {
+      assert.equal(actual.markedBy ?? null, expectedMetadata.markedBy ?? null)
+    } else {
+      assert.equal(actual.markedBy ?? null, null)
+    }
+  }
 }
 
 const sortOrders = (orders: MockOrder[]) =>
@@ -140,6 +230,8 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
     metadata: { ...order.metadata },
     loanEntry: order.loanEntry
       ? {
+          id: order.loanEntry.id ?? null,
+          subMerchantId: order.loanEntry.subMerchantId ?? null,
           amount: order.loanEntry.amount,
           metadata: order.loanEntry.metadata
             ? { ...(order.loanEntry.metadata as Record<string, unknown>) }
@@ -203,6 +295,8 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       createdAt: order.createdAt,
       loanEntry: order.loanEntry
         ? {
+            id: order.loanEntry.id ?? null,
+            subMerchantId: order.loanEntry.subMerchantId ?? null,
             amount: order.loanEntry.amount,
             metadata: order.loanEntry.metadata
               ? { ...(order.loanEntry.metadata as Record<string, unknown>) }
@@ -499,7 +593,23 @@ test('revertLoanSettlementsByRange restores orders based on snapshot history', a
       settlementAmount: 450,
       settlementTime: snapshotSettlementTime,
       loanedAt: null,
-      loanEntry: { amount: null },
+      loanEntry: {
+        id: 'loan-prev-restore',
+        subMerchantId: 'sub-restore',
+        amount: 320,
+        metadata: { reason: 'previous-loan', markedAt: '2024-04-28T12:00:00.000Z' },
+      },
+      previousStatus: ORDER_STATUS.SUCCESS,
+      previousPendingAmount: 450,
+      previousSettlementStatus: 'PAID',
+      previousSettlementAmount: 450,
+      previousSettlementTime: snapshotSettlementTime,
+      previousLoanEntry: {
+        id: 'loan-prev-restore',
+        subMerchantId: 'sub-restore',
+        amount: 320,
+        metadata: { reason: 'previous-loan', markedAt: '2024-04-28T12:00:00.000Z' },
+      },
     },
   }
 
@@ -518,7 +628,12 @@ test('revertLoanSettlementsByRange restores orders based on snapshot history', a
       },
       loanedAt,
       createdAt: new Date('2024-04-01T00:00:00.000Z'),
-      loanEntry: { amount: 600, metadata: { reason: 'loan_adjustment' } },
+      loanEntry: {
+        id: 'loan-current-restore',
+        subMerchantId: 'sub-restore',
+        amount: 600,
+        metadata: { reason: 'loan_adjustment' },
+      },
     },
   ]
 
@@ -556,7 +671,31 @@ test('revertLoanSettlementsByRange restores orders based on snapshot history', a
   assert.equal(update.data.settlementStatus, 'PAID')
   assert.equal(update.data.settlementAmount, 450)
   assert.equal(update.data.settlementTime.toISOString(), snapshotSettlementTime)
-  assert.equal(prismaMock.__loanDeletes.length, 1)
+  const restoredSnapshot = update.data.metadata.loanSettlementHistory[0].snapshot
+  expectSnapshotMatchesOrder(restoredSnapshot, {
+    status: ORDER_STATUS.SUCCESS,
+    pendingAmount: 450,
+    settlementAmount: 450,
+    settlementStatus: 'PAID',
+    settlementTime: new Date(snapshotSettlementTime),
+    loanEntry: {
+      id: 'loan-prev-restore',
+      subMerchantId: 'sub-restore',
+      amount: 320,
+      metadata: { reason: 'previous-loan', markedAt: '2024-04-28T12:00:00.000Z' },
+    },
+  })
+  assert.ok(update.data.metadata.lastLoanSettlementRevert)
+  assert.equal(prismaMock.__loanDeletes.length, 0)
+  assert.equal(prismaMock.__loanEntries.length, 1)
+  const loanUpsert = prismaMock.__loanEntries[0]
+  assert.equal(loanUpsert.orderId, 'order-restore-1')
+  assert.equal(loanUpsert.subMerchantId, 'sub-restore')
+  assert.equal(loanUpsert.amount, 320)
+  assert.deepEqual(loanUpsert.metadata, {
+    reason: 'previous-loan',
+    markedAt: '2024-04-28T12:00:00.000Z',
+  })
 })
 
 test('revertLoanSettlementsByRange supports exportOnly flag', async t => {
@@ -573,7 +712,23 @@ test('revertLoanSettlementsByRange supports exportOnly flag', async t => {
       settlementAmount: 100,
       settlementTime: '2024-05-09T23:00:00.000Z',
       loanedAt: null,
-      loanEntry: { amount: null },
+      loanEntry: {
+        id: 'loan-prev-export',
+        subMerchantId: 'sub-export',
+        amount: 80,
+        metadata: { reason: 'previous-loan', markedAt: '2024-05-09T10:00:00.000Z' },
+      },
+      previousStatus: ORDER_STATUS.SUCCESS,
+      previousPendingAmount: 0,
+      previousSettlementStatus: 'PAID',
+      previousSettlementAmount: 100,
+      previousSettlementTime: '2024-05-09T23:00:00.000Z',
+      previousLoanEntry: {
+        id: 'loan-prev-export',
+        subMerchantId: 'sub-export',
+        amount: 80,
+        metadata: { reason: 'previous-loan', markedAt: '2024-05-09T10:00:00.000Z' },
+      },
     },
   }
 
@@ -643,6 +798,12 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime() + 60_000),
+      loanEntry: {
+        id: 'loan-prev-success',
+        subMerchantId: 'sub-loan',
+        amount: 200,
+        metadata: { reason: 'previous-loan', markedAt: '2024-01-31T18:00:00.000Z' },
+      },
     },
     {
       id: 'order-done',
@@ -667,6 +828,12 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       metadata: {},
       loanedAt: null,
       createdAt: new Date(baseCreatedAt.getTime() + 180_000),
+      loanEntry: {
+        id: 'loan-prev-settled',
+        subMerchantId: 'sub-loan',
+        amount: 450,
+        metadata: { reason: 'previous-loan', markedAt: '2024-01-31T19:00:00.000Z' },
+      },
     },
   ]
 
@@ -708,6 +875,15 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
     assert.equal(order.metadata.lastLoanSettlement.note, 'Range loan adjust')
     assert.equal(order.metadata.lastLoanSettlement.markedBy, 'admin-loan')
     assert.equal(order.metadata.lastLoanSettlement.previousStatus, original.status)
+    expectSnapshotMatchesOrder(order.metadata.lastLoanSettlement.snapshot, {
+      ...original,
+      loanEntry: original.loanEntry ?? null,
+    })
+    const expectedLoanEntry = getExpectedLoanEntrySnapshot(original)
+    assert.deepEqual(
+      order.metadata.lastLoanSettlement.snapshot.previousLoanEntry ?? null,
+      expectedLoanEntry,
+    )
   }
 
   const loanEntries = prismaMock.__loanEntries
@@ -721,5 +897,11 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
     { orderId: 'order-settled', amount: 500 },
     { orderId: 'order-success', amount: 250 },
   ])
+
+  for (const entry of loanEntries) {
+    const original = orders.find(order => order.id === entry.orderId)
+    const expectedLoanEntry = original ? getExpectedLoanEntrySnapshot(original) : null
+    expectPreviousLoanEntryMetadata(entry.metadata.previousLoanEntry ?? null, expectedLoanEntry)
+  }
 })
 

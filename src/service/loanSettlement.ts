@@ -72,9 +72,18 @@ export type OrderForLoanSettlement = {
   loanedAt: Date | null
   createdAt: Date
   loanEntry?: {
+    id: string | null
+    subMerchantId: string | null
     amount: number | null
     metadata: unknown
   } | null
+}
+
+export type LoanSettlementLoanEntrySnapshot = {
+  id: string | null
+  subMerchantId: string | null
+  amount: number | null
+  metadata?: Record<string, any> | null
 }
 
 export type LoanSettlementUpdate = {
@@ -84,6 +93,7 @@ export type LoanSettlementUpdate = {
   pendingAmount: number | null | undefined
   originalStatus: string
   settlementAmount: number | null | undefined
+  previousLoanEntry: LoanSettlementLoanEntrySnapshot | null
 }
 
 type LoanSettlementRevertUpdate = {
@@ -97,6 +107,8 @@ type LoanSettlementRevertUpdate = {
   loanedAt: Date | null
   subMerchantId?: string | null
   loanEntry?: {
+    id: string | null
+    subMerchantId: string | null
     amount: number | null
     metadata?: Record<string, any> | null
   } | null
@@ -110,10 +122,13 @@ export type LoanSettlementSnapshot = {
   settlementAmount: number | null
   settlementTime: string | null
   loanedAt: string | null
-  loanEntry?: {
-    amount: number | null
-    metadata?: Record<string, any> | null
-  } | null
+  loanEntry?: LoanSettlementLoanEntrySnapshot | null
+  previousStatus: string
+  previousPendingAmount: number | null
+  previousSettlementStatus: string | null
+  previousSettlementAmount: number | null
+  previousSettlementTime: string | null
+  previousLoanEntry?: LoanSettlementLoanEntrySnapshot | null
 }
 
 export type LoanSettlementHistoryEntry = {
@@ -141,33 +156,100 @@ export type LoanSettlementRevertSummary = MarkSettledSummary & {
   exportFile?: CsvExportFile | null
 }
 
+export function createLoanEntrySnapshot(
+  loanEntry: OrderForLoanSettlement['loanEntry'],
+): LoanSettlementLoanEntrySnapshot | null {
+  if (!loanEntry) {
+    return null
+  }
+
+  const amount =
+    loanEntry.amount == null || Number.isNaN(Number(loanEntry.amount))
+      ? null
+      : Number(loanEntry.amount)
+
+  const metadata =
+    loanEntry.metadata && typeof loanEntry.metadata === 'object'
+      ? { ...(loanEntry.metadata as Record<string, any>) }
+      : null
+
+  return {
+    id: loanEntry.id ?? null,
+    subMerchantId: loanEntry.subMerchantId ?? null,
+    amount,
+    metadata,
+  }
+}
+
 export function createLoanSettlementSnapshot(order: OrderForLoanSettlement): LoanSettlementSnapshot {
+  const pendingAmount =
+    order.pendingAmount == null || Number.isNaN(Number(order.pendingAmount))
+      ? null
+      : Number(order.pendingAmount)
+  const settlementAmount =
+    order.settlementAmount == null || Number.isNaN(Number(order.settlementAmount))
+      ? null
+      : Number(order.settlementAmount)
+  const settlementTime = order.settlementTime ? order.settlementTime.toISOString() : null
+  const loanedAt = order.loanedAt ? order.loanedAt.toISOString() : null
+  const loanEntrySnapshot = createLoanEntrySnapshot(order.loanEntry)
+
   return {
     status: order.status,
-    pendingAmount:
-      order.pendingAmount == null || Number.isNaN(Number(order.pendingAmount))
-        ? null
-        : Number(order.pendingAmount),
+    pendingAmount,
     settlementStatus: order.settlementStatus ?? null,
-    settlementAmount:
-      order.settlementAmount == null || Number.isNaN(Number(order.settlementAmount))
-        ? null
-        : Number(order.settlementAmount),
-    settlementTime: order.settlementTime ? order.settlementTime.toISOString() : null,
-    loanedAt: order.loanedAt ? order.loanedAt.toISOString() : null,
-    loanEntry: order.loanEntry
-      ? {
-          amount:
-            order.loanEntry.amount == null || Number.isNaN(Number(order.loanEntry.amount))
-              ? null
-              : Number(order.loanEntry.amount),
-          metadata:
-            order.loanEntry.metadata && typeof order.loanEntry.metadata === 'object'
-              ? { ...(order.loanEntry.metadata as Record<string, any>) }
-              : null,
-        }
-      : null,
+    settlementAmount,
+    settlementTime,
+    loanedAt,
+    loanEntry: loanEntrySnapshot,
+    previousStatus: order.status,
+    previousPendingAmount: pendingAmount,
+    previousSettlementStatus: order.settlementStatus ?? null,
+    previousSettlementAmount: settlementAmount,
+    previousSettlementTime: settlementTime,
+    previousLoanEntry: loanEntrySnapshot,
   }
+}
+
+function createPreviousLoanEntryMetadata(
+  previous: LoanSettlementLoanEntrySnapshot | null,
+): Record<string, any> | null {
+  if (!previous) {
+    return null
+  }
+
+  const metadata = previous.metadata && typeof previous.metadata === 'object' ? previous.metadata : null
+
+  const snapshot: Record<string, any> = {
+    id: previous.id,
+    subMerchantId: previous.subMerchantId,
+    amount: previous.amount,
+    metadata,
+  }
+
+  if (previous.amount != null) {
+    snapshot.originalAmount = previous.amount
+  }
+
+  if (metadata) {
+    const markedAt = metadata.markedAt
+    const reason = metadata.reason
+    const markedBy = metadata.markedBy
+
+    if (typeof markedAt === 'string') {
+      snapshot.markedAt = markedAt
+    }
+
+    if (typeof reason === 'string') {
+      snapshot.reason = reason
+    }
+
+    if (typeof markedBy === 'string') {
+      snapshot.markedBy = markedBy
+    }
+  }
+
+  return snapshot
 }
 
 export function createLoanSettlementAuditEntry({
@@ -272,27 +354,26 @@ export async function applyLoanSettlementUpdates({
             }
 
             if (Number.isFinite(amount) && amount > 0 && update.subMerchantId) {
+              const previousLoanEntryMetadata = createPreviousLoanEntryMetadata(update.previousLoanEntry)
+              const loanEntryMetadata: Record<string, any> = {
+                reason: LOAN_SETTLED_METADATA_REASON,
+                markedAt: markedAtIso,
+                ...(adminId ? { markedBy: adminId } : {}),
+                ...(note ? { note } : {}),
+                ...(previousLoanEntryMetadata ? { previousLoanEntry: previousLoanEntryMetadata } : {}),
+              }
+
               await tx.loanEntry.upsert({
                 where: { orderId: update.id },
                 create: {
                   orderId: update.id,
                   subMerchantId: update.subMerchantId,
                   amount,
-                  metadata: {
-                    reason: LOAN_SETTLED_METADATA_REASON,
-                    markedAt: markedAtIso,
-                    ...(adminId ? { markedBy: adminId } : {}),
-                    ...(note ? { note } : {}),
-                  },
+                  metadata: loanEntryMetadata,
                 },
                 update: {
                   amount,
-                  metadata: {
-                    reason: LOAN_SETTLED_METADATA_REASON,
-                    markedAt: markedAtIso,
-                    ...(adminId ? { markedBy: adminId } : {}),
-                    ...(note ? { note } : {}),
-                  },
+                  metadata: loanEntryMetadata,
                 },
               })
             }
@@ -386,13 +467,15 @@ async function applyLoanSettlementRevertUpdates({
               update.loanEntry?.amount != null && Number.isFinite(Number(update.loanEntry.amount))
                 ? Number(update.loanEntry.amount)
                 : null
+            const resolvedSubMerchantId =
+              update.subMerchantId ?? update.loanEntry?.subMerchantId ?? null
 
-            if (amount != null && amount > 0 && update.subMerchantId) {
+            if (amount != null && amount > 0 && resolvedSubMerchantId) {
               await tx.loanEntry.upsert({
                 where: { orderId: update.id },
                 create: {
                   orderId: update.id,
-                  subMerchantId: update.subMerchantId,
+                  subMerchantId: resolvedSubMerchantId,
                   amount,
                   metadata:
                     update.loanEntry?.metadata && typeof update.loanEntry.metadata === 'object'
@@ -401,6 +484,7 @@ async function applyLoanSettlementRevertUpdates({
                 },
                 update: {
                   amount,
+                  subMerchantId: resolvedSubMerchantId,
                   metadata:
                     update.loanEntry?.metadata && typeof update.loanEntry.metadata === 'object'
                       ? update.loanEntry.metadata
@@ -502,6 +586,8 @@ export async function runLoanSettlementByRange({
         createdAt: true,
         loanEntry: {
           select: {
+            id: true,
+            subMerchantId: true,
             amount: true,
             metadata: true,
           },
@@ -527,6 +613,8 @@ export async function runLoanSettlementByRange({
         note: trimmedNote,
       })
 
+      const previousLoanEntry = createLoanEntrySnapshot(order.loanEntry)
+
       const historyKey = 'loanSettlementHistory'
       const history = Array.isArray(metadata[historyKey])
         ? [...metadata[historyKey], auditEntry]
@@ -542,6 +630,7 @@ export async function runLoanSettlementByRange({
         pendingAmount: order.pendingAmount,
         originalStatus: order.status,
         settlementAmount: order.settlementAmount,
+        previousLoanEntry,
       })
     }
 
@@ -607,6 +696,29 @@ const parseOptionalDate = (value: any): Date | null => {
   }
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+const parseSnapshotLoanEntry = (value: any): LoanSettlementLoanEntrySnapshot | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const record = value as Record<string, any>
+  const amount = parseNullableNumber(record.amount)
+  const metadata =
+    record.metadata && typeof record.metadata === 'object'
+      ? { ...(record.metadata as Record<string, any>) }
+      : null
+
+  const id = typeof record.id === 'string' ? record.id : null
+  const subMerchantId = typeof record.subMerchantId === 'string' ? record.subMerchantId : null
+
+  return {
+    id,
+    subMerchantId,
+    amount,
+    metadata,
+  }
 }
 
 const cloneHistoryEntry = (value: any): Record<string, any> | null => {
@@ -694,6 +806,8 @@ export async function revertLoanSettlementsByRange({
         createdAt: true,
         loanEntry: {
           select: {
+            id: true,
+            subMerchantId: true,
             amount: true,
             metadata: true,
           },
@@ -750,32 +864,34 @@ export async function revertLoanSettlementsByRange({
       }
 
       const revertStatus =
-        typeof snapshotValue.status === 'string'
+        typeof snapshotValue.previousStatus === 'string'
+          ? snapshotValue.previousStatus
+          : typeof snapshotValue.status === 'string'
           ? snapshotValue.status
           : typeof targetEntry.previousStatus === 'string'
           ? targetEntry.previousStatus
           : ORDER_STATUS.SUCCESS
 
-      const revertPendingAmount = parseNullableNumber(snapshotValue.pendingAmount)
+      const revertPendingAmount = parseNullableNumber(
+        snapshotValue.previousPendingAmount ?? snapshotValue.pendingAmount,
+      )
       const revertSettlementStatus =
-        typeof snapshotValue.settlementStatus === 'string'
+        typeof snapshotValue.previousSettlementStatus === 'string'
+          ? snapshotValue.previousSettlementStatus
+          : typeof snapshotValue.settlementStatus === 'string'
           ? snapshotValue.settlementStatus
           : null
-      const revertSettlementAmount = parseNullableNumber(snapshotValue.settlementAmount)
-      const revertSettlementTime = parseOptionalDate(snapshotValue.settlementTime)
+      const revertSettlementAmount = parseNullableNumber(
+        snapshotValue.previousSettlementAmount ?? snapshotValue.settlementAmount,
+      )
+      const revertSettlementTime = parseOptionalDate(
+        snapshotValue.previousSettlementTime ?? snapshotValue.settlementTime,
+      )
       const revertLoanedAt = parseOptionalDate(snapshotValue.loanedAt) ?? null
 
-      const loanEntrySnapshot =
-        snapshotValue.loanEntry && typeof snapshotValue.loanEntry === 'object'
-          ? {
-              amount: parseNullableNumber(snapshotValue.loanEntry.amount),
-              metadata:
-                snapshotValue.loanEntry.metadata &&
-                typeof snapshotValue.loanEntry.metadata === 'object'
-                  ? { ...(snapshotValue.loanEntry.metadata as Record<string, any>) }
-                  : null,
-            }
-          : null
+      const loanEntrySnapshot = parseSnapshotLoanEntry(
+        snapshotValue.previousLoanEntry ?? snapshotValue.loanEntry,
+      )
 
       const revertOf = typeof targetEntry.markedAt === 'string' ? targetEntry.markedAt : undefined
 
@@ -822,9 +938,11 @@ export async function revertLoanSettlementsByRange({
 
       metadata.lastLoanSettlementRevert = revertAuditEntry
 
+      const revertSubMerchantId = order.subMerchantId ?? loanEntrySnapshot?.subMerchantId ?? null
+
       exportRows.push({
         orderId: order.id,
-        subMerchantId: order.subMerchantId,
+        subMerchantId: revertSubMerchantId,
         revertStatus,
         revertPendingAmount,
         revertSettlementStatus,
@@ -851,8 +969,15 @@ export async function revertLoanSettlementsByRange({
           settlementAmount: revertSettlementAmount,
           settlementTime: revertSettlementTime,
           loanedAt: revertLoanedAt,
-          subMerchantId: order.subMerchantId,
-          loanEntry: loanEntrySnapshot,
+          subMerchantId: revertSubMerchantId,
+          loanEntry: loanEntrySnapshot
+            ? {
+                id: loanEntrySnapshot.id,
+                subMerchantId: loanEntrySnapshot.subMerchantId,
+                amount: loanEntrySnapshot.amount,
+                metadata: loanEntrySnapshot.metadata,
+              }
+            : null,
           revertOf,
         })
       }
