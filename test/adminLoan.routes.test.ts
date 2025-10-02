@@ -13,6 +13,7 @@ const prisma: any = {
   },
   loanEntry: {
     upsert: async (_args: any) => ({}),
+    deleteMany: async (_args: any) => ({}),
   },
   $transaction: async (cb: any, options?: any) => {
     prisma.__transactionOptions.push(options);
@@ -52,6 +53,7 @@ const {
   getLoanTransactions,
   markLoanOrdersSettled,
   markLoanOrdersSettledByRange,
+  revertLoanOrdersSettled,
 } = require('../src/controller/admin/loan.controller');
 
 test('getLoanTransactions returns PAID and LN_SETTLED orders', async () => {
@@ -322,6 +324,12 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
     assert.deepEqual(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
     assert.equal(call.data.metadata.lastLoanSettlement.note, 'Manual adjust');
     assert.equal(call.data.metadata.lastLoanSettlement.previousStatus, call.where.status);
+    const original = fetchedOrders.find(order => order.id === call.where.id);
+    const snapshot = call.data.metadata.loanSettlementHistory.at(-1)?.snapshot;
+    assert.ok(snapshot);
+    assert.equal(snapshot.status, original?.status ?? '');
+    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
+    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
   }
 
   assert.equal(upsertCalls.length, 3);
@@ -420,6 +428,12 @@ test('markLoanOrdersSettled processes batches larger than the chunk size', async
     assert.equal(call.data.metadata.loanSettlementHistory[0].reason, 'loan_adjustment');
     assert.equal(call.data.metadata.loanSettlementHistory[0].note, 'Bulk adjustment');
     assert.equal(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
+    const original = fetchedOrders.find((order) => order.id === call.where.id);
+    const snapshot = call.data.metadata.loanSettlementHistory[0].snapshot;
+    assert.ok(snapshot);
+    assert.equal(snapshot.status, original?.status ?? '');
+    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
+    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
   }
 
   const upsertedOrderIds = upsertCalls.map((call) => call.where.orderId).sort();
@@ -550,6 +564,12 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
     assert.equal(call.data.settlementStatus, null);
     assert.equal(call.data.settlementTime, null);
     assert.equal(call.data.settlementAmount, null);
+    const original = paidOrders.find(order => order.id === call.where.id);
+    const snapshot = call.data.metadata.loanSettlementHistory.at(-1)?.snapshot;
+    assert.ok(snapshot);
+    assert.equal(snapshot.status, original?.status ?? '');
+    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
+    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
   }
 
   const upsertedIds = upsertCalls.map((call) => call.where.orderId).sort();
@@ -565,5 +585,171 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
   assert.equal(loggedAction[0], 'admin-range');
   assert.equal(loggedAction[1], 'loanMarkSettled');
   assert.equal(loggedAction[3].orderIds.length, paidOrders.length);
+});
+
+test('revertLoanOrdersSettled restores loan-settled orders', async () => {
+  loggedAction = null;
+  resetTransactionTracking();
+
+  const loanedAt = new Date('2024-06-01T00:00:00.000Z');
+  const historyEntry = {
+    reason: 'loan_adjustment',
+    previousStatus: 'SUCCESS',
+    markedAt: '2024-06-01T00:00:00.000Z',
+    markedBy: 'admin-old',
+    snapshot: {
+      status: 'SUCCESS',
+      pendingAmount: 0,
+      settlementStatus: 'PAID',
+      settlementAmount: 100,
+      settlementTime: '2024-05-31T23:00:00.000Z',
+      loanedAt: null,
+      loanEntry: { amount: null },
+    },
+  };
+
+  const order = {
+    id: 'loan-revert-1',
+    status: 'LN_SETTLED',
+    pendingAmount: null,
+    settlementAmount: null,
+    settlementStatus: null,
+    settlementTime: loanedAt,
+    metadata: {
+      loanSettlementHistory: [historyEntry],
+      lastLoanSettlement: historyEntry,
+    },
+    subMerchantId: 'sub-revert',
+    loanedAt,
+    createdAt: new Date('2024-05-15T00:00:00.000Z'),
+  };
+
+  let fetchCount = 0;
+  prisma.order.findMany = async () => {
+    if (fetchCount > 0) {
+      return [];
+    }
+    fetchCount += 1;
+    return [order];
+  };
+
+  const updateCalls: any[] = [];
+  prisma.order.updateMany = async (args: any) => {
+    updateCalls.push(args);
+    return { count: 1 };
+  };
+
+  const deleteCalls: any[] = [];
+  prisma.loanEntry.deleteMany = async (args: any) => {
+    deleteCalls.push(args);
+    return { count: 1 };
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-revert';
+    next();
+  });
+  app.post('/admin/merchants/loan/revert/by-range', (req, res) => {
+    revertLoanOrdersSettled(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/revert/by-range')
+    .send({
+      subMerchantId: 'sub-revert',
+      startDate: '2024-06-01',
+      endDate: '2024-06-02',
+      note: 'Undo loan',
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.ok, ['loan-revert-1']);
+  assert.deepEqual(res.body.fail, []);
+  assert.equal(res.body.errors.length, 0);
+  assert.equal(res.body.events.length, 1);
+  assert.ok(res.body.exportFile);
+  assert.equal(updateCalls.length, 1);
+  assert.equal(updateCalls[0].where.status, 'LN_SETTLED');
+  assert.equal(updateCalls[0].data.status, 'SUCCESS');
+  assert.equal(deleteCalls.length, 1);
+  assert.ok(loggedAction);
+  assert.equal(loggedAction[0], 'admin-revert');
+  assert.equal(loggedAction[1], 'loanRevertSettled');
+});
+
+test('revertLoanOrdersSettled handles exportOnly requests', async () => {
+  loggedAction = null;
+  resetTransactionTracking();
+
+  const historyEntry = {
+    reason: 'loan_adjustment',
+    previousStatus: 'SUCCESS',
+    markedAt: '2024-06-05T00:00:00.000Z',
+    markedBy: 'admin-old',
+    snapshot: {
+      status: 'SUCCESS',
+      pendingAmount: 200,
+      settlementStatus: 'PAID',
+      settlementAmount: 200,
+      settlementTime: '2024-06-04T23:00:00.000Z',
+      loanedAt: null,
+      loanEntry: { amount: null },
+    },
+  };
+
+  let exportFetchCount = 0;
+  prisma.order.findMany = async () => {
+    if (exportFetchCount > 0) {
+      return [];
+    }
+    exportFetchCount += 1;
+    return [
+      {
+        id: 'loan-export-1',
+        status: 'LN_SETTLED',
+        pendingAmount: null,
+        settlementAmount: null,
+        settlementStatus: null,
+        settlementTime: new Date('2024-06-05T00:00:00.000Z'),
+        metadata: { loanSettlementHistory: [historyEntry], lastLoanSettlement: historyEntry },
+        subMerchantId: 'sub-export',
+        loanedAt: new Date('2024-06-05T00:00:00.000Z'),
+        createdAt: new Date('2024-05-20T00:00:00.000Z'),
+      },
+    ];
+  };
+
+  prisma.order.updateMany = async () => {
+    throw new Error('should not update during export');
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).userId = 'admin-revert';
+    next();
+  });
+  app.post('/admin/merchants/loan/revert/by-range', (req, res) => {
+    revertLoanOrdersSettled(req as any, res);
+  });
+
+  const res = await request(app)
+    .post('/admin/merchants/loan/revert/by-range')
+    .send({
+      subMerchantId: 'sub-export',
+      startDate: '2024-06-01',
+      endDate: '2024-06-10',
+      exportOnly: true,
+    });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.ok, ['loan-export-1']);
+  assert.equal(res.body.events.length, 0);
+  assert.ok(res.body.exportFile);
+  assert.ok(loggedAction);
+  assert.equal(loggedAction[1], 'loanRevertSettled');
+  assert.equal(loggedAction[3].exportOnly, true);
 });
 

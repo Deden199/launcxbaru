@@ -14,6 +14,10 @@ type MockOrder = {
   metadata: Record<string, unknown>
   loanedAt: Date | null
   createdAt: Date
+  loanEntry?: {
+    amount: number | null
+    metadata?: Record<string, unknown> | null
+  } | null
 }
 
 const sortOrders = (orders: MockOrder[]) =>
@@ -134,10 +138,19 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
   const clonedOrders = orders.map(order => ({
     ...order,
     metadata: { ...order.metadata },
+    loanEntry: order.loanEntry
+      ? {
+          amount: order.loanEntry.amount,
+          metadata: order.loanEntry.metadata
+            ? { ...(order.loanEntry.metadata as Record<string, unknown>) }
+            : null,
+        }
+      : null,
   }))
 
   prismaMock.__orders = clonedOrders
   prismaMock.__loanEntries = [] as any[]
+  prismaMock.__loanDeletes = [] as any[]
   prismaMock.__updates = [] as any[]
 
   prismaMock.order.findMany = async (args: any) => {
@@ -188,6 +201,14 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       subMerchantId: order.subMerchantId,
       loanedAt: order.loanedAt,
       createdAt: order.createdAt,
+      loanEntry: order.loanEntry
+        ? {
+            amount: order.loanEntry.amount,
+            metadata: order.loanEntry.metadata
+              ? { ...(order.loanEntry.metadata as Record<string, unknown>) }
+              : null,
+          }
+        : null,
     }))
   }
 
@@ -243,10 +264,18 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
     return create
   }
 
+  const deleteMany = async ({ where }: any) => {
+    prismaMock.__loanDeletes.push({ where })
+    prismaMock.__loanEntries = prismaMock.__loanEntries.filter(
+      (entry: any) => entry.orderId !== where.orderId,
+    )
+    return { count: 1 }
+  }
+
   prismaMock.$transaction = async (callback: any) =>
     callback({
       order: { updateMany },
-      loanEntry: { upsert },
+      loanEntry: { upsert, deleteMany },
     })
 }
 
@@ -256,6 +285,8 @@ const setupLoanSettlement = (orders: MockOrder[]) => {
 
   return {
     runLoanSettlementByRange: service.runLoanSettlementByRange,
+    revertLoanSettlementsByRange: service.revertLoanSettlementsByRange,
+    prismaMock,
     restore: restoreModules,
   }
 }
@@ -450,6 +481,140 @@ test('cursor pagination handles duplicate createdAt values deterministically', a
   assert.deepEqual(summary.ok, sortedIds)
   assert.deepEqual(summary.fail, [])
   assert.deepEqual(summary.errors, [])
+})
+
+test('revertLoanSettlementsByRange restores orders based on snapshot history', async t => {
+  const loanedAt = new Date('2024-05-02T10:00:00.000Z')
+  const snapshotSettlementTime = '2024-04-30T08:00:00.000Z'
+
+  const historyEntry = {
+    reason: 'loan_adjustment',
+    previousStatus: ORDER_STATUS.SUCCESS,
+    markedAt: '2024-05-02T10:00:00.000Z',
+    markedBy: 'admin-old',
+    snapshot: {
+      status: ORDER_STATUS.SUCCESS,
+      pendingAmount: 450,
+      settlementStatus: 'PAID',
+      settlementAmount: 450,
+      settlementTime: snapshotSettlementTime,
+      loanedAt: null,
+      loanEntry: { amount: null },
+    },
+  }
+
+  const orders: MockOrder[] = [
+    {
+      id: 'order-restore-1',
+      subMerchantId: 'sub-restore',
+      status: ORDER_STATUS.LN_SETTLED,
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      settlementTime: loanedAt,
+      metadata: {
+        loanSettlementHistory: [historyEntry],
+        lastLoanSettlement: historyEntry,
+      },
+      loanedAt,
+      createdAt: new Date('2024-04-01T00:00:00.000Z'),
+      loanEntry: { amount: 600, metadata: { reason: 'loan_adjustment' } },
+    },
+  ]
+
+  const { revertLoanSettlementsByRange, prismaMock, restore } = setupLoanSettlement(orders)
+
+  process.env.LOAN_FETCH_BATCH_SIZE = '2'
+
+  t.after(() => {
+    restore()
+    delete process.env.LOAN_FETCH_BATCH_SIZE
+  })
+
+  const summary = await revertLoanSettlementsByRange({
+    subMerchantId: 'sub-restore',
+    startDate: '2024-05-01',
+    endDate: '2024-05-03',
+    adminId: 'admin-new',
+    note: 'Undo settlement',
+  })
+
+  assert.deepEqual(summary.ok, ['order-restore-1'])
+  assert.deepEqual(summary.fail, [])
+  assert.equal(summary.errors.length, 0)
+  assert.equal(summary.events.length, 1)
+  assert.equal(summary.events[0]?.restoredStatus, ORDER_STATUS.SUCCESS)
+  assert.ok(summary.exportFile)
+  assert.match(summary.exportFile!.fileName, /^loan-revert-sub-restore-/)
+
+  assert.equal(prismaMock.__updates.length, 1)
+  const update = prismaMock.__updates[0]
+  assert.equal(update.where.id, 'order-restore-1')
+  assert.equal(update.where.status, ORDER_STATUS.LN_SETTLED)
+  assert.equal(update.data.status, ORDER_STATUS.SUCCESS)
+  assert.equal(update.data.pendingAmount, 450)
+  assert.equal(update.data.settlementStatus, 'PAID')
+  assert.equal(update.data.settlementAmount, 450)
+  assert.equal(update.data.settlementTime.toISOString(), snapshotSettlementTime)
+  assert.equal(prismaMock.__loanDeletes.length, 1)
+})
+
+test('revertLoanSettlementsByRange supports exportOnly flag', async t => {
+  const loanedAt = new Date('2024-05-10T00:00:00.000Z')
+  const historyEntry = {
+    reason: 'loan_adjustment',
+    previousStatus: ORDER_STATUS.SUCCESS,
+    markedAt: '2024-05-10T00:00:00.000Z',
+    markedBy: 'admin-old',
+    snapshot: {
+      status: ORDER_STATUS.SUCCESS,
+      pendingAmount: 0,
+      settlementStatus: 'PAID',
+      settlementAmount: 100,
+      settlementTime: '2024-05-09T23:00:00.000Z',
+      loanedAt: null,
+      loanEntry: { amount: null },
+    },
+  }
+
+  const orders: MockOrder[] = [
+    {
+      id: 'order-export-1',
+      subMerchantId: 'sub-export',
+      status: ORDER_STATUS.LN_SETTLED,
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      settlementTime: loanedAt,
+      metadata: {
+        loanSettlementHistory: [historyEntry],
+        lastLoanSettlement: historyEntry,
+      },
+      loanedAt,
+      createdAt: new Date('2024-05-01T00:00:00.000Z'),
+      loanEntry: null,
+    },
+  ]
+
+  const { revertLoanSettlementsByRange, prismaMock, restore } = setupLoanSettlement(orders)
+
+  t.after(() => {
+    restore()
+  })
+
+  const summary = await revertLoanSettlementsByRange({
+    subMerchantId: 'sub-export',
+    startDate: '2024-05-01',
+    endDate: '2024-05-12',
+    exportOnly: true,
+  })
+
+  assert.deepEqual(summary.ok, ['order-export-1'])
+  assert.deepEqual(summary.fail, [])
+  assert.equal(summary.errors.length, 0)
+  assert.equal(summary.events.length, 0)
+  assert.ok(summary.exportFile)
+  assert.equal(prismaMock.__updates.length, 0)
 })
 
 test('runLoanSettlementByRange updates eligible statuses and creates loan entries using pending or settlement amounts', async t => {
