@@ -468,6 +468,10 @@ export async function getDashboardTransactions(req: Request, res: Response) {
           paymentReceivedTime:  true,  // ← baru
           settlementTime:       true,  // ← baru
           trxExpirationTime:    true,  // ← barus
+          isLoan:               true,
+          loanAmount:           true,
+          loanAt:               true,
+          loanBy:               true,
           loanedAt:             true,
           loanEntry: {
             select: {
@@ -514,8 +518,12 @@ export async function getDashboardTransactions(req: Request, res: Response) {
                                ? o.trxExpirationTime.toISOString()
                                : '',
         loanedAt:             o.loanedAt ? o.loanedAt.toISOString() : '',
-        loanAmount:           o.loanEntry?.amount ?? null,
-        loanCreatedAt:        o.loanEntry?.createdAt
+        loanAt:               o.loanAt ? o.loanAt.toISOString() : '',
+        loanBy:               o.loanBy ?? '',
+        loanAmount:           o.loanAmount ?? o.loanEntry?.amount ?? null,
+        loanCreatedAt:        o.loanAt
+                               ? o.loanAt.toISOString()
+                               : o.loanEntry?.createdAt
                                ? o.loanEntry.createdAt.toISOString()
                                : null,
       }

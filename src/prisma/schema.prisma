@@ -63,6 +63,7 @@ model sub_merchant {
   orders           Order[]             @relation("OrderSubMerchant")
   loanEntries     LoanEntry[]         @relation("SubMerchantLoanEntries")
   balanceRecords  SubMerchantBalance[] @relation("SubMerchantBalanceSubMerchant")
+  loanSettlementJobs LoanSettlementJob[] @relation("SubMerchantLoanSettlementJobs")
 
 
 
@@ -234,6 +235,10 @@ model Order {
   paymentReceivedTime  DateTime?      // full.payment_received_time
   settlementTime       DateTime?      // full.settlement_time
   trxExpirationTime    DateTime?      // full.trx_expiration_time
+  isLoan           Boolean   @default(false)
+  loanAmount       Float?
+  loanAt           DateTime?
+  loanBy           String?
   loanedAt         DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -260,6 +265,26 @@ model LoanEntry {
   @@index([subMerchantId])
 }
 
+model LoanSettlementJob {
+  id              String      @id @default(uuid()) @map("_id")
+  subMerchantId   String
+  startDate       DateTime
+  endDate         DateTime
+  totalOrder      Int         @default(0)
+  totalLoanAmount Float       @default(0)
+  status          String
+  createdBy       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  subMerchant sub_merchant @relation("SubMerchantLoanSettlementJobs", fields: [subMerchantId], references: [id])
+  creator     PartnerUser?  @relation("LoanSettlementJobCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([subMerchantId])
+  @@index([status])
+  @@index([createdBy])
+}
+
 /// PartnerUser untuk login admin
 model PartnerUser {
   id        String   @id @default(uuid()) @map("_id")
@@ -273,6 +298,7 @@ model PartnerUser {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   logs      AdminLog[]
+  loanSettlementJobs LoanSettlementJob[] @relation("LoanSettlementJobCreatedBy")
 
 }
 

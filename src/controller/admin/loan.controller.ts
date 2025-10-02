@@ -95,6 +95,10 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
           pendingAmount: true,
           status: true,
           createdAt: true,
+          isLoan: true,
+          loanAmount: true,
+          loanAt: true,
+          loanBy: true,
           loanedAt: true,
           loanEntry: {
             select: {
@@ -115,9 +119,14 @@ export async function getLoanTransactions(req: AuthRequest, res: Response) {
       pendingAmount: order.pendingAmount ?? 0,
       status: order.status,
       createdAt: order.createdAt.toISOString(),
+      isLoan: order.isLoan,
       loanedAt: order.loanedAt ? order.loanedAt.toISOString() : null,
-      loanAmount: order.loanEntry?.amount ?? null,
-      loanCreatedAt: order.loanEntry?.createdAt
+      loanAt: order.loanAt ? order.loanAt.toISOString() : null,
+      loanBy: order.loanBy ?? null,
+      loanAmount: order.loanAmount ?? order.loanEntry?.amount ?? null,
+      loanCreatedAt: order.loanAt
+        ? order.loanAt.toISOString()
+        : order.loanEntry?.createdAt
         ? order.loanEntry.createdAt.toISOString()
         : null,
     }));
@@ -159,6 +168,10 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         settlementTime: true,
         metadata: true,
         subMerchantId: true,
+        isLoan: true,
+        loanAmount: true,
+        loanAt: true,
+        loanBy: true,
         loanedAt: true,
         createdAt: true,
         loanEntry: {
