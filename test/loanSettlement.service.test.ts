@@ -7,6 +7,7 @@ import { backfillOrderMetadata } from '../scripts/backfillLoanSettlementSnapshot
 type MockOrder = {
   id: string
   subMerchantId: string
+  partnerClientId?: string | null
   status: string
   pendingAmount: number | null
   settlementAmount: number | null
@@ -14,6 +15,10 @@ type MockOrder = {
   settlementTime: Date | null
   metadata: Record<string, unknown>
   loanedAt: Date | null
+  loanAmount?: number | null
+  isLoan?: boolean
+  loanAt?: Date | null
+  loanBy?: string | null
   createdAt: Date
   loanEntry?: {
     id?: string | null
@@ -344,6 +349,11 @@ const loadLoanSettlementService = () => {
 const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
   const clonedOrders = orders.map(order => ({
     ...order,
+    partnerClientId: order.partnerClientId ?? null,
+    isLoan: order.isLoan ?? false,
+    loanAmount: order.loanAmount ?? null,
+    loanAt: order.loanAt ?? null,
+    loanBy: order.loanBy ?? null,
     metadata: { ...order.metadata },
     loanEntry: order.loanEntry
       ? {
@@ -362,6 +372,21 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
   prismaMock.__loanDeletes = [] as any[]
   prismaMock.__updates = [] as any[]
 
+  const subMerchantBalances = new Map<string, number>()
+  const partnerBalances = new Map<string, number>()
+
+  for (const order of clonedOrders) {
+    if (order.subMerchantId && !subMerchantBalances.has(order.subMerchantId)) {
+      subMerchantBalances.set(order.subMerchantId, 1_000_000)
+    }
+    if (order.partnerClientId && !partnerBalances.has(order.partnerClientId)) {
+      partnerBalances.set(order.partnerClientId, 1_000_000)
+    }
+  }
+
+  prismaMock.__subMerchantBalances = subMerchantBalances
+  prismaMock.__partnerBalances = partnerBalances
+
   prismaMock.order.findMany = async (args: any) => {
     assert.ok(args)
     assert.equal(args.skip, undefined)
@@ -371,6 +396,7 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
 
     return filtered.slice(0, take ?? filtered.length).map(order => ({
       id: order.id,
+      partnerClientId: order.partnerClientId ?? null,
       status: order.status,
       pendingAmount: order.pendingAmount,
       settlementAmount: order.settlementAmount,
@@ -378,6 +404,10 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       settlementTime: order.settlementTime,
       metadata: { ...order.metadata },
       subMerchantId: order.subMerchantId,
+      isLoan: order.isLoan ?? false,
+      loanAmount: order.loanAmount ?? null,
+      loanAt: order.loanAt ?? null,
+      loanBy: order.loanBy ?? null,
       loanedAt: order.loanedAt,
       createdAt: order.createdAt,
       loanEntry: order.loanEntry
@@ -429,6 +459,22 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
       record.metadata = { ...(data.metadata ?? {}) }
     }
 
+    if (Object.prototype.hasOwnProperty.call(data, 'isLoan')) {
+      record.isLoan = data.isLoan
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'loanAmount')) {
+      record.loanAmount = data.loanAmount
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'loanAt')) {
+      record.loanAt = data.loanAt
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'loanBy')) {
+      record.loanBy = data.loanBy
+    }
+
     return { count: 1 }
   }
 
@@ -453,10 +499,96 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
     return { count: 1 }
   }
 
+  const subMerchantBalanceUpdateMany = async ({ where, data }: any) => {
+    const { subMerchantId } = where
+    const current = subMerchantBalances.get(subMerchantId)
+    const decrement = Number(data?.availableBalance?.decrement ?? 0)
+    const min = Number(where?.availableBalance?.gte ?? 0)
+
+    if (current === undefined || Number.isNaN(decrement) || decrement <= 0) {
+      return { count: 0 }
+    }
+
+    if (current < decrement || current < min) {
+      return { count: 0 }
+    }
+
+    subMerchantBalances.set(subMerchantId, current - decrement)
+    return { count: 1 }
+  }
+
+  const subMerchantBalanceUpdate = async ({ where, data }: any) => {
+    const { subMerchantId } = where
+    const current = subMerchantBalances.get(subMerchantId) ?? 0
+    const increment = Number(data?.availableBalance?.increment ?? 0)
+    const decrement = Number(data?.availableBalance?.decrement ?? 0)
+
+    const next = current + (Number.isFinite(increment) ? increment : 0) - (Number.isFinite(decrement) ? decrement : 0)
+    subMerchantBalances.set(subMerchantId, next)
+    return { count: 1 }
+  }
+
+  const partnerClientUpdateMany = async ({ where, data }: any) => {
+    const { id } = where
+    const current = partnerBalances.get(id)
+    const decrement = Number(data?.balance?.decrement ?? 0)
+    const min = Number(where?.balance?.gte ?? 0)
+
+    if (current === undefined || Number.isNaN(decrement) || decrement <= 0) {
+      return { count: 0 }
+    }
+
+    if (current < decrement || current < min) {
+      return { count: 0 }
+    }
+
+    partnerBalances.set(id, current - decrement)
+    return { count: 1 }
+  }
+
+  const partnerClientUpdate = async ({ where, data }: any) => {
+    const { id } = where
+    const current = partnerBalances.get(id) ?? 0
+    const increment = Number(data?.balance?.increment ?? 0)
+    const decrement = Number(data?.balance?.decrement ?? 0)
+    const next = current + (Number.isFinite(increment) ? increment : 0) - (Number.isFinite(decrement) ? decrement : 0)
+    partnerBalances.set(id, next)
+    return { count: 1 }
+  }
+
+  const loanSettlementJobState = new Map<string, { totalOrder: number; totalLoanAmount: number; status?: string }>()
+
+  const loanSettlementJobUpdate = async ({ where, data }: any) => {
+    const { id } = where
+    const state = loanSettlementJobState.get(id) ?? { totalOrder: 0, totalLoanAmount: 0, status: undefined }
+
+    if (data?.totalOrder?.increment) {
+      state.totalOrder += Number(data.totalOrder.increment)
+    } else if (typeof data?.totalOrder === 'number') {
+      state.totalOrder = data.totalOrder
+    }
+
+    if (data?.totalLoanAmount?.increment) {
+      state.totalLoanAmount += Number(data.totalLoanAmount.increment)
+    } else if (typeof data?.totalLoanAmount === 'number') {
+      state.totalLoanAmount = data.totalLoanAmount
+    }
+
+    if (typeof data?.status === 'string') {
+      state.status = data.status
+    }
+
+    loanSettlementJobState.set(id, state)
+    return state
+  }
+
   prismaMock.$transaction = async (callback: any) =>
     callback({
       order: { updateMany },
       loanEntry: { upsert, deleteMany },
+      subMerchantBalance: { updateMany: subMerchantBalanceUpdateMany, update: subMerchantBalanceUpdate },
+      partnerClient: { updateMany: partnerClientUpdateMany, update: partnerClientUpdate },
+      loanSettlementJob: { update: loanSettlementJobUpdate },
     })
 }
 
@@ -1085,7 +1217,7 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       status: ORDER_STATUS.PAID,
       pendingAmount: 150,
       settlementAmount: null,
-      settlementStatus: 'READY',
+      settlementStatus: 'ACTIVE',
       settlementTime: new Date('2024-02-01T05:00:00.000Z'),
       metadata: {},
       loanedAt: null,
@@ -1097,7 +1229,7 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       status: ORDER_STATUS.SUCCESS,
       pendingAmount: null,
       settlementAmount: 250,
-      settlementStatus: 'READY',
+      settlementStatus: 'COMPLETED',
       settlementTime: new Date('2024-02-01T06:00:00.000Z'),
       metadata: {},
       loanedAt: null,
@@ -1115,7 +1247,7 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       status: ORDER_STATUS.DONE,
       pendingAmount: null,
       settlementAmount: 0,
-      settlementStatus: 'READY',
+      settlementStatus: 'ACTIVE',
       settlementTime: new Date('2024-02-01T07:00:00.000Z'),
       metadata: {},
       loanedAt: null,
@@ -1127,7 +1259,7 @@ test('runLoanSettlementByRange updates eligible statuses and creates loan entrie
       status: ORDER_STATUS.SETTLED,
       pendingAmount: null,
       settlementAmount: 500,
-      settlementStatus: 'READY',
+      settlementStatus: 'COMPLETED',
       settlementTime: new Date('2024-02-01T08:00:00.000Z'),
       metadata: {},
       loanedAt: null,

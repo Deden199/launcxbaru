@@ -58,10 +58,14 @@ export type LoanSettlementEventPayload = {
   adminId?: string
   markedAt: string
   note?: string
+  loanAmount?: number | null
+  loanSettlementJobId?: string
+  loanFlagged?: boolean
 }
 
 export type OrderForLoanSettlement = {
   id: string
+  partnerClientId?: string | null
   status: string
   pendingAmount: number | null | undefined
   settlementAmount: number | null | undefined
@@ -92,6 +96,7 @@ export type LoanSettlementLoanEntrySnapshot = {
 
 export type LoanSettlementUpdate = {
   id: string
+  partnerClientId?: string | null
   subMerchantId?: string | null
   metadata: Record<string, any>
   pendingAmount: number | null | undefined
@@ -324,6 +329,7 @@ export async function applyLoanSettlementUpdates({
   note,
   now,
   markedAtIso,
+  loanSettlementJobId,
 }: {
   updates: LoanSettlementUpdate[]
   summary: MarkSettledSummary
@@ -331,6 +337,7 @@ export async function applyLoanSettlementUpdates({
   note?: string
   now: Date
   markedAtIso: string
+  loanSettlementJobId?: string
 }): Promise<LoanSettlementEventPayload[]> {
   if (updates.length === 0) {
     return []
@@ -349,14 +356,86 @@ export async function applyLoanSettlementUpdates({
     await prisma.$transaction(
       async tx => {
         for (const update of chunk) {
+          let normalizedAmount: number | null = null
+          let subBalanceAdjusted = false
+          let partnerBalanceAdjusted = false
+          const addFailure = (message: string) => {
+            if (!summary.fail.includes(update.id)) {
+              summary.fail.push(update.id)
+            }
+            summary.errors.push({ orderId: update.id, message })
+          }
+
           try {
             let resolvedAmount = Number(update.pendingAmount ?? 0)
             if ((!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) && update.settlementAmount != null) {
               const fallback = Number(update.settlementAmount)
               resolvedAmount = Number.isFinite(fallback) ? fallback : 0
             }
-            const normalizedAmount =
+            normalizedAmount =
               Number.isFinite(resolvedAmount) && resolvedAmount > 0 ? Number(resolvedAmount) : null
+
+            const shouldAdjustBalance = normalizedAmount != null && normalizedAmount > 0
+
+            if (shouldAdjustBalance) {
+              if (!update.subMerchantId) {
+                addFailure('Order is missing sub-merchant balance for loan adjustment')
+                continue
+              }
+
+              const subBalanceResult = await tx.subMerchantBalance.updateMany({
+                where: {
+                  subMerchantId: update.subMerchantId,
+                  availableBalance: {
+                    gte: normalizedAmount!,
+                  },
+                },
+                data: {
+                  availableBalance: {
+                    decrement: normalizedAmount!,
+                  },
+                },
+              })
+
+              if (subBalanceResult.count === 0) {
+                addFailure('Saldo sub-merchant tidak mencukupi untuk penyesuaian pinjaman')
+                continue
+              }
+
+              subBalanceAdjusted = true
+
+              if (update.partnerClientId) {
+                const partnerBalanceResult = await tx.partnerClient.updateMany({
+                  where: {
+                    id: update.partnerClientId,
+                    balance: {
+                      gte: normalizedAmount!,
+                    },
+                  },
+                  data: {
+                    balance: {
+                      decrement: normalizedAmount!,
+                    },
+                  },
+                })
+
+                if (partnerBalanceResult.count === 0) {
+                  await tx.subMerchantBalance.update({
+                    where: { subMerchantId: update.subMerchantId },
+                    data: {
+                      availableBalance: {
+                        increment: normalizedAmount!,
+                      },
+                    },
+                  })
+                  subBalanceAdjusted = false
+                  addFailure('Saldo partner tidak mencukupi untuk penyesuaian pinjaman')
+                  continue
+                }
+
+                partnerBalanceAdjusted = true
+              }
+            }
 
             const result = await tx.order.updateMany({
               where: { id: update.id, status: update.originalStatus },
@@ -376,13 +455,33 @@ export async function applyLoanSettlementUpdates({
             })
 
             if (result.count === 0) {
-              if (!summary.fail.includes(update.id)) {
-                summary.fail.push(update.id)
+              if (shouldAdjustBalance && normalizedAmount != null) {
+                if (subBalanceAdjusted && update.subMerchantId) {
+                  await tx.subMerchantBalance.update({
+                    where: { subMerchantId: update.subMerchantId },
+                    data: {
+                      availableBalance: {
+                        increment: normalizedAmount,
+                      },
+                    },
+                  })
+                  subBalanceAdjusted = false
+                }
+
+                if (partnerBalanceAdjusted && update.partnerClientId) {
+                  await tx.partnerClient.update({
+                    where: { id: update.partnerClientId },
+                    data: {
+                      balance: {
+                        increment: normalizedAmount,
+                      },
+                    },
+                  })
+                  partnerBalanceAdjusted = false
+                }
               }
-              summary.errors.push({
-                orderId: update.id,
-                message: 'Order status changed before loan settlement could be applied',
-              })
+
+              addFailure('Order status changed before loan settlement could be applied')
               continue
             }
 
@@ -390,7 +489,7 @@ export async function applyLoanSettlementUpdates({
               summary.ok.push(update.id)
             }
 
-            if (normalizedAmount != null && normalizedAmount > 0 && update.subMerchantId) {
+            if (shouldAdjustBalance && update.subMerchantId) {
               const previousLoanEntryMetadata = createPreviousLoanEntryMetadata(update.previousLoanEntry)
               const loanEntryMetadata: Record<string, any> = {
                 reason: LOAN_SETTLED_METADATA_REASON,
@@ -405,12 +504,24 @@ export async function applyLoanSettlementUpdates({
                 create: {
                   orderId: update.id,
                   subMerchantId: update.subMerchantId,
-                  amount: normalizedAmount,
+                  amount: normalizedAmount!,
                   metadata: loanEntryMetadata,
                 },
                 update: {
-                  amount: normalizedAmount,
+                  amount: normalizedAmount!,
                   metadata: loanEntryMetadata,
+                },
+              })
+            }
+
+            if (loanSettlementJobId) {
+              await tx.loanSettlementJob.update({
+                where: { id: loanSettlementJobId },
+                data: {
+                  totalOrder: { increment: 1 },
+                  ...(normalizedAmount
+                    ? { totalLoanAmount: { increment: normalizedAmount } }
+                    : {}),
                 },
               })
             }
@@ -421,16 +532,48 @@ export async function applyLoanSettlementUpdates({
               adminId,
               markedAt: markedAtIso,
               note,
+              loanAmount: normalizedAmount,
+              loanSettlementJobId,
+              loanFlagged: true,
             })
           } catch (error: any) {
-            if (!summary.fail.includes(update.id)) {
-              summary.fail.push(update.id)
+            if (normalizedAmount != null && normalizedAmount > 0) {
+              if (subBalanceAdjusted && update.subMerchantId) {
+                try {
+                  await tx.subMerchantBalance.update({
+                    where: { subMerchantId: update.subMerchantId },
+                    data: {
+                      availableBalance: {
+                        increment: normalizedAmount,
+                      },
+                    },
+                  })
+                } catch {
+                  // ignore revert errors but continue logging failure below
+                }
+              }
+
+              if (partnerBalanceAdjusted && update.partnerClientId) {
+                try {
+                  await tx.partnerClient.update({
+                    where: { id: update.partnerClientId },
+                    data: {
+                      balance: {
+                        increment: normalizedAmount,
+                      },
+                    },
+                  })
+                } catch {
+                  // ignore revert errors but continue logging failure below
+                }
+              }
             }
+
             const message =
               error instanceof Error && error.message
                 ? error.message
                 : 'Failed to mark order as loan-settled'
-            summary.errors.push({ orderId: update.id, message })
+            addFailure(message)
           }
         }
       },
@@ -570,12 +713,14 @@ export async function runLoanSettlementByRange({
   endDate,
   note,
   adminId,
+  loanSettlementJobId,
 }: {
   subMerchantId: string
   startDate: string
   endDate: string
   note?: string
   adminId?: string
+  loanSettlementJobId?: string
 }): Promise<MarkSettledSummary> {
   const trimmedNote = note?.trim() ? note.trim() : undefined
   const start = toStartOfDayWib(startDate)
@@ -590,14 +735,31 @@ export async function runLoanSettlementByRange({
 
   let cursor: { createdAt: Date; id: string } | null = null
   while (true) {
+    const dateRangeFilter = {
+      OR: [
+        {
+          settlementTime: {
+            gte: start,
+            lte: end,
+          },
+        },
+        {
+          settlementTime: null,
+          createdAt: {
+            gte: start,
+            lte: end,
+          },
+        },
+      ],
+    }
+
     const orders = (await prisma.order.findMany({
       where: {
         subMerchantId,
         status: { in: [...LOAN_ADJUSTABLE_STATUSES] },
-        createdAt: {
-          gte: start,
-          lte: end,
-        },
+        settlementStatus: { in: ['ACTIVE', 'COMPLETED'] },
+        isLoan: false,
+        ...dateRangeFilter,
         ...(cursor
           ? {
               OR: [
@@ -616,6 +778,7 @@ export async function runLoanSettlementByRange({
       ],
       select: {
         id: true,
+        partnerClientId: true,
         status: true,
         pendingAmount: true,
         settlementAmount: true,
@@ -658,6 +821,10 @@ export async function runLoanSettlementByRange({
         note: trimmedNote,
       })
 
+      if (loanSettlementJobId) {
+        auditEntry.loanSettlementJobId = loanSettlementJobId
+      }
+
       const previousLoanEntry = createLoanEntrySnapshot(order.loanEntry)
 
       const historyKey = 'loanSettlementHistory'
@@ -667,9 +834,15 @@ export async function runLoanSettlementByRange({
 
       metadata[historyKey] = history
       metadata.lastLoanSettlement = auditEntry
+      metadata.loanFlag = true
+      metadata.loanFlaggedAt = markedAtIso
+      if (loanSettlementJobId) {
+        metadata.loanSettlementJobId = loanSettlementJobId
+      }
 
       updates.push({
         id: order.id,
+        partnerClientId: order.partnerClientId ?? null,
         subMerchantId: order.subMerchantId,
         metadata,
         pendingAmount: order.pendingAmount,
@@ -686,6 +859,7 @@ export async function runLoanSettlementByRange({
       note: trimmedNote,
       now,
       markedAtIso,
+      loanSettlementJobId,
     })
 
     for (const event of events) {
