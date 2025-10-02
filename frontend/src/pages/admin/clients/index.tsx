@@ -397,6 +397,12 @@ export default function ApiClientsPage() {
                         >
                           Edit
                         </a>
+                        <a
+                          href={`/admin/clients/${c.id}/withdraw`}
+                          className="rounded-lg border border-neutral-800 px-3 py-1 text-xs hover:bg-neutral-800"
+                        >
+                          Withdrawals
+                        </a>
                       </div>
                     </td>
                   </tr>

@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/router'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
-import { Loader2, Users, UserCog, Save, AlertCircle, Copy, Check } from 'lucide-react'
+import { Loader2, Users, UserCog, Save, AlertCircle, Copy, Check, Wallet } from 'lucide-react'
 
 interface Client {
   id: string
@@ -188,14 +188,24 @@ export default function EditClientPage() {
               <p className="text-xs text-neutral-400">Ubah detail client dan biaya.</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push(`/admin/clients/${clientId}/users`)}
-            className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
-          >
-            <Users size={14} />
-            Manage Users
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/admin/clients/${clientId}/users`)}
+              className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
+            >
+              <Users size={14} />
+              Manage Users
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push(`/admin/clients/${clientId}/withdraw`)}
+              className="inline-flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold hover:bg-neutral-800"
+            >
+              <Wallet size={14} />
+              Manual Withdrawal
+            </button>
+          </div>
         </div>
 
         {/* Error banner */}
