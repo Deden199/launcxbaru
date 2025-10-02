@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, test } from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { JSDOM } from 'jsdom'
 
 import {
@@ -24,6 +25,23 @@ Object.assign(globalThis, {
   Node: window.Node,
   getComputedStyle: window.getComputedStyle.bind(window),
 })
+
+if (!window.attachEvent) {
+  // @ts-ignore legacy support for React polyfills in tests
+  window.attachEvent = () => {}
+}
+if (!window.detachEvent) {
+  // @ts-ignore legacy support for React polyfills in tests
+  window.detachEvent = () => {}
+}
+if (!(HTMLElement.prototype as any).attachEvent) {
+  // @ts-ignore legacy support for React polyfills in tests
+  ;(HTMLElement.prototype as any).attachEvent = () => {}
+}
+if (!(HTMLElement.prototype as any).detachEvent) {
+  // @ts-ignore legacy support for React polyfills in tests
+  ;(HTMLElement.prototype as any).detachEvent = () => {}
+}
 
 if (!globalThis.requestAnimationFrame) {
   globalThis.requestAnimationFrame = (cb: FrameRequestCallback) =>
@@ -87,6 +105,7 @@ const LOAN_MARK_SETTLED_RANGE_START_PATH =
   '/admin/merchants/loan/mark-settled/by-range/start'
 const LOAN_MARK_SETTLED_STATUS_PREFIX =
   '/admin/merchants/loan/mark-settled/by-range/status/'
+const LOAN_REVERT_RANGE_PATH = '/admin/merchants/loan/revert/by-range'
 
 const defaultProps: LoanPageViewProps = {
   apiClient: apiMock as unknown as LoanPageViewProps['apiClient'],
@@ -396,6 +415,275 @@ test('starts loan settlement job and polls until completion', async () => {
     },
     { timeout: 5000 },
   )
+})
+
+test('reverts selected loan-settled transactions with manual order IDs', async () => {
+  const start = new Date('2024-01-02T00:00:00Z')
+  const end = new Date('2024-01-03T00:00:00Z')
+
+  let loanFetchCount = 0
+  apiMock.setGetImplementation(async (url: string) => {
+    if (url === BALANCES_PATH) {
+      return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
+    }
+    if (url === LOAN_TRANSACTIONS_PATH) {
+      loanFetchCount += 1
+      if (loanFetchCount === 1) {
+        return {
+          data: {
+            data: [
+              {
+                id: 'order-1',
+                amount: 10000,
+                pendingAmount: 2000,
+                status: 'PAID',
+                createdAt: new Date('2024-01-02T01:00:00Z').toISOString(),
+                loanedAt: null,
+                loanAmount: null,
+                loanCreatedAt: null,
+              },
+              {
+                id: 'order-ls-1',
+                amount: 15000,
+                pendingAmount: 0,
+                status: 'LN_SETTLED',
+                createdAt: new Date('2024-01-02T02:00:00Z').toISOString(),
+                loanedAt: new Date('2024-01-02T02:30:00Z').toISOString(),
+                loanAmount: 15000,
+                loanCreatedAt: new Date('2024-01-02T02:35:00Z').toISOString(),
+              },
+            ],
+            meta: { total: 2, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+          },
+        }
+      }
+      return {
+        data: {
+          data: [
+            {
+              id: 'order-1',
+              amount: 10000,
+              pendingAmount: 2000,
+              status: 'PAID',
+              createdAt: new Date('2024-01-02T01:00:00Z').toISOString(),
+              loanedAt: null,
+              loanAmount: null,
+              loanCreatedAt: null,
+            },
+          ],
+          meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  let capturedPayload: any = null
+  apiMock.setPostImplementation(async (url: string, payload: any) => {
+    if (url === LOAN_REVERT_RANGE_PATH) {
+      capturedPayload = { ...payload }
+      return {
+        data: {
+          ok: payload.orderIds ?? [],
+          fail: [],
+          errors: [],
+          events: ['audit-log'],
+        },
+      }
+    }
+    throw new Error(`Unhandled POST ${url}`)
+  })
+
+  const { findByLabelText, getByRole, findByText } = render(
+    <LoanPageView {...defaultProps} initialRange={[start, end]} />,
+  )
+
+  const select = (await findByLabelText('Sub-merchant')) as HTMLSelectElement
+  fireEvent.change(select, { target: { value: 'sub-1' } })
+
+  fireEvent.click(getByRole('button', { name: 'Muat Transaksi' }))
+  await findByText('order-1')
+
+  const revertModeButton = getByRole('button', { name: 'Revert Loan Settled' })
+  fireEvent.click(revertModeButton)
+
+  const revertCheckbox = await findByLabelText('Pilih transaksi order-ls-1')
+  fireEvent.click(revertCheckbox)
+
+  const manualField = (await findByLabelText('Order ID manual (opsional)')) as HTMLTextAreaElement
+  const user = userEvent.setup({ document: window.document })
+  await user.type(manualField, 'order-extra-1')
+
+  await waitFor(() => {
+    assert.ok(manualField.value.includes('order-extra-1'))
+  })
+
+  const noteField = (await findByLabelText('Catatan (opsional)')) as HTMLTextAreaElement
+  fireEvent.change(noteField, { target: { value: '  Revert adjust  ' } })
+
+  await waitFor(() => {
+    assert.equal(noteField.value, '  Revert adjust  ')
+  })
+
+  const revertButton = getByRole('button', { name: /Revert Transaksi/ })
+  fireEvent.click(revertButton)
+
+  await waitFor(() => {
+    assert.equal(apiMock.postCalls.length, 1)
+  })
+
+  assert.equal(apiMock.postCalls[0][0], LOAN_REVERT_RANGE_PATH)
+  assert.ok(capturedPayload)
+  assert.deepEqual(capturedPayload.orderIds, ['order-ls-1', 'order-extra-1'])
+  assert.equal(capturedPayload.note, 'Revert adjust')
+  assert.equal(capturedPayload.subMerchantId, 'sub-1')
+  assert.equal(capturedPayload.startDate, toWibIso(start))
+  assert.equal(capturedPayload.endDate, toWibIso(end))
+  assert.ok(!capturedPayload.exportOnly)
+
+  await findByText(/Berhasil merevert 2 transaksi loan-settled/, undefined, {
+    timeout: 5000,
+  })
+
+  await waitFor(() => {
+    assert.equal(manualField.value, '')
+  })
+
+  await waitFor(() => {
+    assert.equal(noteField.value, '')
+  })
+
+  await waitFor(
+    () => {
+      assert.ok(loanFetchCount >= 2)
+    },
+    { timeout: 5000 },
+  )
+})
+
+test('export-only revert downloads CSV file', async () => {
+  const start = new Date('2024-01-02T00:00:00Z')
+  const end = new Date('2024-01-03T00:00:00Z')
+
+  let loanFetchCount = 0
+  apiMock.setGetImplementation(async (url: string) => {
+    if (url === BALANCES_PATH) {
+      return { data: { subBalances: [{ id: 'sub-1', name: 'Sub One', provider: 'oy', balance: 0 }] } }
+    }
+    if (url === LOAN_TRANSACTIONS_PATH) {
+      loanFetchCount += 1
+      return {
+        data: {
+          data: [
+            {
+              id: 'order-ls-2',
+              amount: 5000,
+              pendingAmount: 0,
+              status: 'LN_SETTLED',
+              createdAt: new Date('2024-01-02T04:00:00Z').toISOString(),
+              loanedAt: new Date('2024-01-02T04:30:00Z').toISOString(),
+              loanAmount: 5000,
+              loanCreatedAt: new Date('2024-01-02T04:35:00Z').toISOString(),
+            },
+          ],
+          meta: { total: 1, page: 1, pageSize: DEFAULT_LOAN_PAGE_SIZE },
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  let capturedPayload: any = null
+  apiMock.setPostImplementation(async (url: string, payload: any) => {
+    if (url === LOAN_REVERT_RANGE_PATH) {
+      capturedPayload = { ...payload }
+      return {
+        data: {
+          exportFile: {
+            data: Buffer.from('orderId,status').toString('base64'),
+            mimeType: 'text/csv',
+            fileName: 'loan-revert.csv',
+          },
+          ok: [],
+          fail: [],
+          errors: [],
+          events: ['exported'],
+        },
+      }
+    }
+    throw new Error(`Unhandled POST ${url}`)
+  })
+
+  const originalClick = window.HTMLAnchorElement.prototype.click
+  const urlAny = window.URL as unknown as {
+    createObjectURL?: (...args: any[]) => string
+    revokeObjectURL?: (...args: any[]) => void
+  }
+  const originalCreateObjectURL = urlAny.createObjectURL
+  const originalRevokeObjectURL = urlAny.revokeObjectURL
+  let downloadTriggered = 0
+  window.HTMLAnchorElement.prototype.click = function click() {
+    downloadTriggered += 1
+  }
+  urlAny.createObjectURL = () => 'blob:mock-url'
+  urlAny.revokeObjectURL = () => {}
+
+  try {
+    const { findByLabelText, getByRole, findByText } = render(
+      <LoanPageView {...defaultProps} initialRange={[start, end]} />,
+    )
+
+    const select = (await findByLabelText('Sub-merchant')) as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'sub-1' } })
+
+    fireEvent.click(getByRole('button', { name: 'Muat Transaksi' }))
+    await findByText('Tidak ada data untuk filter saat ini.')
+
+    const revertModeButton = getByRole('button', { name: 'Revert Loan Settled' })
+    fireEvent.click(revertModeButton)
+
+    const manualField = (await findByLabelText('Order ID manual (opsional)')) as HTMLTextAreaElement
+    const user = userEvent.setup({ document: window.document })
+    await user.type(manualField, 'order-extra-9')
+
+    await waitFor(() => {
+      assert.ok(manualField.value.includes('order-extra-9'))
+    })
+
+    const revertCheckbox = await findByLabelText('Pilih transaksi order-ls-2')
+    fireEvent.click(revertCheckbox)
+
+    await findByText('order-ls-2')
+
+    const exportButton = getByRole('button', { name: /Ekspor Saja/ })
+    fireEvent.click(exportButton)
+
+    await waitFor(() => {
+      assert.equal(apiMock.postCalls.length, 1)
+    })
+
+    assert.equal(apiMock.postCalls[0][0], LOAN_REVERT_RANGE_PATH)
+    assert.ok(capturedPayload)
+    assert.equal(capturedPayload.exportOnly, true)
+    assert.deepEqual(capturedPayload.orderIds, ['order-ls-2', 'order-extra-9'])
+
+    await findByText(/Berhasil menyiapkan ekspor/, undefined, { timeout: 5000 })
+
+    assert.ok(downloadTriggered > 0)
+    assert.equal(loanFetchCount, 1)
+  } finally {
+    window.HTMLAnchorElement.prototype.click = originalClick
+    if (originalCreateObjectURL) {
+      urlAny.createObjectURL = originalCreateObjectURL
+    } else {
+      delete urlAny.createObjectURL
+    }
+    if (originalRevokeObjectURL) {
+      urlAny.revokeObjectURL = originalRevokeObjectURL
+    } else {
+      delete urlAny.revokeObjectURL
+    }
+  }
 })
 
 test('bulk settle submits every selectable order id', async () => {
