@@ -734,6 +734,7 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
           completedAt:       true,
           withdrawFeePercent: true,
           withdrawFeeFlat:    true,
+          sourceProvider:    true,
           subMerchant: { select: { name: true, provider: true } },
         },
       }),
@@ -759,7 +760,11 @@ export async function getDashboardWithdrawals(req: Request, res: Response) {
       status:            w.status,
       createdAt:         w.createdAt.toISOString(),
       completedAt:       w.completedAt?.toISOString() ?? null,
-      wallet:            w.subMerchant?.name || w.subMerchant?.provider,
+      wallet:
+        w.sourceProvider === 'manual'
+          ? 'Manual Entry'
+          : w.subMerchant?.name || w.subMerchant?.provider,
+      sourceProvider:    w.sourceProvider,
 
     }));
 

@@ -254,6 +254,52 @@ const adjustClientBalanceValidation = [
   }),
 ];
 
+const manualClientWithdrawValidation = [
+  body('subMerchantId')
+    .isString()
+    .notEmpty()
+    .withMessage('subMerchantId is required'),
+  body('amount')
+    .isFloat({ min: 0 })
+    .withMessage('Amount must be a non-negative number'),
+  body('accountName')
+    .isString()
+    .notEmpty()
+    .withMessage('accountName is required'),
+  body('accountNumber')
+    .isString()
+    .notEmpty()
+    .withMessage('accountNumber is required'),
+  body('bankCode')
+    .isString()
+    .notEmpty()
+    .withMessage('bankCode is required'),
+  body('bankName')
+    .isString()
+    .notEmpty()
+    .withMessage('bankName is required'),
+  body('accountNameAlias')
+    .optional()
+    .isString()
+    .withMessage('accountNameAlias must be a string'),
+  body('branchName')
+    .optional()
+    .isString()
+    .withMessage('branchName must be a string'),
+  body('withdrawFeePercent')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('withdrawFeePercent must be a non-negative number'),
+  body('withdrawFeeFlat')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('withdrawFeeFlat must be a non-negative number'),
+  body('pgFee')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('pgFee must be a non-negative number'),
+];
+
 const validation = {
   handleValidationErrors,
   initiatePaymentValidation,
@@ -264,6 +310,7 @@ const validation = {
   createCardSessionValidation,
   confirmCardSessionValidation,
   adjustClientBalanceValidation,
+  manualClientWithdrawValidation,
 };
 
 export default validation;

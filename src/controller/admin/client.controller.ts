@@ -489,6 +489,7 @@ export const getClientWithdrawalsAdmin = async (req: AuthRequest, res: Response)
         status: true,
         createdAt: true,
         completedAt: true,
+        sourceProvider: true,
         subMerchant: { select: { name: true, provider: true } },
       },
     }),
@@ -508,10 +509,164 @@ export const getClientWithdrawalsAdmin = async (req: AuthRequest, res: Response)
     status: w.status,
     createdAt: w.createdAt.toISOString(),
     completedAt: w.completedAt?.toISOString() ?? null,
-    wallet: w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+    wallet:
+      w.sourceProvider === 'manual'
+        ? 'Manual Entry'
+        : w.subMerchant?.name ?? w.subMerchant?.provider ?? null,
+    sourceProvider: w.sourceProvider,
   }))
 
   res.json({ data, total })
+}
+
+export const createClientManualWithdrawal = async (req: AuthRequest, res: Response) => {
+  const { clientId } = req.params as { clientId: string }
+  const {
+    subMerchantId,
+    amount,
+    accountName,
+    accountNameAlias,
+    accountNumber,
+    bankCode,
+    bankName,
+    branchName,
+    withdrawFeePercent,
+    withdrawFeeFlat,
+    pgFee,
+  } = req.body as Record<string, any>
+
+  const amt = Number(amount)
+  if (!isFinite(amt) || amt < 0) {
+    return res.status(400).json({ error: 'Amount must be a non-negative number' })
+  }
+  const subId = String(subMerchantId || '').trim()
+  if (!subId) {
+    return res.status(400).json({ error: 'subMerchantId is required' })
+  }
+  const accName = String(accountName || '').trim()
+  const accNumber = String(accountNumber || '').trim()
+  const bankCd = String(bankCode || '').trim()
+  const bankNm = String(bankName || '').trim()
+  if (!accName || !accNumber || !bankCd || !bankNm) {
+    return res.status(400).json({ error: 'Beneficiary details are required' })
+  }
+
+  const client = await prisma.partnerClient.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      defaultProvider: true,
+      withdrawFeePercent: true,
+      withdrawFeeFlat: true,
+    },
+  })
+  if (!client) {
+    return res.status(404).json({ error: 'Client not found' })
+  }
+
+  const subMerchant = await prisma.sub_merchant.findUnique({
+    where: { id: subId },
+    select: { id: true, provider: true },
+  })
+  if (!subMerchant) {
+    return res.status(404).json({ error: 'Sub-merchant not found' })
+  }
+  if (client.defaultProvider && subMerchant.provider && subMerchant.provider !== client.defaultProvider) {
+    return res.status(400).json({ error: 'Sub-merchant does not belong to the client provider' })
+  }
+
+  const feePercent =
+    withdrawFeePercent != null && withdrawFeePercent !== ''
+      ? Number(withdrawFeePercent)
+      : client.withdrawFeePercent ?? 0
+  const feeFlat =
+    withdrawFeeFlat != null && withdrawFeeFlat !== ''
+      ? Number(withdrawFeeFlat)
+      : client.withdrawFeeFlat ?? 0
+  if (!isFinite(feePercent) || feePercent < 0) {
+    return res.status(400).json({ error: 'withdrawFeePercent must be >= 0' })
+  }
+  if (!isFinite(feeFlat) || feeFlat < 0) {
+    return res.status(400).json({ error: 'withdrawFeeFlat must be >= 0' })
+  }
+  const pgFeeValue =
+    pgFee != null && pgFee !== ''
+      ? Number(pgFee)
+      : undefined
+  if (pgFeeValue != null && (!isFinite(pgFeeValue) || pgFeeValue < 0)) {
+    return res.status(400).json({ error: 'pgFee must be >= 0' })
+  }
+
+  const feePercentAmount = (feePercent / 100) * amt
+  const netAmount = Math.max(0, amt - feePercentAmount - feeFlat - (pgFeeValue ?? 0))
+
+  const alias = String(accountNameAlias || '').trim() || accName
+  const branch = String(branchName || '').trim()
+
+  const refId = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const withdrawal = await tx.withdrawRequest.create({
+        data: {
+          refId,
+          partnerClientId: clientId,
+          subMerchantId: subId,
+          amount: amt,
+          netAmount,
+          pgFee: pgFeeValue,
+          withdrawFeePercent: feePercent,
+          withdrawFeeFlat: feeFlat,
+          status: DisbursementStatus.COMPLETED,
+          completedAt: new Date(),
+          sourceProvider: 'manual',
+          accountName: accName,
+          accountNameAlias: alias,
+          accountNumber: accNumber,
+          bankCode: bankCd,
+          bankName: bankNm,
+          branchName: branch || null,
+        },
+      })
+
+      if (amt > 0) {
+        await tx.partnerClient.update({
+          where: { id: clientId },
+          data: { balance: { decrement: amt } },
+        })
+      }
+
+      return withdrawal
+    })
+
+    if (req.userId) {
+      await logAdminAction(req.userId, 'createClientManualWithdrawal', clientId, {
+        withdrawId: result.id,
+        amount: amt,
+        subMerchantId: subId,
+        refId,
+      })
+    }
+
+    return res.status(201).json({
+      data: {
+        id: result.id,
+        refId: result.refId,
+        amount: result.amount,
+        netAmount: result.netAmount,
+        pgFee: result.pgFee,
+        withdrawFeePercent: result.withdrawFeePercent,
+        withdrawFeeFlat: result.withdrawFeeFlat,
+        status: result.status,
+        createdAt: result.createdAt.toISOString(),
+        completedAt: result.completedAt?.toISOString() ?? null,
+        wallet: 'Manual Entry',
+        sourceProvider: 'manual',
+      },
+    })
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to record manual withdrawal' })
+  }
 }
 
 // 7) Get list of sub-wallet balances for a client

@@ -133,6 +133,100 @@
 .input,.select { padding:.5rem .75rem; border:1px solid #d1d5db; border-radius:8px;
                  font-size:.875rem; }
 
+.toast {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  border-radius: 12px;
+  padding: .75rem 1rem;
+  font-size: .875rem;
+  border: 1px solid transparent;
+}
+.toastSuccess {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+.toastError {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+.toastIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.manualHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.manualGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.manualField {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.manualField label {
+  font-size: .875rem;
+  color: #4b5563;
+}
+.manualField input,
+.manualField select {
+  padding: .65rem .75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: .9rem;
+  background: #fff;
+}
+.manualField input:focus,
+.manualField select:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+}
+.manualSummary {
+  margin-top: 1rem;
+  font-size: .9rem;
+  color: #374151;
+}
+.manualSummary strong {
+  color: #111827;
+}
+.manualActions {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  grid-column: 1 / -1;
+}
+.manualSubmit {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: .75rem 1.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s ease;
+}
+.manualSubmit:hover {
+  background: #4f46e5;
+}
+.manualSubmit:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
 .tableWrap  { overflow-x:auto; border-radius:12px; }
 .table      { width:100%; border-collapse:collapse; }
 .table th,

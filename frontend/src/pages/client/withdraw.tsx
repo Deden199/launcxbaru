@@ -27,6 +27,7 @@ interface Withdrawal {
   status: string
   createdAt: string
   completedAt?: string
+  sourceProvider?: string
 }
 interface SubMerchant {
   id: string
@@ -311,12 +312,14 @@ export default function WithdrawPage() {
 
   const exportToExcel = () => {
     const rows = [
-      ['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Amount','Fee','Net Amount','Status'],
+      ['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Source','Amount','Fee','Net Amount','Status'],
       ...withdrawals.map(w => [
         new Date(w.createdAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }),
         w.completedAt ? new Date(w.completedAt).toLocaleString('id-ID',{ dateStyle:'short', timeStyle:'short' }) : '-',
         w.refId, w.bankName, w.accountNumber, w.accountName, w.wallet,
-        w.amount, w.amount - w.netAmount, w.netAmount, w.status
+        w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet,
+        w.sourceProvider ?? '',
+        w.amount, w.amount - (w.netAmount ?? 0), w.netAmount ?? 0, w.status
       ])
     ]
     const ws = XLSX.utils.aoa_to_sheet(rows)
@@ -502,7 +505,7 @@ export default function WithdrawPage() {
               <table className="min-w-[1100px] w-full text-sm">
                 <thead className="sticky top-0 z-10">
                   <tr className="border-b border-neutral-800 bg-neutral-900/80 backdrop-blur">
-                    {['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Amount','Fee','Net Amount','Status'].map(h => (
+                    {['Created At','Completed At','Ref ID','Bank','Account','Account Name','Wallet','Source','Amount','Fee','Net Amount','Status'].map(h => (
                       <th key={h} className="px-3 py-2 text-left font-medium text-neutral-300">
                         <span className="inline-flex items-center gap-1">{h}<ArrowUpDown size={14} className="opacity-50" /></span>
                       </th>
@@ -522,10 +525,11 @@ export default function WithdrawPage() {
                       <td className="px-3 py-2">{w.bankName}</td>
                       <td className="px-3 py-2">{w.accountNumber}</td>
                       <td className="px-3 py-2">{w.accountName}</td>
-                      <td className="px-3 py-2">{w.wallet}</td>
+                      <td className="px-3 py-2">{w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet}</td>
+                      <td className="px-3 py-2">{w.sourceProvider ?? '-'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">Rp {w.amount.toLocaleString()}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">Rp {(w.amount - w.netAmount).toLocaleString()}</td>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold">Rp {w.netAmount.toLocaleString()}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">Rp {(w.amount - (w.netAmount ?? 0)).toLocaleString()}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold">Rp {(w.netAmount ?? 0).toLocaleString()}</td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium
                           ${w.status === 'COMPLETED'
@@ -541,7 +545,7 @@ export default function WithdrawPage() {
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={11} className="px-3 py-10 text-center text-neutral-400">No data</td>
+                      <td colSpan={12} className="px-3 py-10 text-center text-neutral-400">No data</td>
                     </tr>
                   )}
                 </tbody>
