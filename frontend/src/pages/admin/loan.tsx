@@ -10,6 +10,7 @@ import { AlertCircle, CheckCircle, Loader2, RefreshCcw } from 'lucide-react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
 import type { SubBalance } from '@/types/dashboard'
+import { downloadExportFile, type ExportFilePayload } from '@/utils/download'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -26,21 +27,30 @@ const PAGE_SIZE_OPTIONS = [100, 250, 500, 1000, MAX_LOAN_PAGE_SIZE]
 
 const SUPPORTED_LOAN_STATUSES = ['PAID', 'SUCCESS', 'DONE', 'SETTLED', 'LN_SETTLED'] as const
 const SELECTABLE_LOAN_STATUSES = ['PAID', 'SUCCESS', 'DONE', 'SETTLED'] as const
-const SELECTABLE_LOAN_STATUS_LABEL = SELECTABLE_LOAN_STATUSES.join('/')
-const SELECTABLE_LOAN_STATUS_TEXT =
-  SELECTABLE_LOAN_STATUSES.length > 1
-    ? `${SELECTABLE_LOAN_STATUSES.slice(0, -1).join(', ')} atau ${
-        SELECTABLE_LOAN_STATUSES[SELECTABLE_LOAN_STATUSES.length - 1]
-      }`
-    : SELECTABLE_LOAN_STATUSES[0]
+const REVERTABLE_LOAN_STATUSES = ['LN_SETTLED'] as const
+
+const formatStatusLabel = (statuses: readonly string[]) => statuses.join('/')
+const formatStatusText = (statuses: readonly string[]) =>
+  statuses.length > 1
+    ? `${statuses.slice(0, -1).join(', ')} atau ${statuses[statuses.length - 1]}`
+    : statuses[0]
+
+const SELECTABLE_LOAN_STATUS_LABEL = formatStatusLabel(SELECTABLE_LOAN_STATUSES)
+const SELECTABLE_LOAN_STATUS_TEXT = formatStatusText(SELECTABLE_LOAN_STATUSES)
+const REVERTABLE_LOAN_STATUS_LABEL = formatStatusLabel(REVERTABLE_LOAN_STATUSES)
+const REVERTABLE_LOAN_STATUS_TEXT = formatStatusText(REVERTABLE_LOAN_STATUSES)
 
 type LoanTransactionStatus = (typeof SUPPORTED_LOAN_STATUSES)[number]
+type LoanActionMode = 'mark' | 'revert'
 
 const isSupportedLoanStatus = (value: unknown): value is LoanTransactionStatus =>
   typeof value === 'string' && SUPPORTED_LOAN_STATUSES.includes(value as LoanTransactionStatus)
 
 const isSelectableLoanStatus = (status: LoanTransactionStatus) =>
   SELECTABLE_LOAN_STATUSES.includes(status as (typeof SELECTABLE_LOAN_STATUSES)[number])
+
+const isRevertableLoanStatus = (status: LoanTransactionStatus) =>
+  REVERTABLE_LOAN_STATUSES.includes(status as (typeof REVERTABLE_LOAN_STATUSES)[number])
 
 type LoanTransaction = {
   id: string
@@ -87,6 +97,15 @@ type LoanSettlementSummary = {
   errors: { orderId: string; message: string }[]
 }
 
+type LoanRevertResponse = {
+  ok?: string[] | null
+  fail?: string[] | null
+  errors?: { orderId: string; message: string }[] | null
+  events?: string[] | null
+  exportFile?: ExportFilePayload | null
+  summary?: LoanSettlementSummary | null
+}
+
 type LoanSettlementJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
 export interface LoanPageViewProps {
@@ -104,6 +123,12 @@ const formatDateTime = (value: string | null) =>
         timeStyle: 'short',
       })
     : '-'
+
+const parseManualOrderIds = (input: string) =>
+  input
+    .split(/[\s,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
 
 function LoanStatusBadge({ status }: { status: LoanTransaction['status'] }) {
   const metaEntry = LOAN_STATUS_BADGE_META[status] ?? LOAN_STATUS_BADGE_META.PAID
@@ -124,6 +149,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [subsError, setSubsError] = useState('')
   const [selectedSub, setSelectedSub] = useState('')
 
+  const [mode, setMode] = useState<LoanActionMode>('mark')
+
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>(() => {
     if (initialRange) return initialRange
     const end = new Date()
@@ -138,10 +165,14 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [formError, setFormError] = useState('')
 
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
+  const [manualOrderInput, setManualOrderInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [reverting, setReverting] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
   const [actionError, setActionError] = useState('')
   const noteRef = useRef<HTMLTextAreaElement | null>(null)
+  const manualOrdersRef = useRef<HTMLTextAreaElement | null>(null)
   const [startingJob, setStartingJob] = useState(false)
   const [rangeJobId, setRangeJobId] = useState('')
   const [rangeJobStatus, setRangeJobStatus] = useState<LoanSettlementJobStatus | ''>('')
@@ -155,6 +186,25 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
 
   const [startDate, endDate] = dateRange
+  const isRevertMode = mode === 'revert'
+  const manualOrderIds = useMemo(() => {
+    const sourceValue = manualOrdersRef.current?.value ?? manualOrderInput
+    return parseManualOrderIds(sourceValue)
+  }, [manualOrderInput])
+
+  const combinedOrderIds = useMemo(() => {
+    const unique = new Set<string>()
+    selectedOrders.forEach(id => unique.add(id))
+    manualOrderIds.forEach(id => unique.add(id))
+    return Array.from(unique)
+  }, [manualOrderIds, selectedOrders])
+  const updateManualOrders = (value: string) => {
+    setManualOrderInput(value)
+  }
+  const currentSelectableStatuses: readonly LoanTransactionStatus[] = isRevertMode
+    ? REVERTABLE_LOAN_STATUSES
+    : SELECTABLE_LOAN_STATUSES
+  const currentStatusLabel = formatStatusLabel(currentSelectableStatuses)
 
   const pageSizeOptions = useMemo(() => {
     const unique = new Set<number>(PAGE_SIZE_OPTIONS)
@@ -188,16 +238,25 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     }
   }, [apiClient])
 
-  const displayedTransactions = useMemo(
-    () => transactions.filter(tx => isSelectableLoanStatus(tx.status)),
-    [transactions]
-  )
+  const displayedTransactions = useMemo(() => {
+    if (isRevertMode) {
+      return transactions.filter(tx => isRevertableLoanStatus(tx.status))
+    }
+    return transactions.filter(tx => isSelectableLoanStatus(tx.status))
+  }, [isRevertMode, transactions])
 
   useEffect(() => {
     setSelectedOrders(prev =>
       prev.filter(id => displayedTransactions.some(tx => tx.id === id))
     )
   }, [displayedTransactions])
+
+  useEffect(() => {
+    setSelectedOrders([])
+    updateManualOrders('')
+    setActionMessage('')
+    setActionError('')
+  }, [isRevertMode])
 
   useEffect(() => {
     return () => {
@@ -334,7 +393,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     }
   }
 
-  const toggleOne = (id: string, checked: boolean, disabled: boolean) => {
+  const toggleOne = (id: string, checked: boolean, disabled = false) => {
     if (disabled) return
     setSelectedOrders(prev =>
       checked ? [...prev, id] : prev.filter(item => item !== id)
@@ -543,6 +602,132 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     }
   }
 
+  const revertSelected = async ({ exportOnly = false }: { exportOnly?: boolean } = {}) => {
+    setFormError('')
+    setActionError('')
+
+    if (!selectedSub) {
+      setFormError('Pilih sub-merchant terlebih dahulu.')
+      return
+    }
+    if (!startDate || !endDate) {
+      setFormError('Pilih rentang tanggal terlebih dahulu.')
+      return
+    }
+    if (!exportOnly && combinedOrderIds.length === 0) {
+      setFormError(
+        `Pilih minimal satu transaksi berstatus ${REVERTABLE_LOAN_STATUS_TEXT} atau masukkan Order ID manual.`,
+      )
+      return
+    }
+
+    const trimmedNote = (noteRef.current?.value ?? '').trim()
+    const manualIdsForPayload = parseManualOrderIds(
+      manualOrdersRef.current?.value ?? manualOrderInput,
+    )
+
+    const payload: {
+      subMerchantId: string
+      startDate: string
+      endDate: string
+      orderIds: string[]
+      note?: string
+      exportOnly?: boolean
+    } = {
+      subMerchantId: selectedSub,
+      startDate: toWibIso(startDate),
+      endDate: toWibIso(endDate),
+      orderIds: Array.from(new Set([...selectedOrders, ...manualIdsForPayload])),
+    }
+
+    if (trimmedNote) {
+      payload.note = trimmedNote
+    }
+    if (exportOnly) {
+      payload.exportOnly = true
+    }
+
+    const setLoading = exportOnly ? setExporting : setReverting
+    setLoading(true)
+    try {
+      const { data } = await apiClient.post<LoanRevertResponse>(
+        '/admin/merchants/loan/revert/by-range',
+        payload,
+      )
+
+      const okRaw = Array.isArray(data?.summary?.ok)
+        ? data.summary?.ok ?? []
+        : Array.isArray(data?.ok)
+          ? data.ok ?? []
+          : []
+      const ok = okRaw.filter((item): item is string => typeof item === 'string')
+      const failRaw = Array.isArray(data?.summary?.fail)
+        ? data.summary?.fail ?? []
+        : Array.isArray(data?.fail)
+          ? data.fail ?? []
+          : []
+      const fail = failRaw.filter((item): item is string => typeof item === 'string')
+      const errorsRaw = Array.isArray(data?.summary?.errors)
+        ? data.summary?.errors ?? []
+        : Array.isArray(data?.errors)
+          ? data.errors ?? []
+          : []
+      const errors = errorsRaw.filter(
+        (item): item is { orderId: string; message: string } =>
+          !!item && typeof item === 'object' && 'message' in item && 'orderId' in item,
+      )
+      const events = Array.isArray(data?.events)
+        ? data.events.filter((event): event is string => typeof event === 'string')
+        : []
+
+      const okCount = ok.length
+      const failCount = fail.length + errors.length
+
+      if (exportOnly) {
+        const baseMessage = combinedOrderIds.length > 0
+          ? `Berhasil menyiapkan ekspor untuk ${combinedOrderIds.length.toLocaleString('id-ID')} transaksi.`
+          : 'Berhasil menyiapkan ekspor transaksi.'
+        const eventText = events.length > 0 ? ` Event: ${events.join(', ')}` : ''
+        setActionMessage(`${baseMessage}${eventText}`)
+      } else if (okCount > 0) {
+        const eventText = events.length > 0 ? ` Event: ${events.join(', ')}` : ''
+        setActionMessage(`Berhasil merevert ${okCount.toLocaleString('id-ID')} transaksi loan-settled.${eventText}`)
+      } else {
+        const eventText = events.length > 0 ? ` Event: ${events.join(', ')}` : ''
+        setActionMessage(`Tidak ada perubahan status yang dilakukan.${eventText}`)
+      }
+
+      if (failCount > 0) {
+        const errorDetails = [
+          ...fail.filter((item): item is string => typeof item === 'string'),
+          ...errors.map(err => `${err?.orderId ?? 'unknown'}: ${err?.message ?? 'Unknown error'}`),
+        ].join('; ')
+        setActionError(`Gagal merevert ${failCount.toLocaleString('id-ID')} transaksi: ${errorDetails}`)
+      } else {
+        setActionError('')
+        if (!exportOnly && okCount > 0 && noteRef.current) {
+          noteRef.current.value = ''
+        }
+      }
+
+      if (data?.exportFile) {
+        downloadExportFile(data.exportFile, `loan-revert-${selectedSub}-${Date.now()}.csv`)
+      }
+
+      if (!exportOnly) {
+        setSelectedOrders([])
+        updateManualOrders('')
+        await loadTransactions()
+      }
+    } catch (err: any) {
+      setActionError(
+        err?.response?.data?.error ?? 'Gagal merevert transaksi loan-settled',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleLoadTransactions = () => {
     setActionError('')
     setActionMessage('')
@@ -572,7 +757,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         <header className="space-y-1">
           <h1 className="text-xl font-semibold">Loan Management</h1>
           <p className="text-sm text-neutral-400">
-            Pantau transaksi loan dan tandai pembayaran manual sebagai loan-settled.
+            Pantau transaksi loan, tandai pembayaran manual sebagai loan-settled, atau revert status
+            loan-settled bila diperlukan.
           </p>
         </header>
 
@@ -584,6 +770,53 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow-sm">
           <div className="space-y-4 p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                  Mode aksi
+                </span>
+                <div className="inline-flex overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950">
+                  <button
+                    type="button"
+                    onClick={() => setMode('mark')}
+                    aria-pressed={!isRevertMode}
+                    className={`px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60 ${
+                      !isRevertMode
+                        ? 'bg-purple-900/30 text-purple-100'
+                        : 'text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    Tandai Loan Settled
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('revert')}
+                    aria-pressed={isRevertMode}
+                    className={`px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60 ${
+                      isRevertMode
+                        ? 'bg-purple-900/30 text-purple-100'
+                        : 'text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    Revert Loan Settled
+                  </button>
+                </div>
+              </div>
+              <div className="max-w-xl text-xs text-neutral-400">
+                {isRevertMode ? (
+                  <>
+                    Mode revert memungkinkan Anda memilih transaksi <strong>{REVERTABLE_LOAN_STATUS_TEXT}</strong>{' '}
+                    untuk mengembalikan status loan-settled atau mengekspor daftarnya.
+                  </>
+                ) : (
+                  <>
+                    Mode tandai digunakan untuk menandai transaksi berstatus{' '}
+                    <strong>{SELECTABLE_LOAN_STATUS_TEXT}</strong> sebagai loan-settled.
+                  </>
+                )}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1fr)]">
               <div className="flex flex-col gap-1">
                 <label htmlFor="loan-sub-merchant" className="text-sm font-medium">
@@ -719,6 +952,18 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
               <span>
                 Loan terpilih: <strong>{formatCurrency(selectedSummary.loan)}</strong>
               </span>
+              {isRevertMode ? (
+                <span>
+                  Total order (checkbox + manual):{' '}
+                  <strong>{combinedOrderIds.length.toLocaleString('id-ID')}</strong>
+                </span>
+              ) : null}
+              {isRevertMode && manualOrderIds.length > 0 ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-purple-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-purple-200">
+                  <span>Order manual</span>
+                  <span>{manualOrderIds.length.toLocaleString('id-ID')}</span>
+                </span>
+              ) : null}
             </div>
 
             <div className="overflow-x-auto">
@@ -728,7 +973,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     <th className="px-3 py-2 text-left">
                       <input
                         type="checkbox"
-                        aria-label={`Pilih semua transaksi ${SELECTABLE_LOAN_STATUS_LABEL}`}
+                        aria-label={`Pilih semua transaksi ${currentStatusLabel}`}
                         checked={selectableIds.length > 0 && selectedOrders.length === selectableIds.length}
                         onChange={event => toggleAll(event.target.checked)}
                         disabled={selectableIds.length === 0}
@@ -760,7 +1005,7 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     </tr>
                   ) : (
                     displayedTransactions.map(tx => {
-                      const disabled = !isSelectableLoanStatus(tx.status)
+                      const disabled = !currentSelectableStatuses.includes(tx.status)
                       const checked = selectedOrders.includes(tx.id)
                       return (
                         <tr key={tx.id} className="border-b border-neutral-800 last:border-0">
@@ -810,18 +1055,45 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
 
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="text-xs text-neutral-400 sm:max-w-sm">
-                Hanya transaksi berstatus{' '}
-                {SELECTABLE_LOAN_STATUSES.length > 1 ? (
+                {isRevertMode ? (
                   <>
-                    <strong>{SELECTABLE_LOAN_STATUSES.slice(0, -1).join(', ')}</strong> atau{' '}
-                    <strong>{SELECTABLE_LOAN_STATUSES.slice(-1)[0]}</strong>
+                    Hanya transaksi berstatus <strong>{REVERTABLE_LOAN_STATUS_TEXT}</strong> yang dapat direvert.
                   </>
                 ) : (
-                  <strong>{SELECTABLE_LOAN_STATUSES[0]}</strong>
-                )}{' '}
-                yang dapat ditandai sebagai loan-settled.
+                  <>
+                    Hanya transaksi berstatus{' '}
+                    {SELECTABLE_LOAN_STATUSES.length > 1 ? (
+                      <>
+                        <strong>{SELECTABLE_LOAN_STATUSES.slice(0, -1).join(', ')}</strong> atau{' '}
+                        <strong>{SELECTABLE_LOAN_STATUSES.slice(-1)[0]}</strong>
+                      </>
+                    ) : (
+                      <strong>{SELECTABLE_LOAN_STATUSES[0]}</strong>
+                    )}{' '}
+                    yang dapat ditandai sebagai loan-settled.
+                  </>
+                )}
               </div>
               <div className="flex w-full flex-col gap-3 sm:w-80">
+                {isRevertMode ? (
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="loan-manual-orders" className="text-sm font-medium text-neutral-200">
+                      Order ID manual (opsional)
+                    </label>
+                    <textarea
+                      id="loan-manual-orders"
+                      ref={manualOrdersRef}
+                      value={manualOrderInput}
+                      onChange={event => updateManualOrders(event.target.value)}
+                      placeholder="Contoh: order-123, order-456"
+                      rows={3}
+                      className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                    />
+                    <p className="text-xs text-neutral-500">
+                      Pisahkan Order ID dengan koma, spasi, atau baris baru untuk menambah daftar revert/ekspor.
+                    </p>
+                  </div>
+                ) : null}
                 <label htmlFor="loan-note" className="text-sm font-medium text-neutral-200">
                   Catatan (opsional)
                 </label>
@@ -837,28 +1109,57 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                   Catatan akan tersimpan dalam metadata audit untuk referensi tim finance.
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={startRangeSettlement}
-                    disabled={
-                      showJobSpinner || loadingSubs || loadingTx || !selectedSub || !startDate || !endDate
-                    }
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-3 py-2.5 text-sm font-medium text-indigo-100 transition hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {showJobSpinner ? <Loader2 className="animate-spin" size={16} /> : null}
-                    Mulai Penandaan Rentang
-                  </button>
-                  <button
-                    type="button"
-                    onClick={settleSelected}
-                    disabled={submitting || selectedOrders.length === 0}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
-                    Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
-                  </button>
+                  {isRevertMode ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void revertSelected()}
+                        disabled={
+                          reverting || exporting || combinedOrderIds.length === 0 || !selectedSub || !startDate || !endDate
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {reverting ? <Loader2 className="animate-spin" size={16} /> : null}
+                        Revert Transaksi ({combinedOrderIds.length.toLocaleString('id-ID')})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void revertSelected({ exportOnly: true })}
+                        disabled={
+                          exporting || reverting || combinedOrderIds.length === 0 || !selectedSub || !startDate || !endDate
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-3 py-2.5 text-sm font-medium text-indigo-100 transition hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {exporting ? <Loader2 className="animate-spin" size={16} /> : null}
+                        Ekspor Saja ({combinedOrderIds.length.toLocaleString('id-ID')})
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={startRangeSettlement}
+                        disabled={
+                          showJobSpinner || loadingSubs || loadingTx || !selectedSub || !startDate || !endDate
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-3 py-2.5 text-sm font-medium text-indigo-100 transition hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {showJobSpinner ? <Loader2 className="animate-spin" size={16} /> : null}
+                        Mulai Penandaan Rentang
+                      </button>
+                      <button
+                        type="button"
+                        onClick={settleSelected}
+                        disabled={submitting || selectedOrders.length === 0}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-purple-900/50 bg-purple-950/30 px-3 py-2.5 text-sm font-medium text-purple-100 transition hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {submitting ? <Loader2 className="animate-spin" size={16} /> : null}
+                        Tandai Loan Settled ({selectedOrders.length.toLocaleString('id-ID')})
+                      </button>
+                    </>
+                  )}
                 </div>
-                {rangeJobStatus !== '' ? (
+                {!isRevertMode && rangeJobStatus !== '' ? (
                   <div className="space-y-1 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-300">
                     <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-neutral-400">
                       <span>Status job</span>
