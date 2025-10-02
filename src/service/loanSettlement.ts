@@ -764,7 +764,7 @@ export async function revertLoanSettlementsByRange({
   const exportRows: LoanSettlementRevertExportRow[] = []
   const normalizedOrderIds = orderIds && orderIds.length > 0 ? new Set(orderIds) : null
 
-  let cursor: { loanedAt: Date; id: string } | null = null
+  let cursor: { createdAt: Date; id: string } | null = null
   const updates: LoanSettlementRevertUpdate[] = []
 
   while (true) {
@@ -773,24 +773,45 @@ export async function revertLoanSettlementsByRange({
         subMerchantId,
         status: ORDER_STATUS.LN_SETTLED,
         ...(normalizedOrderIds ? { id: { in: Array.from(normalizedOrderIds) } } : {}),
-        loanedAt: {
-          gte: start,
-          lte: end,
-        },
-        ...(cursor
-          ? {
-              OR: [
-                { loanedAt: { gt: cursor.loanedAt } },
-                {
-                  loanedAt: cursor.loanedAt,
-                  id: { gt: cursor.id },
+        AND: [
+          // Allow LN_SETTLED orders whose settlement timestamp falls outside the
+          // range to still be considered when they were created within the
+          // selected admin date filter.
+          {
+            OR: [
+              {
+                loanedAt: {
+                  gte: start,
+                  lte: end,
                 },
-              ],
-            }
-          : {}),
+              },
+              {
+                createdAt: {
+                  gte: start,
+                  lte: end,
+                },
+              },
+            ],
+          },
+          ...(cursor
+            ? [
+                {
+                  OR: [
+                    { createdAt: { gt: cursor.createdAt } },
+                    {
+                      createdAt: cursor.createdAt,
+                      id: { gt: cursor.id },
+                    },
+                  ],
+                },
+              ]
+            : []),
+        ],
       },
       orderBy: [
-        { loanedAt: 'asc' },
+        // Align the pagination cursor with the same column used for filtering
+        // so the date range in the admin UI matches the backend results.
+        { createdAt: 'asc' },
         { id: 'asc' },
       ],
       select: {
@@ -989,11 +1010,7 @@ export async function revertLoanSettlementsByRange({
     }
 
     const lastOrder = orders[orders.length - 1]
-    if (lastOrder.loanedAt) {
-      cursor = { loanedAt: lastOrder.loanedAt, id: lastOrder.id }
-    } else {
-      cursor = null
-    }
+    cursor = { createdAt: lastOrder.createdAt, id: lastOrder.id }
   }
 
   if (!exportOnly && updates.length > 0) {

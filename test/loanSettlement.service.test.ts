@@ -119,52 +119,168 @@ const sortOrders = (orders: MockOrder[]) =>
     return a.id.localeCompare(b.id)
   })
 
-const evaluateCursorCondition = (order: MockOrder, condition: any) => {
-  if (Object.prototype.hasOwnProperty.call(condition, 'createdAt')) {
-    const createdAtCondition = condition.createdAt
+const toTime = (value: Date | null | undefined) => (value instanceof Date ? value.getTime() : null)
 
-    if (createdAtCondition instanceof Date) {
-      if (order.createdAt.getTime() !== createdAtCondition.getTime()) {
-        return false
-      }
-    } else if (createdAtCondition && typeof createdAtCondition === 'object') {
-      const { gt, gte, lt, lte } = createdAtCondition
-      if (gt instanceof Date && !(order.createdAt.getTime() > gt.getTime())) {
-        return false
-      }
-      if (gte instanceof Date && !(order.createdAt.getTime() >= gte.getTime())) {
-        return false
-      }
-      if (lt instanceof Date && !(order.createdAt.getTime() < lt.getTime())) {
-        return false
-      }
-      if (lte instanceof Date && !(order.createdAt.getTime() <= lte.getTime())) {
-        return false
-      }
-    } else {
+const matchesDateCondition = (value: Date | null, condition: any) => {
+  if (condition == null) {
+    return true
+  }
+
+  if (condition === null) {
+    return value === null
+  }
+
+  if (condition instanceof Date) {
+    const valueTime = toTime(value)
+    return valueTime !== null && valueTime === condition.getTime()
+  }
+
+  if (typeof condition !== 'object') {
+    return true
+  }
+
+  const valueTime = toTime(value)
+
+  if (Object.prototype.hasOwnProperty.call(condition, 'equals')) {
+    const equalsValue = condition.equals
+    if (equalsValue === null) {
+      return value === null
+    }
+    if (!(equalsValue instanceof Date) || valueTime === null) {
+      return false
+    }
+    if (valueTime !== equalsValue.getTime()) {
       return false
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(condition, 'id')) {
-    const idCondition = condition.id
-    if (idCondition && typeof idCondition === 'object') {
-      if (Object.prototype.hasOwnProperty.call(idCondition, 'gt') && !(order.id > idCondition.gt)) {
+  if (Object.prototype.hasOwnProperty.call(condition, 'gte')) {
+    const gte = condition.gte
+    if (!(gte instanceof Date) || valueTime === null || !(valueTime >= gte.getTime())) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(condition, 'gt')) {
+    const gt = condition.gt
+    if (!(gt instanceof Date) || valueTime === null || !(valueTime > gt.getTime())) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(condition, 'lte')) {
+    const lte = condition.lte
+    if (!(lte instanceof Date) || valueTime === null || !(valueTime <= lte.getTime())) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(condition, 'lt')) {
+    const lt = condition.lt
+    if (!(lt instanceof Date) || valueTime === null || !(valueTime < lt.getTime())) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const matchesIdCondition = (value: string, condition: any) => {
+  if (condition == null) {
+    return true
+  }
+
+  if (typeof condition === 'string') {
+    return value === condition
+  }
+
+  if (Array.isArray(condition?.in)) {
+    return condition.in.includes(value)
+  }
+
+  if (typeof condition === 'object') {
+    if (Object.prototype.hasOwnProperty.call(condition, 'equals')) {
+      const equalsValue = condition.equals
+      if (typeof equalsValue === 'string') {
+        return value === equalsValue
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(condition, 'gt') && !(value > condition.gt)) {
+      return false
+    }
+
+    if (Object.prototype.hasOwnProperty.call(condition, 'gte') && !(value >= condition.gte)) {
+      return false
+    }
+
+    if (Object.prototype.hasOwnProperty.call(condition, 'lt') && !(value < condition.lt)) {
+      return false
+    }
+
+    if (Object.prototype.hasOwnProperty.call(condition, 'lte') && !(value <= condition.lte)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const matchesWhere = (order: MockOrder, where: any): boolean => {
+  if (!where || typeof where !== 'object') {
+    return true
+  }
+
+  if (Object.prototype.hasOwnProperty.call(where, 'subMerchantId')) {
+    if (order.subMerchantId !== where.subMerchantId) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(where, 'status')) {
+    const statusCondition = where.status
+    if (typeof statusCondition === 'string') {
+      if (order.status !== statusCondition) {
         return false
       }
-      if (Object.prototype.hasOwnProperty.call(idCondition, 'gte') && !(order.id >= idCondition.gte)) {
+    } else if (
+      statusCondition &&
+      typeof statusCondition === 'object' &&
+      Array.isArray(statusCondition.in)
+    ) {
+      if (!statusCondition.in.includes(order.status)) {
         return false
       }
-      if (Object.prototype.hasOwnProperty.call(idCondition, 'lt') && !(order.id < idCondition.lt)) {
-        return false
-      }
-      if (Object.prototype.hasOwnProperty.call(idCondition, 'lte') && !(order.id <= idCondition.lte)) {
-        return false
-      }
-    } else if (typeof idCondition === 'string') {
-      if (order.id !== idCondition) {
-        return false
-      }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(where, 'id')) {
+    if (!matchesIdCondition(order.id, where.id)) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(where, 'createdAt')) {
+    if (!matchesDateCondition(order.createdAt, where.createdAt)) {
+      return false
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(where, 'loanedAt')) {
+    if (!matchesDateCondition(order.loanedAt, where.loanedAt)) {
+      return false
+    }
+  }
+
+  if (Array.isArray(where.AND)) {
+    if (!where.AND.every((condition: any) => matchesWhere(order, condition))) {
+      return false
+    }
+  }
+
+  if (Array.isArray(where.OR)) {
+    if (!where.OR.some((condition: any) => matchesWhere(order, condition))) {
+      return false
     }
   }
 
@@ -250,37 +366,7 @@ const mockPrismaOrders = (prismaMock: any, orders: MockOrder[]) => {
     assert.equal(args.skip, undefined)
     const { where, take } = args
 
-    const filtered = sortOrders(clonedOrders).filter(order => {
-      if (where?.subMerchantId && order.subMerchantId !== where.subMerchantId) {
-        return false
-      }
-
-      if (where?.status) {
-        if (typeof where.status === 'string') {
-          if (order.status !== where.status) {
-            return false
-          }
-        } else if (where.status && typeof where.status === 'object' && Array.isArray(where.status.in)) {
-          if (!where.status.in.includes(order.status)) {
-            return false
-          }
-        }
-      }
-
-      if (where?.createdAt?.gte && order.createdAt < where.createdAt.gte) {
-        return false
-      }
-
-      if (where?.createdAt?.lte && order.createdAt > where.createdAt.lte) {
-        return false
-      }
-
-      if (Array.isArray(where?.OR)) {
-        return where.OR.some((condition: any) => evaluateCursorCondition(order, condition))
-      }
-
-      return true
-    })
+    const filtered = sortOrders(clonedOrders).filter(order => matchesWhere(order, where))
 
     return filtered.slice(0, take ?? filtered.length).map(order => ({
       id: order.id,
@@ -696,6 +782,83 @@ test('revertLoanSettlementsByRange restores orders based on snapshot history', a
     reason: 'previous-loan',
     markedAt: '2024-04-28T12:00:00.000Z',
   })
+})
+
+test('revertLoanSettlementsByRange matches createdAt when loanedAt is outside range', async t => {
+  const historyEntry = {
+    reason: 'loan_adjustment',
+    previousStatus: ORDER_STATUS.SUCCESS,
+    markedAt: '2024-05-05T04:00:00.000Z',
+    markedBy: 'admin-created-range',
+    snapshot: {
+      status: ORDER_STATUS.SUCCESS,
+      pendingAmount: 1000,
+      settlementStatus: 'PAID',
+      settlementAmount: 1000,
+      settlementTime: '2024-05-04T23:00:00.000Z',
+      loanedAt: '2024-05-04T23:00:00.000Z',
+      loanEntry: null,
+      previousStatus: ORDER_STATUS.SUCCESS,
+      previousPendingAmount: 1000,
+      previousSettlementStatus: 'PAID',
+      previousSettlementAmount: 1000,
+      previousSettlementTime: '2024-05-04T23:00:00.000Z',
+      previousLoanEntry: null,
+    },
+  }
+
+  const orders: MockOrder[] = [
+    {
+      id: 'order-created-range',
+      subMerchantId: 'sub-created-range',
+      status: ORDER_STATUS.LN_SETTLED,
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      settlementTime: null,
+      metadata: {
+        loanSettlementHistory: [historyEntry],
+        lastLoanSettlement: historyEntry,
+      },
+      loanedAt: new Date('2024-04-20T00:00:00.000Z'),
+      createdAt: new Date('2024-05-02T00:00:00.000Z'),
+      loanEntry: null,
+    },
+    {
+      id: 'order-created-outside',
+      subMerchantId: 'sub-created-range',
+      status: ORDER_STATUS.LN_SETTLED,
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      settlementTime: null,
+      metadata: {
+        loanSettlementHistory: [historyEntry],
+        lastLoanSettlement: historyEntry,
+      },
+      loanedAt: new Date('2024-04-10T00:00:00.000Z'),
+      createdAt: new Date('2024-04-10T00:00:00.000Z'),
+      loanEntry: null,
+    },
+  ]
+
+  const { revertLoanSettlementsByRange, prismaMock, restore } = setupLoanSettlement(orders)
+
+  t.after(() => {
+    restore()
+  })
+
+  const summary = await revertLoanSettlementsByRange({
+    subMerchantId: 'sub-created-range',
+    startDate: '2024-05-01',
+    endDate: '2024-05-03',
+  })
+
+  assert.deepEqual(summary.ok, ['order-created-range'])
+  assert.deepEqual(summary.fail, [])
+  assert.equal(summary.errors.length, 0)
+  assert.equal(prismaMock.__updates.length, 1)
+  assert.equal(prismaMock.__updates[0]?.where?.id, 'order-created-range')
 })
 
 test('revertLoanSettlementsByRange supports exportOnly flag', async t => {
