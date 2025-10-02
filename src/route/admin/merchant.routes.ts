@@ -50,6 +50,7 @@ router.get('/dashboard/profit-submerchant', ctrl.getProfitPerSubMerchant)
 router.get('/loan/transactions', loanCtrl.getLoanTransactions)
 router.post('/loan/mark-settled', loanCtrl.markLoanOrdersSettled)
 router.post('/loan/mark-settled/by-range', loanCtrl.markLoanOrdersSettledByRange)
+router.post('/loan/revert/by-range', loanCtrl.revertLoanOrdersSettled)
 router.post('/loan/mark-settled/by-range/start', loanCtrl.startLoanSettlementJob)
 router.get(
   '/loan/mark-settled/by-range/status/:jobId',

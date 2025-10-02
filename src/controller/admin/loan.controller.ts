@@ -15,9 +15,12 @@ import {
   type LoanAdjustableStatus,
   applyLoanSettlementUpdates,
   runLoanSettlementByRange,
+  revertLoanSettlementsByRange,
   type MarkSettledSummary,
   type OrderForLoanSettlement,
   type LoanSettlementUpdate,
+  createLoanSettlementAuditEntry,
+  type LoanSettlementRevertSummary,
 } from '../../service/loanSettlement';
 import {
   startLoanSettlementJob as enqueueLoanSettlementJob,
@@ -50,6 +53,15 @@ const markSettledRangeSchema = z.object({
   startDate: z.string().min(1, 'startDate is required'),
   endDate: z.string().min(1, 'endDate is required'),
   note: z.string().max(500).optional(),
+});
+
+const revertSettledRangeSchema = z.object({
+  subMerchantId: z.string().min(1, 'subMerchantId is required'),
+  startDate: z.string().min(1, 'startDate is required'),
+  endDate: z.string().min(1, 'endDate is required'),
+  note: z.string().max(500).optional(),
+  orderIds: z.array(z.string().min(1)).optional(),
+  exportOnly: z.boolean().optional(),
 });
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
@@ -148,6 +160,12 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         subMerchantId: true,
         loanedAt: true,
         createdAt: true,
+        loanEntry: {
+          select: {
+            amount: true,
+            metadata: true,
+          },
+        },
       },
     })) as OrderForLoanSettlement[];
 
@@ -189,13 +207,12 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
       }
 
       const metadata = normalizeMetadata(order.metadata);
-      const auditEntry = {
-        reason: LOAN_SETTLED_METADATA_REASON,
-        previousStatus: order.status,
-        markedBy: adminId ?? 'unknown',
-        markedAt: markedAtIso,
-        ...(note ? { note } : {}),
-      };
+      const auditEntry = createLoanSettlementAuditEntry({
+        order,
+        adminId,
+        markedAtIso,
+        note,
+      });
 
       const historyKey = 'loanSettlementHistory';
       const history = Array.isArray(metadata[historyKey])
@@ -272,6 +289,42 @@ export async function markLoanOrdersSettledByRange(req: AuthRequest, res: Respon
     }
     console.error('[markLoanOrdersSettledByRange]', error);
     return res.status(500).json({ error: 'Failed to mark loans as settled by range' });
+  }
+}
+
+export async function revertLoanOrdersSettled(req: AuthRequest, res: Response) {
+  try {
+    const parsed = revertSettledRangeSchema.parse(req.body);
+    const adminId = req.userId ?? undefined;
+
+    const result = await revertLoanSettlementsByRange({
+      subMerchantId: parsed.subMerchantId,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      note: parsed.note,
+      adminId,
+      orderIds: parsed.orderIds,
+      exportOnly: parsed.exportOnly,
+    });
+
+    const payload: LoanSettlementRevertSummary = {
+      ok: result.ok,
+      fail: result.fail,
+      errors: result.errors,
+      events: result.events,
+      exportFile: result.exportFile,
+    };
+
+    return res.json(payload);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
+    }
+    if (error instanceof Error && error.message.startsWith('Invalid ')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('[revertLoanOrdersSettled]', error);
+    return res.status(500).json({ error: 'Failed to revert loan settlements' });
   }
 }
 

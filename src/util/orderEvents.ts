@@ -8,8 +8,19 @@ type OrderLoanSettledEvent = {
   note?: string;
 };
 
+type OrderLoanSettlementRevertedEvent = {
+  orderId: string;
+  previousStatus: string;
+  restoredStatus: string;
+  adminId?: string;
+  revertedAt: string;
+  note?: string;
+  revertOf?: string;
+};
+
 type OrderEventPayloads = {
   'order.loan_settled': OrderLoanSettledEvent;
+  'order.loan_settlement_reverted': OrderLoanSettlementRevertedEvent;
 };
 
 const emitter = new EventEmitter();
