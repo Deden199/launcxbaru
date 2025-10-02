@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { ORDER_STATUS } from '../src/types/orderStatus'
+import { backfillOrderMetadata } from '../scripts/backfillLoanSettlementSnapshots'
 
 type MockOrder = {
   id: string
@@ -777,6 +778,146 @@ test('revertLoanSettlementsByRange restores orders based on snapshot history', a
   const loanUpsert = prismaMock.__loanEntries[0]
   assert.equal(loanUpsert.orderId, 'order-restore-1')
   assert.equal(loanUpsert.subMerchantId, 'sub-restore')
+  assert.equal(loanUpsert.amount, 320)
+  assert.deepEqual(loanUpsert.metadata, {
+    reason: 'previous-loan',
+    markedAt: '2024-04-28T12:00:00.000Z',
+  })
+})
+
+test('backfilled snapshots allow reverting historical settlements without snapshot metadata', async t => {
+  const loanedAt = new Date('2024-05-02T10:00:00.000Z')
+  const snapshotSettlementTime = '2024-04-30T08:00:00.000Z'
+
+  const previousLoanEntry = {
+    id: 'loan-prev-legacy',
+    subMerchantId: 'sub-legacy',
+    amount: 320,
+    metadata: { reason: 'previous-loan', markedAt: '2024-04-28T12:00:00.000Z' },
+  }
+
+  const historyEntryWithoutSnapshot = {
+    reason: 'loan_adjustment',
+    previousStatus: ORDER_STATUS.SUCCESS,
+    previousPendingAmount: 450,
+    previousSettlementStatus: 'PAID',
+    previousSettlementAmount: 450,
+    previousSettlementTime: snapshotSettlementTime,
+    markedAt: '2024-05-02T10:00:00.000Z',
+    markedBy: 'admin-legacy',
+    loanedAt: loanedAt.toISOString(),
+  }
+
+  const ordersNeedingBackfill: MockOrder[] = [
+    {
+      id: 'order-legacy-1',
+      subMerchantId: 'sub-legacy',
+      status: ORDER_STATUS.LN_SETTLED,
+      pendingAmount: null,
+      settlementAmount: null,
+      settlementStatus: null,
+      settlementTime: loanedAt,
+      metadata: {
+        loanSettlementHistory: [historyEntryWithoutSnapshot],
+        lastLoanSettlement: { ...historyEntryWithoutSnapshot },
+      },
+      loanedAt,
+      createdAt: new Date('2024-04-01T00:00:00.000Z'),
+      loanEntry: {
+        id: 'loan-current-legacy',
+        subMerchantId: 'sub-legacy',
+        amount: 600,
+        metadata: {
+          reason: 'loan_adjustment',
+          previousLoanEntry,
+        },
+      },
+    },
+  ]
+
+  const backfilledOrders = ordersNeedingBackfill.map(order => {
+    const { metadata, changed } = backfillOrderMetadata({
+      id: order.id,
+      metadata: order.metadata,
+      loanEntry: order.loanEntry ?? null,
+    } as any)
+    assert.ok(changed)
+    return { ...order, metadata }
+  })
+
+  const preparedOrder = backfilledOrders[0]
+  const historySnapshot = preparedOrder.metadata.loanSettlementHistory?.[0]?.snapshot
+  const lastSnapshot = preparedOrder.metadata.lastLoanSettlement?.snapshot
+
+  expectSnapshotMatchesOrder(historySnapshot, {
+    status: ORDER_STATUS.SUCCESS,
+    pendingAmount: 450,
+    settlementStatus: 'PAID',
+    settlementAmount: 450,
+    settlementTime: new Date(snapshotSettlementTime),
+    loanedAt,
+    loanEntry: previousLoanEntry,
+  })
+  expectSnapshotMatchesOrder(lastSnapshot, {
+    status: ORDER_STATUS.SUCCESS,
+    pendingAmount: 450,
+    settlementStatus: 'PAID',
+    settlementAmount: 450,
+    settlementTime: new Date(snapshotSettlementTime),
+    loanedAt,
+    loanEntry: previousLoanEntry,
+  })
+
+  const { revertLoanSettlementsByRange, prismaMock, restore } = setupLoanSettlement(backfilledOrders)
+
+  process.env.LOAN_FETCH_BATCH_SIZE = '2'
+
+  t.after(() => {
+    restore()
+    delete process.env.LOAN_FETCH_BATCH_SIZE
+  })
+
+  const summary = await revertLoanSettlementsByRange({
+    subMerchantId: 'sub-legacy',
+    startDate: '2024-05-01',
+    endDate: '2024-05-03',
+    adminId: 'admin-new',
+    note: 'Undo settlement',
+  })
+
+  assert.deepEqual(summary.ok, ['order-legacy-1'])
+  assert.deepEqual(summary.fail, [])
+  assert.equal(summary.errors.length, 0)
+  assert.equal(summary.events.length, 1)
+  assert.equal(summary.events[0]?.restoredStatus, ORDER_STATUS.SUCCESS)
+  assert.ok(summary.exportFile)
+  assert.match(summary.exportFile!.fileName, /^loan-revert-sub-legacy-/)
+
+  assert.equal(prismaMock.__updates.length, 1)
+  const update = prismaMock.__updates[0]
+  assert.equal(update.where.id, 'order-legacy-1')
+  assert.equal(update.where.status, ORDER_STATUS.LN_SETTLED)
+  assert.equal(update.data.status, ORDER_STATUS.SUCCESS)
+  assert.equal(update.data.pendingAmount, 450)
+  assert.equal(update.data.settlementStatus, 'PAID')
+  assert.equal(update.data.settlementAmount, 450)
+  assert.equal(update.data.settlementTime.toISOString(), snapshotSettlementTime)
+  const restoredSnapshot = update.data.metadata.loanSettlementHistory[0].snapshot
+  expectSnapshotMatchesOrder(restoredSnapshot, {
+    status: ORDER_STATUS.SUCCESS,
+    pendingAmount: 450,
+    settlementStatus: 'PAID',
+    settlementAmount: 450,
+    settlementTime: new Date(snapshotSettlementTime),
+    loanedAt,
+    loanEntry: previousLoanEntry,
+  })
+  assert.ok(update.data.metadata.lastLoanSettlementRevert)
+  assert.equal(prismaMock.__loanDeletes.length, 0)
+  assert.equal(prismaMock.__loanEntries.length, 1)
+  const loanUpsert = prismaMock.__loanEntries[0]
+  assert.equal(loanUpsert.orderId, 'order-legacy-1')
+  assert.equal(loanUpsert.subMerchantId, 'sub-legacy')
   assert.equal(loanUpsert.amount, 320)
   assert.deepEqual(loanUpsert.metadata, {
     reason: 'previous-loan',
