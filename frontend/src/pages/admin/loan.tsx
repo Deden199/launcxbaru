@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
@@ -108,6 +108,26 @@ type LoanRevertResponse = {
 
 type LoanSettlementJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
+type LoanSettlementJobTotals = {
+  totalOrder: number
+  totalLoanAmount: number
+}
+
+type LoanSettlementJobHistory = {
+  id: string
+  status: string
+  dryRun: boolean
+  subMerchantId: string
+  startDate: string
+  endDate: string
+  totalOrder: number
+  totalLoanAmount: number
+  createdAt: string
+  updatedAt: string
+  createdBy: string | null
+  createdByName: string | null
+}
+
 export interface LoanPageViewProps {
   apiClient?: typeof api
   initialRange?: [Date | null, Date | null]
@@ -178,12 +198,21 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
   const [rangeJobStatus, setRangeJobStatus] = useState<LoanSettlementJobStatus | ''>('')
   const [rangeJobSummary, setRangeJobSummary] = useState<LoanSettlementSummary | null>(null)
   const [rangeJobError, setRangeJobError] = useState('')
+  const [rangeJobTotals, setRangeJobTotals] = useState<LoanSettlementJobTotals>({
+    totalOrder: 0,
+    totalLoanAmount: 0,
+  })
+  const [rangeJobDryRun, setRangeJobDryRun] = useState(false)
   const jobPollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [effectivePageSize, setEffectivePageSize] = useState(DEFAULT_LOAN_PAGE_SIZE)
   const [rawTotalCount, setRawTotalCount] = useState(0)
   const [lastLoadedPage, setLastLoadedPage] = useState(0)
+  const [dryRun, setDryRun] = useState(false)
+  const [jobHistory, setJobHistory] = useState<LoanSettlementJobHistory[]>([])
+  const [loadingJobHistory, setLoadingJobHistory] = useState(false)
+  const [jobHistoryError, setJobHistoryError] = useState('')
 
   const [startDate, endDate] = dateRange
   const isRevertMode = mode === 'revert'
@@ -407,6 +436,43 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     }
   }
 
+  const fetchJobHistory = useCallback(async () => {
+    if (isRevertMode) {
+      setJobHistory([])
+      return
+    }
+
+    setLoadingJobHistory(true)
+    setJobHistoryError('')
+    try {
+      const params: Record<string, string | number> = { limit: 20 }
+      if (selectedSub) {
+        params.subMerchantId = selectedSub
+      }
+
+      const { data } = await apiClient.get<{ data?: LoanSettlementJobHistory[] }>(
+        '/admin/merchants/loan/mark-settled/by-range/jobs',
+        { params },
+      )
+
+      if (Array.isArray(data?.data)) {
+        setJobHistory(data.data)
+      } else {
+        setJobHistory([])
+      }
+    } catch (err: any) {
+      setJobHistoryError(
+        err?.response?.data?.error ?? 'Gagal memuat histori job loan-settlement',
+      )
+    } finally {
+      setLoadingJobHistory(false)
+    }
+  }, [apiClient, isRevertMode, selectedSub])
+
+  useEffect(() => {
+    void fetchJobHistory()
+  }, [fetchJobHistory])
+
   const pollJobStatus = async (jobId: string) => {
     const scheduleNext = () => {
       clearJobPolling()
@@ -421,6 +487,8 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
         status: LoanSettlementJobStatus
         summary?: LoanSettlementSummary
         error?: string | null
+        dryRun?: boolean
+        totals?: LoanSettlementJobTotals
       }>(`/admin/merchants/loan/mark-settled/by-range/status/${jobId}`)
 
       const summary: LoanSettlementSummary = data.summary ?? {
@@ -432,13 +500,28 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       setRangeJobSummary(summary)
       setRangeJobStatus(data.status)
       setRangeJobError('')
+      setRangeJobDryRun(Boolean(data.dryRun))
+      if (data.totals) {
+        setRangeJobTotals({
+          totalOrder: data.totals.totalOrder ?? 0,
+          totalLoanAmount: data.totals.totalLoanAmount ?? 0,
+        })
+      }
 
       if (data.status === 'completed') {
         clearJobPolling()
+        void fetchJobHistory()
         if (summary.ok.length > 0) {
-          setActionMessage(`Berhasil menandai ${summary.ok.length} transaksi sebagai loan-settled.`)
+          const message = data.dryRun
+            ? `Dry run selesai. ${summary.ok.length.toLocaleString('id-ID')} transaksi terdeteksi siap loan-settled.`
+            : `Berhasil menandai ${summary.ok.length.toLocaleString('id-ID')} transaksi sebagai loan-settled.`
+          setActionMessage(message)
         } else {
-          setActionMessage('Tidak ada perubahan status yang dilakukan.')
+          setActionMessage(
+            data.dryRun
+              ? 'Dry run selesai. Tidak ada transaksi yang memenuhi kriteria.'
+              : 'Tidak ada perubahan status yang dilakukan.',
+          )
         }
 
         if (summary.fail.length > 0) {
@@ -448,18 +531,21 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
           setActionError(`Gagal menandai ${summary.fail.length} transaksi: ${detail}`)
         } else {
           setActionError('')
-          if (summary.ok.length > 0 && noteRef.current) {
+          if (!data.dryRun && summary.ok.length > 0 && noteRef.current) {
             noteRef.current.value = ''
           }
         }
 
-        void loadTransactions()
+        if (!data.dryRun) {
+          void loadTransactions()
+        }
       } else if (data.status === 'failed') {
         clearJobPolling()
         const message = data.error ?? 'Job penandaan loan-settled gagal dijalankan.'
         setRangeJobError(message)
         setActionError(message)
         setActionMessage('')
+        void fetchJobHistory()
       } else {
         setActionMessage('Proses penandaan sedang dijalankan…')
         setActionError('')
@@ -495,10 +581,12 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       startDate: string
       endDate: string
       note?: string
+      dryRun: boolean
     } = {
       subMerchantId: selectedSub,
       startDate: toWibIso(startDate),
       endDate: toWibIso(endDate),
+      dryRun,
     }
 
     const trimmedNote = (noteRef.current?.value ?? '').trim()
@@ -521,17 +609,22 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
       setRangeJobId(jobId)
       setRangeJobStatus('queued')
       setRangeJobSummary({ ok: [], fail: [], errors: [] })
+      setRangeJobTotals({ totalOrder: 0, totalLoanAmount: 0 })
+      setRangeJobDryRun(dryRun)
       setActionMessage('Proses penandaan sedang dijalankan…')
       setActionError('')
       clearJobPolling()
       jobPollTimeout.current = setTimeout(() => {
         void pollJobStatus(jobId)
       }, 1000)
+      void fetchJobHistory()
     } catch (err: any) {
       clearJobPolling()
       setRangeJobId('')
       setRangeJobStatus('')
       setRangeJobSummary(null)
+      setRangeJobTotals({ totalOrder: 0, totalLoanAmount: 0 })
+      setRangeJobDryRun(false)
       const message =
         err?.response?.data?.error ?? 'Gagal memulai job penandaan loan-settled'
       setRangeJobError(message)
@@ -747,6 +840,12 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
     running: 'Sedang diproses',
     completed: 'Selesai',
     failed: 'Gagal',
+  }
+  const jobStatusBadgeClass: Record<LoanSettlementJobStatus, string> = {
+    queued: 'border border-neutral-700/50 bg-neutral-900/60 text-neutral-300',
+    running: 'border border-sky-800/60 bg-sky-950/40 text-sky-200',
+    completed: 'border border-emerald-800/60 bg-emerald-950/40 text-emerald-200',
+    failed: 'border border-rose-800/60 bg-rose-950/40 text-rose-200',
   }
   const currentJobLabel =
     rangeJobStatus !== '' ? jobStatusLabel[rangeJobStatus] : ''
@@ -1136,11 +1235,29 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     </>
                   ) : (
                     <>
+                      <label
+                        htmlFor="loan-dry-run"
+                        className="flex w-full items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/50 px-3 py-2 text-xs text-neutral-300"
+                      >
+                        <input
+                          id="loan-dry-run"
+                          type="checkbox"
+                          checked={dryRun}
+                          onChange={event => setDryRun(event.target.checked)}
+                          className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 text-indigo-500 focus:ring-indigo-500"
+                        />
+                        <span>Dry run (simulasi tanpa perubahan data)</span>
+                      </label>
                       <button
                         type="button"
                         onClick={startRangeSettlement}
                         disabled={
-                          showJobSpinner || loadingSubs || loadingTx || !selectedSub || !startDate || !endDate
+                          showJobSpinner ||
+                          loadingSubs ||
+                          loadingTx ||
+                          !selectedSub ||
+                          !startDate ||
+                          !endDate
                         }
                         className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-3 py-2.5 text-sm font-medium text-indigo-100 transition hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-60"
                       >
@@ -1168,6 +1285,20 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
                     {rangeJobId ? (
                       <div className="text-[11px] text-neutral-500">ID: {rangeJobId}</div>
                     ) : null}
+                    <div className="flex flex-wrap gap-3 text-neutral-300">
+                      <span>
+                        Dry run:{' '}
+                        <strong>{rangeJobDryRun ? 'Ya' : 'Tidak'}</strong>
+                      </span>
+                      <span>
+                        Total order:{' '}
+                        <strong>{rangeJobTotals.totalOrder.toLocaleString('id-ID')}</strong>
+                      </span>
+                      <span>
+                        Total loan:{' '}
+                        <strong>{formatCurrency(rangeJobTotals.totalLoanAmount)}</strong>
+                      </span>
+                    </div>
                     {rangeJobSummary ? (
                       <div className="flex flex-wrap gap-3 text-neutral-300">
                         <span>
@@ -1189,6 +1320,117 @@ export function LoanPageView({ apiClient = api, initialRange }: LoanPageViewProp
             </div>
           </div>
         </section>
+        {!isRevertMode ? (
+          <section className="rounded-2xl border border-neutral-800 bg-neutral-900/70 shadow-sm">
+            <div className="space-y-4 p-4 sm:p-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-neutral-100">Histori job loan settlement</h2>
+                  <p className="text-xs text-neutral-400">
+                    Riwayat proses penandaan rentang beserta progresnya.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void fetchJobHistory()}
+                  disabled={loadingJobHistory}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingJobHistory ? <Loader2 className="animate-spin" size={14} /> : <RefreshCcw size={14} />}
+                  Refresh
+                </button>
+              </div>
+              {jobHistoryError ? (
+                <div className="rounded-lg border border-rose-900/40 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
+                  {jobHistoryError}
+                </div>
+              ) : null}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-neutral-800 text-xs">
+                  <thead className="bg-neutral-900/80 text-neutral-400">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Status</th>
+                      <th className="px-3 py-2 text-left font-semibold">Dry run</th>
+                      <th className="px-3 py-2 text-right font-semibold">Total order</th>
+                      <th className="px-3 py-2 text-right font-semibold">Total loan</th>
+                      <th className="px-3 py-2 text-left font-semibold">Rentang</th>
+                      <th className="px-3 py-2 text-left font-semibold">Sub-merchant</th>
+                      <th className="px-3 py-2 text-left font-semibold">Dibuat oleh</th>
+                      <th className="px-3 py-2 text-left font-semibold">Dibuat</th>
+                      <th className="px-3 py-2 text-left font-semibold">Terakhir update</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-800 text-neutral-200">
+                    {jobHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-3 py-4 text-center text-neutral-500">
+                          {loadingJobHistory ? 'Memuat histori job…' : 'Belum ada histori job.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      jobHistory.map(job => {
+                        const isKnownStatus = (
+                          ['queued', 'running', 'completed', 'failed'] as LoanSettlementJobStatus[]
+                        ).includes(job.status as LoanSettlementJobStatus)
+                        const normalizedStatus = isKnownStatus
+                          ? (job.status as LoanSettlementJobStatus)
+                          : undefined
+                        const statusLabel = normalizedStatus
+                          ? jobStatusLabel[normalizedStatus]
+                          : job.status
+                        const statusClass = normalizedStatus
+                          ? jobStatusBadgeClass[normalizedStatus]
+                          : jobStatusBadgeClass.queued
+
+                        return (
+                          <tr key={job.id}>
+                            <td className="px-3 py-2">
+                              <span
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium uppercase ${statusClass}`}
+                              >
+                                {statusLabel}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {job.dryRun ? (
+                                <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-200">
+                                  Ya
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-200">
+                                  Tidak
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {job.totalOrder.toLocaleString('id-ID')}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {formatCurrency(job.totalLoanAmount)}
+                            </td>
+                            <td className="px-3 py-2">
+                              {formatDateTime(job.startDate)}
+                              <span className="text-neutral-500"> — </span>
+                              {formatDateTime(job.endDate)}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="font-mono text-[11px] text-neutral-300">{job.subMerchantId}</span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {job.createdByName ?? job.createdBy ?? '—'}
+                            </td>
+                            <td className="px-3 py-2">{formatDateTime(job.createdAt)}</td>
+                            <td className="px-3 py-2">{formatDateTime(job.updatedAt)}</td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   )

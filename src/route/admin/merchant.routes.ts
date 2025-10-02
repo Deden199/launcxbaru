@@ -56,6 +56,7 @@ router.get(
   '/loan/mark-settled/by-range/status/:jobId',
   loanCtrl.loanSettlementJobStatus,
 )
+router.get('/loan/mark-settled/by-range/jobs', loanCtrl.listLoanSettlementJobs)
 
 router.get('/dashboard/withdrawals',  ctrl.getDashboardWithdrawals)
 router.patch(

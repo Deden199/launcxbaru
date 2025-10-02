@@ -9,6 +9,8 @@ test('loan settlement worker processes jobs concurrently up to configured limit'
   const originalService = require.cache[servicePath]
   const timePath = require.resolve('../src/util/time')
   const originalTime = require.cache[timePath]
+  const prismaPath = require.resolve('../src/core/prisma')
+  const originalPrisma = require.cache[prismaPath]
 
   let activeCount = 0
   const concurrencySamples: number[] = []
@@ -35,6 +37,36 @@ test('loan settlement worker processes jobs concurrently up to configured limit'
     },
   } as any
 
+  let jobCounter = 0
+  const prismaMock = {
+    loanSettlementJob: {
+      create: async ({ data }: any) => {
+        jobCounter += 1
+        return {
+          id: `job-${jobCounter}`,
+          subMerchantId: data.subMerchantId,
+          startDate: new Date(data.startDate),
+          endDate: new Date(data.endDate),
+          status: data.status,
+          dryRun: data.dryRun ?? false,
+          totalOrder: 0,
+          totalLoanAmount: 0,
+          createdBy: data.createdBy ?? null,
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+        }
+      },
+      update: async () => ({}),
+    },
+  }
+
+  require.cache[prismaPath] = {
+    id: prismaPath,
+    filename: prismaPath,
+    loaded: true,
+    exports: { prisma: prismaMock },
+  } as any
+
   require.cache[timePath] = {
     id: timePath,
     filename: timePath,
@@ -56,9 +88,9 @@ test('loan settlement worker processes jobs concurrently up to configured limit'
   }
 
   const jobIds = [
-    startLoanSettlementJob(payload),
-    startLoanSettlementJob({ ...payload, subMerchantId: 'sub-2' }),
-    startLoanSettlementJob({ ...payload, subMerchantId: 'sub-3' }),
+    await startLoanSettlementJob(payload),
+    await startLoanSettlementJob({ ...payload, subMerchantId: 'sub-2' }),
+    await startLoanSettlementJob({ ...payload, subMerchantId: 'sub-3' }),
   ]
 
   await new Promise(resolve => setImmediate(resolve))
@@ -99,11 +131,11 @@ test('loan settlement worker processes jobs concurrently up to configured limit'
   }
 
   delete require.cache[workerPath]
-    if (originalService) {
-      require.cache[servicePath] = originalService
-    } else {
-      delete require.cache[servicePath]
-    }
+  if (originalService) {
+    require.cache[servicePath] = originalService
+  } else {
+    delete require.cache[servicePath]
+  }
 
   if (originalTime) {
     require.cache[timePath] = originalTime
@@ -111,6 +143,12 @@ test('loan settlement worker processes jobs concurrently up to configured limit'
     delete require.cache[timePath]
   }
 
-    delete process.env.LOAN_SETTLEMENT_CONCURRENCY
-    delete process.env.JWT_SECRET
-  })
+  if (originalPrisma) {
+    require.cache[prismaPath] = originalPrisma
+  } else {
+    delete require.cache[prismaPath]
+  }
+
+  delete process.env.LOAN_SETTLEMENT_CONCURRENCY
+  delete process.env.JWT_SECRET
+})

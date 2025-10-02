@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../core/prisma';
 import { AuthRequest } from '../../middleware/auth';
 import { logAdminAction } from '../../util/adminLog';
+import logger from '../../logger';
 import { wibTimestamp } from '../../util/time';
 import { ORDER_STATUS, LOAN_SETTLED_METADATA_REASON } from '../../types/orderStatus';
 import { emitOrderEvent } from '../../util/orderEvents';
@@ -26,6 +27,7 @@ import {
 import {
   startLoanSettlementJob as enqueueLoanSettlementJob,
   getLoanSettlementJob,
+  type LoanSettlementJobStatus,
 } from '../../worker/loanSettlementJob';
 
 const MAX_CONFIGURED_PAGE_SIZE = 1500;
@@ -54,6 +56,7 @@ const markSettledRangeSchema = z.object({
   startDate: z.string().min(1, 'startDate is required'),
   endDate: z.string().min(1, 'endDate is required'),
   note: z.string().max(500).optional(),
+  dryRun: z.boolean().optional(),
 });
 
 const revertSettledRangeSchema = z.object({
@@ -63,6 +66,12 @@ const revertSettledRangeSchema = z.object({
   note: z.string().max(500).optional(),
   orderIds: z.array(z.string().min(1)).optional(),
   exportOnly: z.boolean().optional(),
+});
+
+const listLoanJobsQuerySchema = z.object({
+  subMerchantId: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export async function getLoanTransactions(req: AuthRequest, res: Response) {
@@ -294,6 +303,7 @@ export async function markLoanOrdersSettledByRange(req: AuthRequest, res: Respon
       endDate: parsed.endDate,
       note: parsed.note,
       adminId: req.userId ?? undefined,
+      dryRun: parsed.dryRun ?? false,
     });
 
     return res.json(summary);
@@ -351,13 +361,18 @@ export async function startLoanSettlementJob(req: AuthRequest, res: Response) {
     const trimmedNote = parsed.note?.trim() ? parsed.note.trim() : undefined;
     const adminId = req.userId ?? undefined;
 
-    const jobId = enqueueLoanSettlementJob({
+    const jobId = await enqueueLoanSettlementJob({
       subMerchantId: parsed.subMerchantId,
       startDate: parsed.startDate,
       endDate: parsed.endDate,
       note: trimmedNote,
       adminId,
+      dryRun: parsed.dryRun ?? false,
     });
+
+    logger.info(
+      `[LoanSettlementAdmin] queued job ${jobId} (${parsed.subMerchantId}) dryRun=${parsed.dryRun ?? false} range ${parsed.startDate} - ${parsed.endDate}`,
+    );
 
     if (adminId) {
       await logAdminAction(adminId, 'loanMarkSettledRangeJobStart', undefined, {
@@ -366,6 +381,7 @@ export async function startLoanSettlementJob(req: AuthRequest, res: Response) {
         startDate: parsed.startDate,
         endDate: parsed.endDate,
         ...(trimmedNote ? { note: trimmedNote } : {}),
+        dryRun: parsed.dryRun ?? false,
       });
     }
 
@@ -377,35 +393,96 @@ export async function startLoanSettlementJob(req: AuthRequest, res: Response) {
     if (error instanceof Error && error.message.startsWith('Invalid ')) {
       return res.status(400).json({ error: error.message });
     }
-    console.error('[startLoanSettlementJob]', error);
+    logger.error('[startLoanSettlementJob]', error);
     return res.status(500).json({ error: 'Failed to queue loan settlement job' });
   }
 }
 
-export function loanSettlementJobStatus(req: AuthRequest, res: Response) {
+export async function loanSettlementJobStatus(req: AuthRequest, res: Response) {
   try {
     const { jobId } = req.params;
     if (!jobId) {
       return res.status(400).json({ error: 'jobId is required' });
     }
 
-    const job = getLoanSettlementJob(jobId);
-    if (!job) {
+    const [jobRecord, runtimeJob] = await Promise.all([
+      prisma.loanSettlementJob.findUnique({
+        where: { id: jobId },
+      }),
+      Promise.resolve(getLoanSettlementJob(jobId)),
+    ]);
+
+    if (!jobRecord) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
+    const recordStatus = jobRecord.status as LoanSettlementJobStatus;
+    const status = runtimeJob?.status ?? (recordStatus === 'pending' ? 'queued' : recordStatus);
+    const summary = runtimeJob?.summary ?? { ok: [], fail: [], errors: [] };
+
     return res.json({
-      jobId: job.id,
-      status: job.status,
-      summary: job.summary,
-      createdAt: job.createdAt,
-      startedAt: job.startedAt ?? null,
-      completedAt: job.completedAt ?? null,
-      updatedAt: job.updatedAt,
-      error: job.error ?? null,
+      jobId: jobRecord.id,
+      status,
+      summary,
+      createdAt: jobRecord.createdAt.toISOString(),
+      startedAt: runtimeJob?.startedAt ?? null,
+      completedAt: runtimeJob?.completedAt ?? null,
+      updatedAt: jobRecord.updatedAt.toISOString(),
+      error: runtimeJob?.error ?? null,
+      dryRun: jobRecord.dryRun,
+      subMerchantId: jobRecord.subMerchantId,
+      startDate: jobRecord.startDate.toISOString(),
+      endDate: jobRecord.endDate.toISOString(),
+      totals: {
+        totalOrder: jobRecord.totalOrder,
+        totalLoanAmount: jobRecord.totalLoanAmount,
+      },
+      createdBy: jobRecord.createdBy ?? null,
     });
   } catch (error) {
-    console.error('[loanSettlementJobStatus]', error);
+    logger.error('[loanSettlementJobStatus]', error);
     return res.status(500).json({ error: 'Failed to fetch loan settlement job status' });
+  }
+}
+
+export async function listLoanSettlementJobs(req: AuthRequest, res: Response) {
+  try {
+    const parsed = listLoanJobsQuerySchema.parse(req.query);
+    const { subMerchantId, status, limit } = parsed;
+
+    const jobs = await prisma.loanSettlementJob.findMany({
+      where: {
+        ...(subMerchantId ? { subMerchantId } : {}),
+        ...(status ? { status } : {}),
+      },
+      include: {
+        creator: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    return res.json({
+      data: jobs.map(job => ({
+        id: job.id,
+        status: job.status,
+        dryRun: job.dryRun,
+        subMerchantId: job.subMerchantId,
+        startDate: job.startDate.toISOString(),
+        endDate: job.endDate.toISOString(),
+        totalOrder: job.totalOrder,
+        totalLoanAmount: job.totalLoanAmount,
+        createdAt: job.createdAt.toISOString(),
+        updatedAt: job.updatedAt.toISOString(),
+        createdBy: job.createdBy ?? null,
+        createdByName: job.creator?.name ?? null,
+      })),
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
+    }
+    logger.error('[listLoanSettlementJobs]', error);
+    return res.status(500).json({ error: 'Failed to fetch loan settlement jobs' });
   }
 }

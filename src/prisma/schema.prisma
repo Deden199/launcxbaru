@@ -273,6 +273,7 @@ model LoanSettlementJob {
   totalOrder      Int         @default(0)
   totalLoanAmount Float       @default(0)
   status          String
+  dryRun          Boolean     @default(false)
   createdBy       String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
