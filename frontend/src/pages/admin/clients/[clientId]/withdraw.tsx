@@ -1,4 +1,5 @@
 'use client'
+
 import { NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -8,7 +9,12 @@ import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { FileText, ArrowUpDown, CheckCircle2, AlertTriangle } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import styles from '../../../client/WithdrawPage.module.css'
+
+const statusBadgeClasses: Record<string, string> = {
+  PENDING: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  COMPLETED: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  FAILED: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+}
 
 interface Withdrawal {
   id?: string
@@ -46,7 +52,7 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
 
   const [searchRef, setSearchRef] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [dateRange, setDateRange] = useState<[Date|null,Date|null]>([null,null])
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(10)
   const [startDate, endDate] = dateRange
@@ -75,7 +81,7 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
       setPageError('')
       const currentPage = override?.page ?? page
       const currentLimit = override?.limit ?? perPage
-      const params: any = { page: currentPage, limit: currentLimit, search: searchRef }
+      const params: Record<string, any> = { page: currentPage, limit: currentLimit, search: searchRef }
       if (statusFilter) params.status = statusFilter
       if (startDate) params.fromDate = startDate.toISOString()
       if (endDate) params.toDate = endDate.toISOString()
@@ -107,7 +113,7 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
       .then(res => {
         setWallets(res.data)
         if (res.data.length) {
-          setManualForm(prev => prev.subMerchantId ? prev : { ...prev, subMerchantId: res.data[0].id })
+          setManualForm(prev => (prev.subMerchantId ? prev : { ...prev, subMerchantId: res.data[0].id }))
         }
       })
       .catch(() => {})
@@ -230,7 +236,7 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
         w.amount - (w.netAmount ?? 0),
         w.netAmount ?? 0,
         w.status,
-      ])
+      ]),
     ]
     const ws = XLSX.utils.aoa_to_sheet(rows)
     const wb = XLSX.utils.book_new()
@@ -238,50 +244,74 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
     XLSX.writeFile(wb, 'withdrawals.xlsx')
   }
 
+  const inputClasses =
+    'w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40'
 
+  const selectClasses =
+    'w-full rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40'
+
+  const buttonClasses =
+    'inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:cursor-not-allowed disabled:bg-indigo-500/60'
+
+  const paginationButtonClasses =
+    'flex h-10 w-10 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-200 transition hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:cursor-not-allowed disabled:border-neutral-800/60 disabled:text-neutral-500 disabled:hover:bg-neutral-900'
 
   return (
     <ClientLayout>
-      <div className={styles.page}>
-        {pageError && <p className={styles.pageError}>{pageError}</p>}
+      <div className="relative min-h-screen space-y-6 bg-neutral-950 p-6 text-neutral-100">
+        {pageError && (
+          <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {pageError}
+          </p>
+        )}
+
         {toast && (
           <div
-            className={`${styles.toast} ${toast.type === 'success' ? styles.toastSuccess : styles.toastError}`}
             role="status"
+            className={`fixed right-6 top-6 z-50 flex max-w-sm items-start gap-3 rounded-xl border px-5 py-4 text-sm shadow-xl backdrop-blur ${
+              toast.type === 'success'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+            }`}
           >
-            <span className={styles.toastIcon}>
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900/70">
               {toast.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
             </span>
-            <div>{toast.message}</div>
-          </div>
-        )}
-        {wallets.length > 0 && (
-          <div className={styles.statsGrid}>
-            <div className={`${styles.statCard} ${styles.activeCard}`}>
-              {wallets.map(w => (
-                <div key={w.id} className={styles.statCard}>
-                  <h4>
-                    {w.name || (w.provider ? w.provider.charAt(0).toUpperCase() + w.provider.slice(1) : `Sub-wallet ${w.id.substring(0,6)}`)}
-                  </h4>
-                  <p>Rp {w.balance.toLocaleString()}</p>
-                </div>
-              ))}
-            </div>
+            <div className="leading-relaxed">{toast.message}</div>
           </div>
         )}
 
-        <section className={styles.historyCard}>
-          <div className={styles.manualHeader}>
-            <h3>Manual Withdrawal Entry</h3>
-            <div className={styles.manualSummary}>
-              Net Amount:{' '}
-              <strong>Rp {manualNetAmount.toLocaleString('id-ID')}</strong>
+        {wallets.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {wallets.map(w => (
+              <div
+                key={w.id}
+                className="rounded-xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-sm backdrop-blur transition hover:border-indigo-500/40 hover:shadow-lg"
+              >
+                <h4 className="text-sm font-semibold text-neutral-200">
+                  {w.name ||
+                    (w.provider
+                      ? w.provider.charAt(0).toUpperCase() + w.provider.slice(1)
+                      : `Sub-wallet ${w.id.substring(0, 6)}`)}
+                </h4>
+                <p className="mt-2 text-2xl font-semibold text-neutral-50">Rp {w.balance.toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <section className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/80 shadow-xl backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 px-6 py-5">
+            <h3 className="text-lg font-semibold text-neutral-50">Manual Withdrawal Entry</h3>
+            <div className="text-sm text-neutral-300">
+              Net Amount <strong className="text-neutral-50">Rp {manualNetAmount.toLocaleString('id-ID')}</strong>
             </div>
           </div>
-          <form onSubmit={handleManualSubmit} className={styles.manualGrid}>
-            <div className={styles.manualField}>
-              <label>Sub-wallet</label>
+          <form onSubmit={handleManualSubmit} className="grid gap-4 px-6 py-6 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Sub-wallet</label>
               <select
+                className={selectClasses}
                 value={manualForm.subMerchantId}
                 onChange={e => setManualForm(prev => ({ ...prev, subMerchantId: e.target.value }))}
               >
@@ -293,9 +323,10 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                 ))}
               </select>
             </div>
-            <div className={styles.manualField}>
-              <label>Amount (Rp)</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Amount (Rp)</label>
               <input
+                className={inputClasses}
                 type="number"
                 min="0"
                 value={manualForm.amount}
@@ -303,57 +334,64 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                 placeholder="0"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Account Name</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Account Name</label>
               <input
+                className={inputClasses}
                 value={manualForm.accountName}
                 onChange={e => setManualForm(prev => ({ ...prev, accountName: e.target.value }))}
                 placeholder="Beneficiary name"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Account Alias</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Account Alias</label>
               <input
+                className={inputClasses}
                 value={manualForm.accountNameAlias}
                 onChange={e => setManualForm(prev => ({ ...prev, accountNameAlias: e.target.value }))}
                 placeholder="Alias (optional)"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Account Number</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Account Number</label>
               <input
+                className={inputClasses}
                 value={manualForm.accountNumber}
                 onChange={e => setManualForm(prev => ({ ...prev, accountNumber: e.target.value }))}
                 placeholder="1234567890"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Bank Code</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Bank Code</label>
               <input
+                className={inputClasses}
                 value={manualForm.bankCode}
                 onChange={e => setManualForm(prev => ({ ...prev, bankCode: e.target.value }))}
                 placeholder="Bank code"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Bank Name</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Bank Name</label>
               <input
+                className={inputClasses}
                 value={manualForm.bankName}
                 onChange={e => setManualForm(prev => ({ ...prev, bankName: e.target.value }))}
                 placeholder="Bank name"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Branch Name</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Branch Name</label>
               <input
+                className={inputClasses}
                 value={manualForm.branchName}
                 onChange={e => setManualForm(prev => ({ ...prev, branchName: e.target.value }))}
                 placeholder="Branch (optional)"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Withdraw Fee %</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Withdraw Fee %</label>
               <input
+                className={inputClasses}
                 type="number"
                 min="0"
                 step="0.01"
@@ -362,9 +400,10 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                 placeholder="0"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>Withdraw Fee Flat</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">Withdraw Fee Flat</label>
               <input
+                className={inputClasses}
                 type="number"
                 min="0"
                 step="0.01"
@@ -373,9 +412,10 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                 placeholder="0"
               />
             </div>
-            <div className={styles.manualField}>
-              <label>PG Fee</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-neutral-300">PG Fee</label>
               <input
+                className={inputClasses}
                 type="number"
                 min="0"
                 step="0.01"
@@ -384,31 +424,39 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
                 placeholder="0"
               />
             </div>
-            <div className={styles.manualActions}>
-              <button type="submit" className={styles.manualSubmit} disabled={manualSubmitting}>
+            <div className="flex items-center justify-end md:col-span-2">
+              <button type="submit" className={buttonClasses} disabled={manualSubmitting}>
                 {manualSubmitting ? 'Saving…' : 'Record Withdrawal'}
               </button>
             </div>
           </form>
         </section>
 
-        <section className={styles.historyCard}>
-          <div className={styles.historyHeader}>
-            <h3>Withdrawal History</h3>
-            <button onClick={exportToExcel} className={styles.exportBtn}>
+        <section className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/80 shadow-xl backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 px-6 py-5">
+            <h3 className="text-lg font-semibold text-neutral-50">Withdrawal History</h3>
+            <button onClick={exportToExcel} className={buttonClasses} type="button">
               <FileText size={16} /> Excel
             </button>
           </div>
 
-          <div className={styles.withdrawFilters}>
+          <div className="flex flex-col gap-3 border-b border-neutral-800 bg-neutral-950/40 px-6 py-5 md:flex-row md:items-center">
             <input
+              className={`${inputClasses} md:w-48`}
               placeholder="Search Ref"
               value={searchRef}
-              onChange={e => { setSearchRef(e.target.value); setPage(1) }}
+              onChange={e => {
+                setSearchRef(e.target.value)
+                setPage(1)
+              }}
             />
             <select
+              className={`${selectClasses} md:w-44`}
               value={statusFilter}
-              onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+              onChange={e => {
+                setStatusFilter(e.target.value)
+                setPage(1)
+              }}
             >
               <option value="">All Status</option>
               <option>PENDING</option>
@@ -416,10 +464,13 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
               <option>FAILED</option>
             </select>
             <DatePicker
+              className={`${inputClasses} w-full md:w-56`}
+              calendarClassName="!bg-neutral-900 !text-neutral-100"
+              dayClassName={() => '!text-neutral-100 hover:!bg-indigo-600/60'}
               selectsRange
               startDate={startDate}
               endDate={endDate}
-              onChange={(update: [Date|null,Date|null]) => {
+              onChange={(update: [Date | null, Date | null]) => {
                 setDateRange(update)
                 if (update[0] && update[1]) {
                   setPage(1)
@@ -432,44 +483,69 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
             />
           </div>
 
-          <div className={styles.tableWrap}>
+          <div className="overflow-x-auto">
             {loading ? (
-              <p>Loading…</p>
+              <p className="px-6 py-8 text-sm text-neutral-400">Loading…</p>
             ) : (
-              <table className={styles.table}>
-                <thead>
+              <table className="min-w-full divide-y divide-neutral-800">
+                <thead className="bg-neutral-900/70">
                   <tr>
                     {['Created At', 'Completed At', 'Ref ID', 'Bank', 'Account', 'Account Name', 'Wallet', 'Source', 'Amount', 'Fee', 'Net Amount', 'Status'].map(h => (
-                      <th key={h}>
-                        {h}
-                        <ArrowUpDown size={14} className={styles.sortIcon} />
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-400"
+                      >
+                        <span className="flex items-center gap-2">
+                          {h}
+                          <ArrowUpDown size={14} className="h-3.5 w-3.5 text-neutral-600" />
+                        </span>
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-neutral-900/60 bg-neutral-950/60">
                   {withdrawals.length ? (
                     withdrawals.map(w => (
-                      <tr key={w.refId}>
-                        <td>{new Date(w.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                        <td>{w.completedAt ? new Date(w.completedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
-                        <td>{w.refId}</td>
-                        <td>{w.bankName}</td>
-                        <td>{w.accountNumber}</td>
-                        <td>{w.accountName}</td>
-                        <td>{w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet}</td>
-                        <td>{w.sourceProvider ?? '-'}</td>
-                        <td>Rp {w.amount.toLocaleString()}</td>
-                        <td>Rp {(w.amount - (w.netAmount ?? 0)).toLocaleString()}</td>
-                        <td>Rp {(w.netAmount ?? 0).toLocaleString()}</td>
-                        <td>
-                          <span className={styles[`s${w.status}`]}>{w.status}</span>
+                      <tr key={w.refId} className="hover:bg-neutral-900/60">
+                        <td className="px-4 py-3 text-sm text-neutral-200">
+                          {new Date(w.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">
+                          {w.completedAt
+                            ? new Date(w.completedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">{w.refId}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">{w.bankName}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">{w.accountNumber}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">{w.accountName}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">
+                          {w.sourceProvider === 'manual' ? 'Manual Entry' : w.wallet}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-200">{w.sourceProvider ?? '-'}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-100">Rp {w.amount.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-sm text-neutral-100">
+                          Rp {(w.amount - (w.netAmount ?? 0)).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-100">
+                          Rp {(w.netAmount ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                              statusBadgeClasses[w.status] ?? 'border-neutral-700 bg-neutral-800 text-neutral-200'
+                            }`}
+                          >
+                            {w.status}
+                          </span>
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={12} className={styles.noData}>No data</td>
+                      <td colSpan={12} className="px-4 py-8 text-center text-sm text-neutral-400">
+                        No data
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -477,22 +553,42 @@ const AdminClientWithdrawPage: NextPage & { disableLayout?: boolean } = () => {
             )}
           </div>
 
-          <div className={styles.pagination}>
-            <div>
-              Rows
+          <div className="flex flex-col gap-4 border-t border-neutral-800 bg-neutral-900/60 px-6 py-5 text-sm text-neutral-300 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <span>Rows</span>
               <select
+                className={`${selectClasses} w-24`}
                 value={perPage}
-                onChange={e => { setPerPage(+e.target.value); setPage(1) }}
+                onChange={e => {
+                  setPerPage(+e.target.value)
+                  setPage(1)
+                }}
               >
                 {[5, 10, 20].map(n => (
                   <option key={n}>{n}</option>
                 ))}
               </select>
             </div>
-            <div>
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹</button>
-              <span>{page}/{totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>›</button>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                className={paginationButtonClasses}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                type="button"
+              >
+                ‹
+              </button>
+              <span className="text-sm font-semibold text-neutral-200">
+                {page}/{totalPages}
+              </span>
+              <button
+                className={paginationButtonClasses}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                type="button"
+              >
+                ›
+              </button>
             </div>
           </div>
         </section>
