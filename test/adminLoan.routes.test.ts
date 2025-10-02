@@ -49,6 +49,94 @@ adminLog.logAdminAction = async (...args: any[]) => {
   loggedAction = args;
 };
 
+const toNullableNumber = (value: any): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const cloneMetadataObject = (value: any) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, any>) } : null;
+
+const getExpectedLoanEntrySnapshot = (order: any) =>
+  order && typeof order === 'object' && order.loanEntry && typeof order.loanEntry === 'object'
+    ? {
+        id: typeof order.loanEntry.id === 'string' ? order.loanEntry.id : null,
+        subMerchantId:
+          typeof order.loanEntry.subMerchantId === 'string' ? order.loanEntry.subMerchantId : null,
+        amount: toNullableNumber(order.loanEntry.amount),
+        metadata: cloneMetadataObject(order.loanEntry.metadata),
+      }
+    : null;
+
+const expectSnapshotMatchesOrder = (snapshot: any, order: any) => {
+  assert.ok(snapshot);
+
+  const status = typeof order.status === 'string' ? order.status : null;
+  const pendingAmount = toNullableNumber(order.pendingAmount);
+  const settlementStatus = typeof order.settlementStatus === 'string' ? order.settlementStatus : null;
+  const settlementAmount = toNullableNumber(order.settlementAmount);
+  const settlementTime = order.settlementTime instanceof Date ? order.settlementTime.toISOString() : null;
+
+  assert.equal(snapshot.status, status);
+  assert.equal(snapshot.previousStatus, status);
+  assert.equal(snapshot.pendingAmount, pendingAmount);
+  assert.equal(snapshot.previousPendingAmount, pendingAmount);
+  assert.equal(snapshot.settlementStatus, settlementStatus);
+  assert.equal(snapshot.previousSettlementStatus, settlementStatus);
+  assert.equal(snapshot.settlementAmount, settlementAmount);
+  assert.equal(snapshot.previousSettlementAmount, settlementAmount);
+  assert.equal(snapshot.settlementTime, settlementTime);
+  assert.equal(snapshot.previousSettlementTime, settlementTime);
+
+  const expectedLoanEntry = getExpectedLoanEntrySnapshot(order);
+
+  assert.deepEqual(snapshot.loanEntry ?? null, expectedLoanEntry);
+  assert.deepEqual(snapshot.previousLoanEntry ?? null, expectedLoanEntry);
+};
+
+const expectPreviousLoanEntryMetadata = (actual: any, expected: ReturnType<typeof getExpectedLoanEntrySnapshot>) => {
+  if (!expected) {
+    assert.equal(actual ?? null, null);
+    return;
+  }
+
+  assert.ok(actual);
+  assert.equal(actual.id ?? null, expected.id ?? null);
+  assert.equal(actual.subMerchantId ?? null, expected.subMerchantId ?? null);
+  assert.equal(actual.amount ?? null, expected.amount ?? null);
+  assert.deepEqual(actual.metadata ?? null, expected.metadata ?? null);
+
+  if (expected.amount != null) {
+    assert.equal(actual.originalAmount ?? null, expected.amount);
+  } else {
+    assert.equal(actual.originalAmount ?? null, null);
+  }
+
+  const expectedMetadata = expected.metadata ?? {};
+  if (expectedMetadata && typeof expectedMetadata === 'object') {
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'markedAt')) {
+      assert.equal(actual.markedAt ?? null, expectedMetadata.markedAt ?? null);
+    } else {
+      assert.equal(actual.markedAt ?? null, null);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'reason')) {
+      assert.equal(actual.reason ?? null, expectedMetadata.reason ?? null);
+    } else {
+      assert.equal(actual.reason ?? null, null);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(expectedMetadata, 'markedBy')) {
+      assert.equal(actual.markedBy ?? null, expectedMetadata.markedBy ?? null);
+    } else {
+      assert.equal(actual.markedBy ?? null, null);
+    }
+  }
+};
+
 const {
   getLoanTransactions,
   markLoanOrdersSettled,
@@ -207,6 +295,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-1',
       metadata: { loanSettlementHistory: [] },
       loanedAt: null,
+      loanEntry: null,
     },
     {
       id: 'ord-success',
@@ -218,6 +307,12 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-1',
       metadata: {},
       loanedAt: null,
+      loanEntry: {
+        id: 'loan-success',
+        subMerchantId: 'sub-1',
+        amount: 200,
+        metadata: { reason: 'previous-loan', markedAt: '2023-12-28T00:00:00.000Z' },
+      },
     },
     {
       id: 'ord-done',
@@ -229,6 +324,12 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-1',
       metadata: {},
       loanedAt: null,
+      loanEntry: {
+        id: 'loan-done',
+        subMerchantId: 'sub-1',
+        amount: 0,
+        metadata: { markedAt: '2023-12-27T10:00:00.000Z' },
+      },
     },
     {
       id: 'ord-settled',
@@ -240,6 +341,12 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-1',
       metadata: {},
       loanedAt: new Date('2023-12-31T00:00:00Z'),
+      loanEntry: {
+        id: 'loan-settled',
+        subMerchantId: 'sub-1',
+        amount: null,
+        metadata: { reason: 'loan_adjustment' },
+      },
     },
     {
       id: 'ord-failed',
@@ -251,6 +358,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-2',
       metadata: null,
       loanedAt: null,
+      loanEntry: null,
     },
     {
       id: 'ord-paid-2',
@@ -262,6 +370,12 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       subMerchantId: 'sub-1',
       metadata: null,
       loanedAt: null,
+      loanEntry: {
+        id: 'loan-paid-2',
+        subMerchantId: 'sub-1',
+        amount: 125,
+        metadata: { reason: 'old-loan' },
+      },
     },
   ];
 
@@ -326,10 +440,7 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
     assert.equal(call.data.metadata.lastLoanSettlement.previousStatus, call.where.status);
     const original = fetchedOrders.find(order => order.id === call.where.id);
     const snapshot = call.data.metadata.loanSettlementHistory.at(-1)?.snapshot;
-    assert.ok(snapshot);
-    assert.equal(snapshot.status, original?.status ?? '');
-    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
-    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
+    expectSnapshotMatchesOrder(snapshot, original ?? {});
   }
 
   assert.equal(upsertCalls.length, 3);
@@ -346,6 +457,13 @@ test('markLoanOrdersSettled updates PAID orders and returns summary', async () =
       { orderId: 'ord-success', amount: 250, note: 'Manual adjust' },
     ],
   );
+
+  for (const call of upsertCalls) {
+    const original = fetchedOrders.find(order => order.id === call.create.orderId);
+    const expectedLoanEntry = getExpectedLoanEntrySnapshot(original ?? {});
+    expectPreviousLoanEntryMetadata(call.create.metadata.previousLoanEntry ?? null, expectedLoanEntry);
+    expectPreviousLoanEntryMetadata(call.update.metadata.previousLoanEntry ?? null, expectedLoanEntry);
+  }
 
   assert.ok(loggedAction);
   assert.equal(loggedAction[0], 'admin-123');
@@ -430,10 +548,7 @@ test('markLoanOrdersSettled processes batches larger than the chunk size', async
     assert.equal(call.data.metadata.lastLoanSettlement.reason, 'loan_adjustment');
     const original = fetchedOrders.find((order) => order.id === call.where.id);
     const snapshot = call.data.metadata.loanSettlementHistory[0].snapshot;
-    assert.ok(snapshot);
-    assert.equal(snapshot.status, original?.status ?? '');
-    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
-    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
+    expectSnapshotMatchesOrder(snapshot, original ?? {});
   }
 
   const upsertedOrderIds = upsertCalls.map((call) => call.where.orderId).sort();
@@ -441,6 +556,10 @@ test('markLoanOrdersSettled processes batches larger than the chunk size', async
   for (const call of upsertCalls) {
     assert.equal(call.create.metadata.note, 'Bulk adjustment');
     assert.equal(call.create.metadata.reason, 'loan_adjustment');
+    const original = fetchedOrders.find(order => order.id === call.where.orderId);
+    const expectedLoanEntry = getExpectedLoanEntrySnapshot(original ?? {});
+    expectPreviousLoanEntryMetadata(call.create.metadata.previousLoanEntry ?? null, expectedLoanEntry);
+    expectPreviousLoanEntryMetadata(call.update.metadata.previousLoanEntry ?? null, expectedLoanEntry);
   }
 });
 
@@ -487,6 +606,15 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
     subMerchantId: 'sub-range-1',
     metadata: index === 0 ? { loanSettlementHistory: [] } : {},
     loanedAt: null,
+    loanEntry:
+      index === 1
+        ? {
+            id: `range-loan-${index + 1}`,
+            subMerchantId: 'sub-range-1',
+            amount: 175,
+            metadata: { reason: 'range-old', markedAt: '2023-12-18T00:00:00.000Z' },
+          }
+        : null,
   }));
 
   let fetchIndex = 0;
@@ -566,10 +694,7 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
     assert.equal(call.data.settlementAmount, null);
     const original = paidOrders.find(order => order.id === call.where.id);
     const snapshot = call.data.metadata.loanSettlementHistory.at(-1)?.snapshot;
-    assert.ok(snapshot);
-    assert.equal(snapshot.status, original?.status ?? '');
-    assert.equal(snapshot.pendingAmount, original?.pendingAmount ?? null);
-    assert.equal(snapshot.settlementStatus, original?.settlementStatus ?? null);
+    expectSnapshotMatchesOrder(snapshot, original ?? {});
   }
 
   const upsertedIds = upsertCalls.map((call) => call.where.orderId).sort();
@@ -580,6 +705,13 @@ test('markLoanOrdersSettledByRange settles paid orders across paginated batches'
       .map((order) => order.id)
       .sort(),
   );
+
+  for (const call of upsertCalls) {
+    const original = paidOrders.find(order => order.id === call.where.orderId);
+    const expectedLoanEntry = getExpectedLoanEntrySnapshot(original ?? {});
+    expectPreviousLoanEntryMetadata(call.create.metadata.previousLoanEntry ?? null, expectedLoanEntry);
+    expectPreviousLoanEntryMetadata(call.update.metadata.previousLoanEntry ?? null, expectedLoanEntry);
+  }
 
   assert.ok(loggedAction);
   assert.equal(loggedAction[0], 'admin-range');
@@ -604,7 +736,23 @@ test('revertLoanOrdersSettled restores loan-settled orders', async () => {
       settlementAmount: 100,
       settlementTime: '2024-05-31T23:00:00.000Z',
       loanedAt: null,
-      loanEntry: { amount: null },
+      loanEntry: {
+        id: 'loan-prev-1',
+        subMerchantId: 'sub-revert',
+        amount: 80,
+        metadata: { reason: 'previous-loan', markedAt: '2024-05-31T10:00:00.000Z' },
+      },
+      previousStatus: 'SUCCESS',
+      previousPendingAmount: 0,
+      previousSettlementStatus: 'PAID',
+      previousSettlementAmount: 100,
+      previousSettlementTime: '2024-05-31T23:00:00.000Z',
+      previousLoanEntry: {
+        id: 'loan-prev-1',
+        subMerchantId: 'sub-revert',
+        amount: 80,
+        metadata: { reason: 'previous-loan', markedAt: '2024-05-31T10:00:00.000Z' },
+      },
     },
   };
 
@@ -645,6 +793,12 @@ test('revertLoanOrdersSettled restores loan-settled orders', async () => {
     return { count: 1 };
   };
 
+  const upsertCalls: any[] = [];
+  prisma.loanEntry.upsert = async (args: any) => {
+    upsertCalls.push(args);
+    return {};
+  };
+
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -673,7 +827,35 @@ test('revertLoanOrdersSettled restores loan-settled orders', async () => {
   assert.equal(updateCalls.length, 1);
   assert.equal(updateCalls[0].where.status, 'LN_SETTLED');
   assert.equal(updateCalls[0].data.status, 'SUCCESS');
-  assert.equal(deleteCalls.length, 1);
+  const revertedHistory = updateCalls[0].data.metadata.loanSettlementHistory;
+  assert.ok(Array.isArray(revertedHistory));
+  const revertedEntry = revertedHistory[0];
+  assert.ok(revertedEntry);
+  expectSnapshotMatchesOrder(revertedEntry.snapshot, {
+    status: 'SUCCESS',
+    pendingAmount: 0,
+    settlementAmount: 100,
+    settlementStatus: 'PAID',
+    settlementTime: new Date('2024-05-31T23:00:00.000Z'),
+    loanEntry: {
+      id: 'loan-prev-1',
+      subMerchantId: 'sub-revert',
+      amount: 80,
+      metadata: { reason: 'previous-loan', markedAt: '2024-05-31T10:00:00.000Z' },
+    },
+  });
+  assert.equal(revertedEntry.revertedBy, 'admin-revert');
+  assert.equal(updateCalls[0].data.metadata.lastLoanSettlementRevert.reason, 'loan_settlement_reverted');
+  assert.equal(deleteCalls.length, 0);
+  assert.equal(upsertCalls.length, 1);
+  const upsert = upsertCalls[0];
+  assert.equal(upsert.where.orderId, 'loan-revert-1');
+  assert.equal(upsert.update.subMerchantId, 'sub-revert');
+  assert.equal(upsert.update.amount, 80);
+  assert.deepEqual(upsert.update.metadata, {
+    reason: 'previous-loan',
+    markedAt: '2024-05-31T10:00:00.000Z',
+  });
   assert.ok(loggedAction);
   assert.equal(loggedAction[0], 'admin-revert');
   assert.equal(loggedAction[1], 'loanRevertSettled');
@@ -695,7 +877,23 @@ test('revertLoanOrdersSettled handles exportOnly requests', async () => {
       settlementAmount: 200,
       settlementTime: '2024-06-04T23:00:00.000Z',
       loanedAt: null,
-      loanEntry: { amount: null },
+      loanEntry: {
+        id: 'loan-prev-export',
+        subMerchantId: 'sub-export',
+        amount: 150,
+        metadata: { reason: 'previous-export', markedAt: '2024-06-04T10:00:00.000Z' },
+      },
+      previousStatus: 'SUCCESS',
+      previousPendingAmount: 200,
+      previousSettlementStatus: 'PAID',
+      previousSettlementAmount: 200,
+      previousSettlementTime: '2024-06-04T23:00:00.000Z',
+      previousLoanEntry: {
+        id: 'loan-prev-export',
+        subMerchantId: 'sub-export',
+        amount: 150,
+        metadata: { reason: 'previous-export', markedAt: '2024-06-04T10:00:00.000Z' },
+      },
     },
   };
 

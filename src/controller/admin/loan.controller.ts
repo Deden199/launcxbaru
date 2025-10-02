@@ -20,6 +20,7 @@ import {
   type OrderForLoanSettlement,
   type LoanSettlementUpdate,
   createLoanSettlementAuditEntry,
+  createLoanEntrySnapshot,
   type LoanSettlementRevertSummary,
 } from '../../service/loanSettlement';
 import {
@@ -162,6 +163,8 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         createdAt: true,
         loanEntry: {
           select: {
+            id: true,
+            subMerchantId: true,
             amount: true,
             metadata: true,
           },
@@ -229,6 +232,7 @@ export async function markLoanOrdersSettled(req: AuthRequest, res: Response) {
         pendingAmount: order.pendingAmount,
         originalStatus: order.status,
         settlementAmount: order.settlementAmount,
+        previousLoanEntry: createLoanEntrySnapshot(order.loanEntry),
       });
     }
 
