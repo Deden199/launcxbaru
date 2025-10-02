@@ -416,8 +416,10 @@ export async function loanSettlementJobStatus(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    const recordStatus = jobRecord.status as LoanSettlementJobStatus;
-    const status = runtimeJob?.status ?? (recordStatus === 'pending' ? 'queued' : recordStatus);
+    const rawRecordStatus = jobRecord.status;
+    const recordStatus: LoanSettlementJobStatus =
+      rawRecordStatus === 'pending' ? 'queued' : (rawRecordStatus as LoanSettlementJobStatus);
+    const status = runtimeJob?.status ?? recordStatus;
     const summary = runtimeJob?.summary ?? { ok: [], fail: [], errors: [] };
 
     return res.json({
