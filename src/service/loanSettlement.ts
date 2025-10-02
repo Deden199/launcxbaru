@@ -69,6 +69,10 @@ export type OrderForLoanSettlement = {
   settlementTime: Date | null | undefined
   metadata: unknown
   subMerchantId: string | null | undefined
+  isLoan: boolean
+  loanAmount: number | null | undefined
+  loanAt: Date | null
+  loanBy: string | null | undefined
   loanedAt: Date | null
   createdAt: Date
   loanEntry?: {
@@ -104,6 +108,10 @@ type LoanSettlementRevertUpdate = {
   settlementStatus: string | null
   settlementAmount: number | null
   settlementTime: Date | null
+  isLoan: boolean
+  loanAmount: number | null
+  loanAt: Date | null
+  loanBy: string | null
   loanedAt: Date | null
   subMerchantId?: string | null
   loanEntry?: {
@@ -121,6 +129,10 @@ export type LoanSettlementSnapshot = {
   settlementStatus: string | null
   settlementAmount: number | null
   settlementTime: string | null
+  isLoan: boolean
+  loanAmount: number | null
+  loanAt: string | null
+  loanBy: string | null
   loanedAt: string | null
   loanEntry?: LoanSettlementLoanEntrySnapshot | null
   previousStatus: string
@@ -128,6 +140,10 @@ export type LoanSettlementSnapshot = {
   previousSettlementStatus: string | null
   previousSettlementAmount: number | null
   previousSettlementTime: string | null
+  previousIsLoan: boolean
+  previousLoanAmount: number | null
+  previousLoanAt: string | null
+  previousLoanBy: string | null
   previousLoanEntry?: LoanSettlementLoanEntrySnapshot | null
 }
 
@@ -191,6 +207,13 @@ export function createLoanSettlementSnapshot(order: OrderForLoanSettlement): Loa
       ? null
       : Number(order.settlementAmount)
   const settlementTime = order.settlementTime ? order.settlementTime.toISOString() : null
+  const isLoan = Boolean(order.isLoan)
+  const loanAmount =
+    order.loanAmount == null || Number.isNaN(Number(order.loanAmount))
+      ? null
+      : Number(order.loanAmount)
+  const loanAt = order.loanAt ? order.loanAt.toISOString() : null
+  const loanBy = typeof order.loanBy === 'string' ? order.loanBy : null
   const loanedAt = order.loanedAt ? order.loanedAt.toISOString() : null
   const loanEntrySnapshot = createLoanEntrySnapshot(order.loanEntry)
 
@@ -200,6 +223,10 @@ export function createLoanSettlementSnapshot(order: OrderForLoanSettlement): Loa
     settlementStatus: order.settlementStatus ?? null,
     settlementAmount,
     settlementTime,
+    isLoan,
+    loanAmount,
+    loanAt,
+    loanBy,
     loanedAt,
     loanEntry: loanEntrySnapshot,
     previousStatus: order.status,
@@ -207,6 +234,10 @@ export function createLoanSettlementSnapshot(order: OrderForLoanSettlement): Loa
     previousSettlementStatus: order.settlementStatus ?? null,
     previousSettlementAmount: settlementAmount,
     previousSettlementTime: settlementTime,
+    previousIsLoan: isLoan,
+    previousLoanAmount: loanAmount,
+    previousLoanAt: loanAt,
+    previousLoanBy: loanBy,
     previousLoanEntry: loanEntrySnapshot,
   }
 }
@@ -319,6 +350,14 @@ export async function applyLoanSettlementUpdates({
       async tx => {
         for (const update of chunk) {
           try {
+            let resolvedAmount = Number(update.pendingAmount ?? 0)
+            if ((!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) && update.settlementAmount != null) {
+              const fallback = Number(update.settlementAmount)
+              resolvedAmount = Number.isFinite(fallback) ? fallback : 0
+            }
+            const normalizedAmount =
+              Number.isFinite(resolvedAmount) && resolvedAmount > 0 ? Number(resolvedAmount) : null
+
             const result = await tx.order.updateMany({
               where: { id: update.id, status: update.originalStatus },
               data: {
@@ -327,6 +366,10 @@ export async function applyLoanSettlementUpdates({
                 settlementStatus: null,
                 settlementTime: null,
                 settlementAmount: null,
+                isLoan: true,
+                loanAmount: normalizedAmount,
+                loanAt: now,
+                loanBy: adminId ?? null,
                 loanedAt: now,
                 metadata: update.metadata,
               },
@@ -347,13 +390,7 @@ export async function applyLoanSettlementUpdates({
               summary.ok.push(update.id)
             }
 
-            let amount = Number(update.pendingAmount ?? 0)
-            if ((!Number.isFinite(amount) || amount <= 0) && update.settlementAmount != null) {
-              const fallback = Number(update.settlementAmount)
-              amount = Number.isFinite(fallback) ? fallback : 0
-            }
-
-            if (Number.isFinite(amount) && amount > 0 && update.subMerchantId) {
+            if (normalizedAmount != null && normalizedAmount > 0 && update.subMerchantId) {
               const previousLoanEntryMetadata = createPreviousLoanEntryMetadata(update.previousLoanEntry)
               const loanEntryMetadata: Record<string, any> = {
                 reason: LOAN_SETTLED_METADATA_REASON,
@@ -368,11 +405,11 @@ export async function applyLoanSettlementUpdates({
                 create: {
                   orderId: update.id,
                   subMerchantId: update.subMerchantId,
-                  amount,
+                  amount: normalizedAmount,
                   metadata: loanEntryMetadata,
                 },
                 update: {
-                  amount,
+                  amount: normalizedAmount,
                   metadata: loanEntryMetadata,
                 },
               })
@@ -443,6 +480,10 @@ async function applyLoanSettlementRevertUpdates({
                 settlementStatus: update.settlementStatus,
                 settlementTime: update.settlementTime,
                 settlementAmount: update.settlementAmount,
+                isLoan: update.isLoan,
+                loanAmount: update.loanAmount,
+                loanAt: update.loanAt,
+                loanBy: update.loanBy,
                 loanedAt: update.loanedAt,
                 metadata: update.metadata,
               },
@@ -582,6 +623,10 @@ export async function runLoanSettlementByRange({
         settlementTime: true,
         metadata: true,
         subMerchantId: true,
+        isLoan: true,
+        loanAmount: true,
+        loanAt: true,
+        loanBy: true,
         loanedAt: true,
         createdAt: true,
         loanEntry: {
@@ -677,6 +722,9 @@ type LoanSettlementRevertExportRow = {
   revertSettlementAmount: number | null
   revertSettlementTime: Date | null
   revertLoanedAt: Date | null
+  revertLoanAmount: number | null
+  revertLoanAt: Date | null
+  revertLoanBy: string | null
   originalMarkedAt?: string
   originalMarkedBy?: string
   originalNote?: string
@@ -696,6 +744,10 @@ const parseOptionalDate = (value: any): Date | null => {
   }
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+const parseOptionalString = (value: any): string | null => {
+  return typeof value === 'string' ? value : null
 }
 
 const parseSnapshotLoanEntry = (value: any): LoanSettlementLoanEntrySnapshot | null => {
@@ -823,6 +875,10 @@ export async function revertLoanSettlementsByRange({
         settlementTime: true,
         metadata: true,
         subMerchantId: true,
+        isLoan: true,
+        loanAmount: true,
+        loanAt: true,
+        loanBy: true,
         loanedAt: true,
         createdAt: true,
         loanEntry: {
@@ -909,6 +965,19 @@ export async function revertLoanSettlementsByRange({
         snapshotValue.previousSettlementTime ?? snapshotValue.settlementTime,
       )
       const revertLoanedAt = parseOptionalDate(snapshotValue.loanedAt) ?? null
+      const revertIsLoan =
+        typeof snapshotValue.previousIsLoan === 'boolean'
+          ? snapshotValue.previousIsLoan
+          : typeof snapshotValue.isLoan === 'boolean'
+          ? snapshotValue.isLoan
+          : false
+      const revertLoanAmount = parseNullableNumber(
+        snapshotValue.previousLoanAmount ?? snapshotValue.loanAmount,
+      )
+      const revertLoanAt = parseOptionalDate(snapshotValue.previousLoanAt ?? snapshotValue.loanAt)
+      const revertLoanByValue =
+        parseOptionalString(snapshotValue.previousLoanBy) ?? parseOptionalString(snapshotValue.loanBy)
+      const revertLoanBy = revertLoanByValue ?? null
 
       const loanEntrySnapshot = parseSnapshotLoanEntry(
         snapshotValue.previousLoanEntry ?? snapshotValue.loanEntry,
@@ -970,6 +1039,9 @@ export async function revertLoanSettlementsByRange({
         revertSettlementAmount,
         revertSettlementTime,
         revertLoanedAt,
+        revertLoanAmount,
+        revertLoanAt,
+        revertLoanBy,
         originalMarkedAt: revertOf,
         originalMarkedBy:
           typeof targetEntry.markedBy === 'string' ? targetEntry.markedBy : undefined,
@@ -989,6 +1061,10 @@ export async function revertLoanSettlementsByRange({
           settlementStatus: revertSettlementStatus,
           settlementAmount: revertSettlementAmount,
           settlementTime: revertSettlementTime,
+          isLoan: revertIsLoan,
+          loanAmount: revertLoanAmount,
+          loanAt: revertLoanAt,
+          loanBy: revertLoanBy,
           loanedAt: revertLoanedAt,
           subMerchantId: revertSubMerchantId,
           loanEntry: loanEntrySnapshot
@@ -1040,6 +1116,9 @@ export async function revertLoanSettlementsByRange({
         'Restored Settlement Amount',
         'Restored Settlement Time',
         'Restored Loaned At',
+        'Restored Loan Amount',
+        'Restored Loan At',
+        'Restored Loan By',
         'Original Marked At',
         'Original Marked By',
         'Original Note',
@@ -1053,6 +1132,9 @@ export async function revertLoanSettlementsByRange({
         row.revertSettlementAmount ?? '',
         row.revertSettlementTime ? row.revertSettlementTime.toISOString() : '',
         row.revertLoanedAt ? row.revertLoanedAt.toISOString() : '',
+        row.revertLoanAmount ?? '',
+        row.revertLoanAt ? row.revertLoanAt.toISOString() : '',
+        row.revertLoanBy ?? '',
         row.originalMarkedAt ?? '',
         row.originalMarkedBy ?? '',
         row.originalNote ?? '',
