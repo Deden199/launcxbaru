@@ -50,18 +50,18 @@ model sub_merchant {
   provider       String?
   name           String
 
-  fee            Float   @default(0.0)
-  credentials    Json?   // merchantId, env, secretKey
-  schedule       Json?   // { weekday: boolean, weekend: boolean }
+  fee            Float    @default(0.0)
+  credentials    Json?    // merchantId, env, secretKey
+  schedule       Json?    // { weekday: boolean, weekend: boolean }
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  merchant            merchant           @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
-  withdrawRequests    WithdrawRequest[]  @relation("SubMerchantWithdrawals")
-  adminWithdraws      AdminWithdraw[]    @relation("SubMerchantAdminWithdraws")
+  merchant            merchant              @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
+  withdrawRequests    WithdrawRequest[]     @relation("SubMerchantWithdrawals")
+  adminWithdraws      AdminWithdraw[]       @relation("SubMerchantAdminWithdraws")
   transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
-  orders              Order[]            @relation("OrderSubMerchant")
-  balanceRecords      SubMerchantBalance[] @relation("SubMerchantBalanceSubMerchant")
+  orders              Order[]               @relation("OrderSubMerchant")
+  balanceRecords      SubMerchantBalance[]  @relation("SubMerchantBalanceSubMerchant")
 }
 
 /// Transaksi
@@ -82,8 +82,8 @@ model transaction_request {
   settlementAmount Int?
   settlementAt     DateTime?
 
-  merchant    merchant?    @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
-  subMerchant sub_merchant? @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
+  merchant    merchant?     @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
+  subMerchant sub_merchant?  @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
 
   @@index([merchantId])
   @@index([createdAt])
@@ -104,11 +104,11 @@ model transaction_response {
 
 /// Callback masuk dari gateway
 model transaction_callback {
-  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
-  referenceId        String?  @db.ObjectId
-  requestBody        Json
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  referenceId         String?  @db.ObjectId
+  requestBody         Json
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
   paymentReceivedTime DateTime?
   settlementTime      DateTime?
   trxExpirationTime   DateTime?
@@ -190,10 +190,10 @@ model PartnerClient {
   children               PartnerClient[]  @relation("ParentChildren")
   users                  ClientUser[]
   withdraws              WithdrawRequest[]
-  withdrawFeePercent     Float            @default(0)
-  withdrawFeeFlat        Float            @default(0)
-  weekendFeePercent      Float            @default(0)
-  weekendFeeFlat         Float            @default(0)
+  withdrawFeePercent     Float @default(0)
+  withdrawFeeFlat        Float @default(0)
+  weekendFeePercent      Float @default(0)
+  weekendFeeFlat         Float @default(0)
   /// Force credential schedule: "weekday" or "weekend"
   forceSchedule          String?
   callbackJobs           CallbackJob[]
@@ -239,12 +239,9 @@ model Order {
   @@index([subMerchantId, status, createdAt])
 }
 
-model LoanSettlementJob {
-  // <-- DIHAPUS DALAM VERSI INI (sudah tidak ada)
-}
-
-model LoanEntry {
-  // <-- DIHAPUS DALAM VERSI INI (sudah tidak ada)
+enum AdminRole {
+  ADMIN
+  SUPER_ADMIN
 }
 
 model PartnerUser {
@@ -370,11 +367,6 @@ model CallbackJob {
 
   @@index([delivered])
   @@index([partnerClientId])
-}
-
-enum AdminRole {
-  ADMIN
-  SUPER_ADMIN
 }
 
 model AdminLog {
