@@ -9,6 +9,7 @@ export interface SettlementJob {
   settledOrders: number
   netAmount: number
   error?: string
+  actor?: string
 }
 
 const jobs = new Map<string, SettlementJob>()
@@ -21,9 +22,12 @@ function runNext() {
   current = job
   job.status = 'running'
   resetSettlementState()
-  runManualSettlement(p => {
-    job.settledOrders = p.settledOrders
-    job.netAmount = p.netAmount
+  runManualSettlement({
+    onProgress: p => {
+      job.settledOrders = p.settledOrders
+      job.netAmount = p.netAmount
+    },
+    context: { actor: job.actor, jobId: job.id, trigger: 'worker' },
   })
     .then(() => {
       job.status = 'completed'
@@ -39,12 +43,17 @@ function runNext() {
     })
 }
 
-export function startSettlementJob() {
+export interface StartSettlementJobOptions {
+  actor?: string
+}
+
+export function startSettlementJob(options: StartSettlementJobOptions = {}) {
   const job: SettlementJob = {
     id: uuidv4(),
     status: 'queued',
     settledOrders: 0,
     netAmount: 0,
+    actor: options.actor,
   }
   jobs.set(job.id, job)
   queue.push(job)

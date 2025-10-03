@@ -204,6 +204,7 @@ model PartnerClient {
   callbackJobs       CallbackJob[]
   callbackJobDeadLetters CallbackJobDeadLetter[]
   clientApiRequestLogs ClientApiRequestLog[]
+  balanceLedgerEntries PartnerBalanceLedger[]
 }
 
 model Order {
@@ -469,4 +470,20 @@ model ClientApiRequestLog {
 
   @@index([partnerClientId, createdAt])
   @@map("client_api_request_log")
+}
+
+model PartnerBalanceLedger {
+  id              String   @id @default(uuid()) @map("_id")
+  partnerClientId String
+  amount          Float
+  type            String   @default("CREDIT")
+  reference       String   @unique
+  description     String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  partnerClient PartnerClient @relation(fields: [partnerClientId], references: [id])
+
+  @@index([partnerClientId])
+  @@map("partner_balance_ledger")
 }

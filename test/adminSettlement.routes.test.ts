@@ -6,9 +6,9 @@ import request from 'supertest'
 // Patch runManualSettlement before loading controller
 const settlement = require('../src/cron/settlement')
 let called = 0
-settlement.runManualSettlement = async (cb?: any) => {
+settlement.runManualSettlement = async (opts?: any) => {
   called++
-  cb?.({ settledOrders: 2, netAmount: 200, batchSettled: 2, batchAmount: 200 })
+  opts?.onProgress?.({ settledOrders: 2, netAmount: 200, batchSettled: 2, batchAmount: 200 })
   return { settledOrders: 2, netAmount: 200 }
 }
 settlement.restartSettlementChecker = () => {}
