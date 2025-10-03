@@ -587,7 +587,9 @@ test('preview cleanup reversal metadata returns affected order ids without persi
   assert.equal(orderUpdateCalls, 0)
   assert.deepEqual(capturedWhere.subMerchantId, 'sub-1')
   assert.deepEqual(capturedWhere.metadata?.path, ['reversal'])
-})
+  assert.ok(Array.isArray(capturedWhere.metadata?.notIn))
+  assert.ok(capturedWhere.metadata?.notIn?.includes(null))
+  })
 
 test('cleanup reversal metadata resets loanedAt and logs admin action', async () => {
   const prisma = require.cache[prismaPath].exports.prisma

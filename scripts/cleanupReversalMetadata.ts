@@ -14,7 +14,17 @@ const ORDER_METADATA_KEYS_TO_REMOVE = [
 
 const LOAN_ENTRY_KEYS_TO_REMOVE = ['reversal', 'lastAction'] as const
 
-const PRISMA_JSON_NULL = (Prisma as unknown as { JsonNull?: unknown }).JsonNull
+const PRISMA_NULL_TYPES = (Prisma as unknown as {
+  NullTypes?: {
+    JsonNull?: unknown
+    DbNull?: unknown
+  }
+}).NullTypes
+
+const PRISMA_JSON_NULL =
+  (Prisma as unknown as { JsonNull?: unknown }).JsonNull ?? PRISMA_NULL_TYPES?.JsonNull
+const PRISMA_DB_NULL =
+  (Prisma as unknown as { DbNull?: unknown }).DbNull ?? PRISMA_NULL_TYPES?.DbNull
 
 type CleanupOptions = {
   startDate: string
@@ -137,6 +147,16 @@ function buildWhereClause(options: CleanupOptions) {
     throw new Error('startDate must be before or equal to endDate')
   }
 
+  const nullExclusions: unknown[] = [null]
+
+  if (PRISMA_JSON_NULL !== undefined) {
+    nullExclusions.push(PRISMA_JSON_NULL)
+  }
+
+  if (PRISMA_DB_NULL !== undefined) {
+    nullExclusions.push(PRISMA_DB_NULL)
+  }
+
   const where: Record<string, unknown> = {
     loanedAt: {
       gte: start,
@@ -144,7 +164,7 @@ function buildWhereClause(options: CleanupOptions) {
     },
     metadata: {
       path: ['reversal'],
-      not: (PRISMA_JSON_NULL ?? null) as unknown,
+      notIn: nullExclusions as unknown[],
     },
   }
 

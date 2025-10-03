@@ -86,7 +86,8 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
 
   assert.ok(capturedWhere)
   assert.deepEqual(capturedWhere?.metadata?.path, ['reversal'])
-  assert.notEqual(capturedWhere?.metadata?.not, undefined)
+  assert.ok(Array.isArray(capturedWhere?.metadata?.notIn))
+  assert.ok(capturedWhere?.metadata?.notIn?.includes(null))
 
   assert.ok(capturedOrderUpdate)
   assert.equal(capturedOrderUpdate.where.id, 'order-123')
@@ -104,4 +105,58 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
 
   assert.deepEqual(orderResult.metadata, originalMetadata)
   assert.deepEqual(orderResult.loanEntry?.metadata, originalLoanEntryMetadata)
+})
+
+test('cleanupReversalMetadata sanitizes primitive reversal metadata values', async () => {
+  let capturedWhere: any = null
+  let capturedOrderUpdate: any = null
+
+  const primitiveMetadata = {
+    reversal: true,
+    keep: 42,
+    nested: { foo: 'bar' },
+  }
+
+  prismaMock.order.findMany = async (args: any) => {
+    capturedWhere = args?.where
+    return [
+      {
+        id: 'order-primitive',
+        metadata: { ...primitiveMetadata },
+        loanedAt: new Date('2024-05-02T00:00:00.000Z'),
+        loanEntry: null,
+      },
+    ]
+  }
+
+  prismaMock.order.update = async (args: any) => {
+    capturedOrderUpdate = args
+    return {}
+  }
+
+  const summary = await cleanupReversalMetadata({
+    startDate: '2024-05-01',
+    endDate: '2024-05-03',
+    dryRun: false,
+  })
+
+  assert.equal(summary.total, 1)
+  assert.equal(summary.success, 1)
+  assert.deepEqual(summary.failed, [])
+  assert.equal(summary.dryRun, false)
+
+  assert.ok(Array.isArray(capturedWhere?.metadata?.notIn))
+  assert.ok(capturedWhere?.metadata?.notIn?.includes(null))
+  assert.equal(capturedWhere?.metadata?.notIn?.includes(true), false)
+
+  assert.ok(capturedOrderUpdate)
+  assert.equal(capturedOrderUpdate.where.id, 'order-primitive')
+  assert.equal(capturedOrderUpdate.data.loanedAt, null)
+  assert.deepEqual(capturedOrderUpdate.data.metadata, {
+    keep: 42,
+    nested: { foo: 'bar' },
+  })
+
+  prismaMock.order.findMany = async () => []
+  prismaMock.order.update = async () => ({})
 })
