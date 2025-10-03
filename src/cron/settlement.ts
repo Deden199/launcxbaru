@@ -9,6 +9,8 @@ import crypto from 'crypto'
 import logger from '../logger'
 import { sendTelegramMessage } from '../core/telegram.axios'
 import { tryAdvisoryLock, releaseAdvisoryLock } from '../util/dbLock'
+import { computeSettlement } from '../service/feeSettlement'
+import { postBalanceMovement } from '../service/billing'
 
 // ————————— CONFIG —————————
 const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
@@ -73,6 +75,45 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 type SettlementResult = { netAmt: number; rrn: string; st: string; tmt?: Date; fee?: number };
 
+type LedgerMovement = { orderId: string; partnerClientId: string; amount: number };
+
+type ManualSettlementOrder = {
+  pendingAmount?: number | null
+  amount?: number | null
+  rrn?: string | null
+  partnerClient?: { feePercent?: number | null; feeFlat?: number | null } | null
+};
+
+function deriveManualSettlement(order: ManualSettlementOrder): SettlementResult | null {
+  const now = new Date()
+  let netAmt = Number(order.pendingAmount ?? 0)
+  let fee: number | undefined
+
+  if (!Number.isFinite(netAmt) || netAmt <= 0) {
+    const gross = Number(order.amount ?? 0)
+    if (!Number.isFinite(gross) || gross <= 0) {
+      return null
+    }
+    const percent = order.partnerClient?.feePercent ?? 0
+    const flat = order.partnerClient?.feeFlat ?? 0
+    const computed = computeSettlement(gross, { percent, flat })
+    netAmt = computed.settlement
+    fee = computed.fee
+  }
+
+  if (!Number.isFinite(netAmt) || netAmt <= 0) {
+    return null
+  }
+
+  return {
+    netAmt,
+    fee,
+    rrn: order.rrn ?? 'MANUAL',
+    st: 'MANUAL',
+    tmt: now,
+  }
+}
+
 type BatchResult = {
   hasMore: boolean;
   settledCount: number;
@@ -81,7 +122,8 @@ type BatchResult = {
 };
 
 // core worker: proses satu batch; return object with stats
-async function processBatch(cursor: Cursor): Promise<BatchResult> {
+async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Promise<BatchResult> {
+  const manual = !!opts.manual
   // cursor-based pagination
   const where: any = {
     status: 'PAID',
@@ -111,9 +153,12 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
       id: true,
       partnerClientId: true,
       pendingAmount: true,
+      amount: true,
       channel: true,
       createdAt: true,
-      subMerchant: { select: { credentials: true } }
+      rrn: true,
+      subMerchant: { select: { credentials: true } },
+      partnerClient: { select: { id: true, feePercent: true, feeFlat: true } }
     }
   });
 
@@ -151,12 +196,12 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
   logger.info(`[SettlementCron] processing ${pendingOrders.length} orders`);
 
   const unsettledIds = new Set(pendingOrders.map(o => o.id));
-  const httpLimit = pLimit(HTTP_CONCURRENCY);
+  const httpLimit = manual ? null : pLimit(HTTP_CONCURRENCY);
   const groups = new Map<string, { order: PendingOrder; settlement: SettlementResult }[]>();
 
   await Promise.all(
     pendingOrders.map(o =>
-      httpLimit(async () => {
+      (httpLimit ? httpLimit(async () => {
         try {
           const creds =
             o.subMerchant?.credentials as { merchantId: string; secretKey: string } | undefined;
@@ -167,7 +212,9 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
           let settlementResult: SettlementResult | null = null;
           const { merchantId, secretKey } = creds;
 
-          if (o.channel === 'hilogate') {
+          if (manual) {
+            settlementResult = deriveManualSettlement(o);
+          } else if (o.channel === 'hilogate') {
             const path = `/api/v1/transactions/${o.id}`;
             const url = `${config.api.hilogate.baseUrl}${path}`;
             const sig = generateSignature(path, secretKey);
@@ -232,7 +279,20 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
         } catch (err) {
           logger.error(`[SettlementCron] order ${o.id} failed:`, err);
         }
-      })
+      }) : (async () => {
+        try {
+          const settlementResult = deriveManualSettlement(o);
+          if (!settlementResult) {
+            return
+          }
+          const key = o.partnerClientId!;
+          const arr = groups.get(key) ?? [];
+          arr.push({ order: o, settlement: settlementResult });
+          groups.set(key, arr);
+        } catch (err) {
+          logger.error(`[SettlementCron] order ${o.id} failed:`, err)
+        }
+      })())
     )
   );
 
@@ -241,6 +301,7 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
     dbLimit(async () => {
       let settledCount = 0;
       let netAmount = 0;
+      const ledgerMovements: LedgerMovement[] = []
       const chunks = chunk(items, PARTNER_TX_CHUNK_SIZE);
       for (const chunkItems of chunks) {
         try {
@@ -248,6 +309,7 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
             prisma.$transaction(async tx => {
               let sc = 0;
               let na = 0;
+              const txLedger: LedgerMovement[] = []
               for (const { order, settlement } of chunkItems) {
                 const upd = await tx.order.updateMany({
                   where: { id: order.id, status: 'PROCESSING' },
@@ -266,6 +328,13 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
                   sc++;
                   na += settlement.netAmt;
                   unsettledIds.delete(order.id);
+                  if (manual) {
+                    txLedger.push({
+                      orderId: order.id,
+                      partnerClientId: pcId,
+                      amount: settlement.netAmt
+                    })
+                  }
                 }
               }
               if (na > 0) {
@@ -274,14 +343,34 @@ async function processBatch(cursor: Cursor): Promise<BatchResult> {
                   data: { balance: { increment: na } }
                 });
               }
-              return { settledCount: sc, netAmount: na };
+              return { settledCount: sc, netAmount: na, ledgerMovements: txLedger };
             }, { timeout: DB_TX_TIMEOUT_MS })
           );
           settledCount += res.settledCount;
           netAmount += res.netAmount;
+          if (manual && res.ledgerMovements?.length) {
+            ledgerMovements.push(...res.ledgerMovements)
+          }
         } catch (err) {
           logger.error(`[SettlementCron] partnerClient ${pcId} failed:`, err);
         }
+      }
+      if (manual && ledgerMovements.length) {
+        await Promise.all(
+          ledgerMovements.map(movement =>
+            postBalanceMovement({
+              partnerClientId: movement.partnerClientId,
+              amount: movement.amount,
+              reference: `SETTLE:${movement.orderId}`,
+              description: `Manual settlement for order ${movement.orderId}`
+            }).catch(err => {
+              logger.error(
+                `[SettlementCron] Failed to post ledger movement for order ${movement.orderId}`,
+                err
+              )
+            })
+          )
+        )
       }
       return { settledCount, netAmount };
     })
@@ -473,7 +562,7 @@ export async function runManualSettlement(
     let cursor: Cursor = null
 
     while (true) {
-      const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor)
+      const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor, { manual: true })
       if (!settledCount) break
       settledOrders += settledCount
       netAmount += na
