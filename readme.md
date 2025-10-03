@@ -1,32 +1,96 @@
-# laucxserver
+# Launcx Monorepo
 
-Backend for the Launcx payment aggregator.
+The Launcx monorepo hosts the payments backend (Node.js/Express + Prisma) alongside the Next.js frontend dashboard and the shared developer documentation. The backend lives at the repository root under `src/`, while the admin/frontend experience is located in `frontend/`. Both layers depend on external infrastructure such as PostgreSQL for persistence and Apache Kafka for asynchronous messaging.
 
-See [docs/services](docs/services) for service-specific endpoints, dependencies, and environment variables.
+See the service-specific docs in [`docs/services`](docs/services) as well as the deployment guide in [`docs/deployment.md`](docs/deployment.md) for detailed API contracts, infrastructure guidance, and operational notes.
 
-## Environment Variables
+## Prerequisites
 
-Set `FRONTEND_BASE_URL` to the publicly accessible URL of the frontend site. It is used when creating card payment sessions to build redirect links such as `/payment-success`, `/payment-failure`, and `/payment-expired`.
+| Requirement | Recommended version | Notes |
+| --- | --- | --- |
+| Node.js | 20.x LTS | Required for both backend and frontend packages.
+| npm / pnpm | npm ≥ 10.x or pnpm ≥ 8.x | Use a single package manager consistently across the repo.
+| Docker Desktop (optional) | Latest | Useful for running PostgreSQL and Kafka locally.
+| PostgreSQL | 15 or newer | Required by Prisma via `DATABASE_URL`.
+| Apache Kafka | 3.x | Brokers are used by background workers and event consumers.
 
-Rate limiting for public traffic can be tuned with the following environment variables:
+> Tip: If you prefer containerized dependencies, the compose snippets in [`docs/deployment.md`](docs/deployment.md) spin up PostgreSQL, ZooKeeper, and Kafka for local work.
 
-- `RATE_LIMIT_WINDOW_MS` (default `60000`): Sliding time window in milliseconds for the global rate limiter.
-- `RATE_LIMIT_MAX` (default `10000`): Maximum number of requests allowed per client within the configured window.
+## Installation & Environment Setup
 
-Ops teams can raise or lower these values per instance to match the expected throughput.
+1. **Install dependencies**
+   ```bash
+   npm install
+   cd frontend && npm install
+   cd ..
+   ```
 
-## Reconcile Partner Balances
+2. **Create environment files** – copy `.env.example` (if present) or create `.env` at the repository root and in `frontend/`. A minimal backend configuration looks like:
+   ```env
+   NODE_ENV=development
+   PORT=3001
+   DATABASE_URL=postgresql://launcx:secret@localhost:5432/launcx
+   KAFKA_BROKER=localhost:9092
+   FRONTEND_BASE_URL=http://localhost:3000
+   JWT_SECRET=change-me
+   PIVOT_CALLBACK_API_KEY=sample-key
+   ```
+   Refer to [`docs/services/*`](docs/services) for additional service-specific variables and secrets.
 
-Run `npm run reconcile-balances` after setting database environment variables to recompute client balances.
+3. **Prepare the database schema**
+   ```bash
+   npx prisma migrate dev --schema=src/prisma/schema.prisma
+   npm run generate
+   ```
+   Use `npx prisma migrate deploy` in CI or production environments. The `npm run generate` alias keeps the Prisma client in sync with the schema.
 
-## API Documentation
+4. **Seed baseline data (optional)** – scripts in `scripts/` help bootstrap environments, for example:
+   ```bash
+   npm run create-admin
+   npm run sync-from-hilogate
+   ```
+   Review script descriptions in [`docs/services`](docs/services) before running them against shared environments.
 
-Generate and serve Swagger docs for payment, withdrawal, and withdrawal S2S routes:
+## Running the Backend
 
+| Mode | Command | Notes |
+| --- | --- | --- |
+| Development server | `npm run dev` | Starts the Express API with `ts-node` and watches for TypeScript changes.
+| Production build | `npm run build && npm start` | Compiles to `dist/` and runs the compiled server.
+| Callback worker (dev) | `npm run dev:callback-worker` | Watches and processes Kafka callback events with TypeScript sources.
+| Callback worker (compiled) | `npm run build && npm run callback-worker` | Build once, then run the JavaScript worker from `dist/`.
+
+### Utility scripts
+
+- `npm run reconcile-balances` – recompute partner balances after manual adjustments.
+- `npm run docs` – generate Swagger/OpenAPI definitions at `docs/api/*` and serve them locally.
+- `npm run sync-from-hilogate` – synchronize merchant data from Hilogate.
+- Additional operational helpers live in the [`scripts/`](scripts) directory.
+
+## Frontend
+
+The Next.js dashboard resides in [`frontend/`](frontend). After installing dependencies, start it with:
 ```bash
-npm run docs
+cd frontend
+npm run dev
 ```
 
-This command writes `docs/api/payment.yaml`, `docs/api/withdrawal.yaml`, and `docs/api/withdrawal.s2s.yaml` and hosts them at `http://localhost:3001/docs/payment`, `/docs/withdrawal`, and `/docs/withdrawal-s2s`.
+Refer to [`frontend/README.md`](frontend/README.md) for framework-specific tips and commands.
 
-S2S withdrawal requests must include `X-API-Key`, `X-Timestamp`, and `X-Signature` headers and originate from an IP address whitelisted under the `s2s_ip_whitelist` setting. Whitelist entries dapat dikonfigurasi melalui halaman Admin Settings di frontend.
+## Testing
+
+Run the backend test suite with:
+```bash
+npm test
+```
+
+Frontend tests (if configured) should be executed from the `frontend/` directory. Check feature-specific documentation in [`docs/services`](docs/services) and event flows in [`docs/events.md`](docs/events.md) during test planning.
+
+## Additional Documentation
+
+- [`docs/services`](docs/services) – API specs, data contracts, and per-service environment variables.
+- [`docs/events.md`](docs/events.md) – Kafka topics and event payloads.
+- [`docs/observability.md`](docs/observability.md) – Logging, tracing, and alerting conventions.
+- [`docs/deployment.md`](docs/deployment.md) – Container, Compose, and Kubernetes deployment references.
+
+Keeping these resources aligned with the steps above ensures new engineers can move from clone to running services quickly.
