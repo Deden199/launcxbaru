@@ -440,10 +440,7 @@ export async function downloadSettlementSummary(req: AuthRequest, res: Response)
           'manualSettlementJobCancelled',
         ],
       },
-      detail: {
-        path: ['jobId'],
-        equals: jobId,
-      },
+      target: jobId,
     },
     orderBy: { createdAt: 'desc' },
   })
