@@ -50,23 +50,18 @@ model sub_merchant {
   provider       String?
   name           String
 
-  fee            Float  @default(0.0)
-  credentials   Json?     // merchantId, env, secretKey
-  schedule      Json?     // { weekday: boolean, weekend: boolean }
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  merchant merchant @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
-  withdrawRequests WithdrawRequest[] @relation("SubMerchantWithdrawals")
-  adminWithdraws   AdminWithdraw[]   @relation("SubMerchantAdminWithdraws")
+  fee            Float   @default(0.0)
+  credentials    Json?   // merchantId, env, secretKey
+  schedule       Json?   // { weekday: boolean, weekend: boolean }
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  merchant            merchant           @relation("MerchantSubMerchants", fields: [merchantId], references: [id])
+  withdrawRequests    WithdrawRequest[]  @relation("SubMerchantWithdrawals")
+  adminWithdraws      AdminWithdraw[]    @relation("SubMerchantAdminWithdraws")
   transactionRequests transaction_request[] @relation("TransactionRequestSubMerchant")
-  orders           Order[]             @relation("OrderSubMerchant")
-  loanEntries     LoanEntry[]         @relation("SubMerchantLoanEntries")
-  balanceRecords  SubMerchantBalance[] @relation("SubMerchantBalanceSubMerchant")
-  loanSettlementJobs LoanSettlementJob[] @relation("SubMerchantLoanSettlementJobs")
-
-
-
+  orders              Order[]            @relation("OrderSubMerchant")
+  balanceRecords      SubMerchantBalance[] @relation("SubMerchantBalanceSubMerchant")
 }
 
 /// Transaksi
@@ -86,8 +81,9 @@ model transaction_request {
   expiration       Int?
   settlementAmount Int?
   settlementAt     DateTime?
-  merchant         merchant?         @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
-  subMerchant      sub_merchant?     @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
+
+  merchant    merchant?    @relation("MerchantTransactionRequests", fields: [merchantId], references: [id])
+  subMerchant sub_merchant? @relation("TransactionRequestSubMerchant", fields: [subMerchantId], references: [id])
 
   @@index([merchantId])
   @@index([createdAt])
@@ -108,15 +104,14 @@ model transaction_response {
 
 /// Callback masuk dari gateway
 model transaction_callback {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  referenceId String?  @db.ObjectId
-  requestBody Json
-  createdAt   DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  paymentReceivedTime  DateTime?
-  settlementTime       DateTime?
-  trxExpirationTime    DateTime?
-
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  referenceId        String?  @db.ObjectId
+  requestBody        Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  paymentReceivedTime DateTime?
+  settlementTime      DateTime?
+  trxExpirationTime   DateTime?
 }
 
 /// Callback disbursement
@@ -188,39 +183,39 @@ model PartnerClient {
   callbackSecret   String?
   allowedDomains   String[]
 
-  orders           Order[]          @relation("PartnerClientOrders")
-  defaultProvider  String?          @default("hilogate")
-  parentClientId   String?          @map("parentClientId")
-  parentClient     PartnerClient?   @relation("ParentChildren", fields: [parentClientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children         PartnerClient[]  @relation("ParentChildren")
-  users            ClientUser[]
-  withdraws        WithdrawRequest[]
-  withdrawFeePercent Float @default(0)
-  withdrawFeeFlat    Float @default(0)
-  weekendFeePercent  Float @default(0)
-  weekendFeeFlat     Float @default(0)
-    /// Force credential schedule: "weekday" or "weekend"
-  forceSchedule      String?
-  callbackJobs       CallbackJob[]
+  orders                 Order[]          @relation("PartnerClientOrders")
+  defaultProvider        String?          @default("hilogate")
+  parentClientId         String?          @map("parentClientId")
+  parentClient           PartnerClient?   @relation("ParentChildren", fields: [parentClientId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children               PartnerClient[]  @relation("ParentChildren")
+  users                  ClientUser[]
+  withdraws              WithdrawRequest[]
+  withdrawFeePercent     Float            @default(0)
+  withdrawFeeFlat        Float            @default(0)
+  weekendFeePercent      Float            @default(0)
+  weekendFeeFlat         Float            @default(0)
+  /// Force credential schedule: "weekday" or "weekend"
+  forceSchedule          String?
+  callbackJobs           CallbackJob[]
   callbackJobDeadLetters CallbackJobDeadLetter[]
-  clientApiRequestLogs ClientApiRequestLog[]
+  clientApiRequestLogs   ClientApiRequestLog[]
 }
 
 model Order {
-  id               String           @id @default(uuid()) @map("_id")
+  id               String   @id @default(uuid()) @map("_id")
 
   // UUID string foreign key, nullable for existing orders
-  partnerClientId  String?          @map("partnerClientId")
-  partnerClient    PartnerClient?   @relation("PartnerClientOrders", fields: [partnerClientId], references: [id])
+  partnerClientId  String?  @map("partnerClientId")
+  partnerClient    PartnerClient? @relation("PartnerClientOrders", fields: [partnerClientId], references: [id])
   subMerchantId    String?
-  subMerchant      sub_merchant? @relation("OrderSubMerchant",       fields: [subMerchantId], references: [id])
+  subMerchant      sub_merchant?  @relation("OrderSubMerchant", fields: [subMerchantId], references: [id])
   userId           String
   playerId         String?
   merchantId       String?
   amount           Float
   channel          String
   settlementStatus String?
-  status           String           @default("PENDING")
+  status           String   @default("PENDING")
   pendingAmount    Float?
   rrn              String?
   settlementAmount Float?
@@ -232,18 +227,11 @@ model Order {
   pgClientRef      String?
   providerPayload  Json?
   metadata         Json?
-  paymentReceivedTime  DateTime?      // full.payment_received_time
-  settlementTime       DateTime?      // full.settlement_time
-  trxExpirationTime    DateTime?      // full.trx_expiration_time
-  isLoan           Boolean   @default(false)
-  loanAmount       Float?
-  loanAt           DateTime?
-  loanBy           String?
-  loanedAt         DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-
-  loanEntry        LoanEntry?       @relation("OrderLoanEntry")
+  paymentReceivedTime  DateTime?
+  settlementTime       DateTime?
+  trxExpirationTime    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([partnerClientId])
   @@index([createdAt])
@@ -251,59 +239,29 @@ model Order {
   @@index([subMerchantId, status, createdAt])
 }
 
-model LoanEntry {
-  id             String        @id @default(uuid()) @map("_id")
-  orderId        String        @unique
-  subMerchantId  String
-  amount         Float
-  metadata       Json?
-  createdAt      DateTime      @default(now())
-
-  order          Order         @relation("OrderLoanEntry", fields: [orderId], references: [id])
-  subMerchant    sub_merchant  @relation("SubMerchantLoanEntries", fields: [subMerchantId], references: [id])
-
-  @@index([subMerchantId])
-}
-
 model LoanSettlementJob {
-  id              String      @id @default(uuid()) @map("_id")
-  subMerchantId   String
-  startDate       DateTime
-  endDate         DateTime
-  totalOrder      Int         @default(0)
-  totalLoanAmount Float       @default(0)
-  status          String
-  dryRun          Boolean     @default(false)
-  createdBy       String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  subMerchant sub_merchant @relation("SubMerchantLoanSettlementJobs", fields: [subMerchantId], references: [id])
-  creator     PartnerUser?  @relation("LoanSettlementJobCreatedBy", fields: [createdBy], references: [id])
-
-  @@index([subMerchantId])
-  @@index([status])
-  @@index([createdBy])
+  // <-- DIHAPUS DALAM VERSI INI (sudah tidak ada)
 }
 
-/// PartnerUser untuk login admin
+model LoanEntry {
+  // <-- DIHAPUS DALAM VERSI INI (sudah tidak ada)
+}
+
 model PartnerUser {
-  id        String   @id @default(uuid()) @map("_id")
-  name      String
-  email     String   @unique
-  password  String
-  role      AdminRole @default(ADMIN)
+  id         String    @id @default(uuid()) @map("_id")
+  name       String
+  email      String    @unique
+  password   String
+  role       AdminRole @default(ADMIN)
   totpSecret String?
-  totpEnabled Boolean @default(false)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  logs      AdminLog[]
-  loanSettlementJobs LoanSettlementJob[] @relation("LoanSettlementJobCreatedBy")
+  totpEnabled Boolean  @default(false)
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
+  logs      AdminLog[]
 }
 
-/// Key‐value settings
 model Setting {
   id        String   @id @default(uuid()) @map("_id")
   key       String   @unique
@@ -312,10 +270,9 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
-/// Payment Gateway providers
 model PGProvider {
-  id          String     @id @default(uuid()) @map("_id")
-  name        String     @unique
+  id          String @id @default(uuid()) @map("_id")
+  name        String @unique
   credentials Json
 }
 
@@ -352,64 +309,64 @@ model AdminWithdraw {
   @@index([subMerchantId])
 }
 
-
 model WithdrawRequest {
-  id                String             @id @default(uuid()) @map("_id")
-  refId             String             @unique
-  partnerClientId   String             @map("partnerClientId")
-  accountName       String
-  accountNameAlias  String
-  accountNumber     String
-  bankCode          String
-  bankName          String
-  branchName        String?
-  amount            Float
-  netAmount         Float?
-  pgFee             Float?
-
-  paymentGatewayId  String?
-  isTransferProcess Boolean?           @default(false)
-  status            DisbursementStatus @default(PENDING)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  completedAt       DateTime?
+  id                 String             @id @default(uuid()) @map("_id")
+  refId              String             @unique
+  partnerClientId    String             @map("partnerClientId")
+  accountName        String
+  accountNameAlias   String
+  accountNumber      String
+  bankCode           String
+  bankName           String
+  branchName         String?
+  amount             Float
+  netAmount          Float?
+  pgFee              Float?
+  paymentGatewayId   String?
+  isTransferProcess  Boolean?           @default(false)
+  status             DisbursementStatus @default(PENDING)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  completedAt        DateTime?
   subMerchantId      String
   sourceProvider     String
   withdrawFeePercent Float
   withdrawFeeFlat    Float
-  partnerClient PartnerClient @relation(fields: [partnerClientId], references: [id])
-  subMerchant        sub_merchant    @relation("SubMerchantWithdrawals", fields: [subMerchantId], references: [id])
+
+  partnerClient PartnerClient  @relation(fields: [partnerClientId], references: [id])
+  subMerchant   sub_merchant   @relation("SubMerchantWithdrawals", fields: [subMerchantId], references: [id])
+
   @@index([partnerClientId])
   @@index([createdAt])
   @@index([status])
-
 }
 
 model SubMerchantBalance {
-  id               String        @id @default(auto()) @map("_id") @db.ObjectId
-  subMerchantId    String        @unique
-  availableBalance Float         @default(0.0)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  subMerchantId    String   @unique
+  availableBalance Float    @default(0.0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   subMerchant sub_merchant @relation("SubMerchantBalanceSubMerchant", fields: [subMerchantId], references: [id])
 
   @@map("sub_merchant_balance")
 }
+
 /// Queue for partner callback deliverys
 model CallbackJob {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  url       String
-  payload   Json
-  signature String
-  attempts  Int      @default(0)
-  delivered Boolean  @default(false)
-  lastError Json?
-  responseBody Json?
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  url             String
+  payload         Json
+  signature       String
+  attempts        Int      @default(0)
+  delivered       Boolean  @default(false)
+  lastError       Json?
+  responseBody    Json?
   partnerClientId String
   partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([delivered])
   @@index([partnerClientId])
@@ -421,30 +378,31 @@ enum AdminRole {
 }
 
 model AdminLog {
-  id        String   @id @default(uuid()) @map("_id")
-  adminId   String
-  adminName  String   @default("Unknown") // ⬅️ default
-  action    String
-  target    String?
-  detail    Json?
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid()) @map("_id")
+  adminId    String
+  adminName  String   @default("Unknown")
+  action     String
+  target     String?
+  detail     Json?
+  createdAt  DateTime @default(now())
 
   admin PartnerUser @relation(fields: [adminId], references: [id])
 }
 
 model CallbackJobDeadLetter {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  jobId        String   @db.ObjectId
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  jobId           String   @db.ObjectId
   partnerClientId String
   partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
-  url          String
-  payload      Json
-  signature    String
-  statusCode   Int?
-  errorMessage String?
-  responseBody Json?
-  attempts     Int
-  createdAt    DateTime @default(now())
+  url             String
+  payload         Json
+  signature       String
+  statusCode      Int?
+  errorMessage    String?
+  responseBody    Json?
+  attempts        Int
+  createdAt       DateTime @default(now())
+
   @@index([partnerClientId])
 }
 
@@ -456,7 +414,7 @@ model HilogateCallbackWatcher {
 }
 
 model ClientApiRequestLog {
-  id              String         @id @default(auto()) @map("_id") @db.ObjectId
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
   partnerClientId String
   partnerClient   PartnerClient  @relation(fields: [partnerClientId], references: [id])
   method          String
@@ -465,7 +423,7 @@ model ClientApiRequestLog {
   errorMessage    String?
   payload         Json?
   responseBody    String?
-  createdAt       DateTime       @default(now())
+  createdAt       DateTime @default(now())
 
   @@index([partnerClientId, createdAt])
   @@map("client_api_request_log")
