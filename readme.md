@@ -1,6 +1,6 @@
 # Launcx Monorepo
 
-The Launcx monorepo hosts the payments backend (Node.js/Express + Prisma) alongside the Next.js frontend dashboard and the shared developer documentation. The backend lives at the repository root under `src/`, while the admin/frontend experience is located in `frontend/`. Both layers depend on external infrastructure such as PostgreSQL for persistence and Apache Kafka for asynchronous messaging.
+The Launcx monorepo hosts the payments backend (Node.js/Express + Prisma) alongside the Next.js frontend dashboard and the shared developer documentation. The backend lives at the repository root under `src/`, while the admin/frontend experience is located in `frontend/`. Both layers depend on external infrastructure such as PostgreSQL for persistence and Apache Kafka for asynchronous messaging. A high-level overview of how these pieces connect is documented in [docs/architecture.md](docs/architecture.md).
 
 See the service-specific docs in [`docs/services`](docs/services) as well as the deployment guide in [`docs/deployment.md`](docs/deployment.md) for detailed API contracts, infrastructure guidance, and operational notes.
 
@@ -88,6 +88,7 @@ Frontend tests (if configured) should be executed from the `frontend/` directory
 
 ## Additional Documentation
 
+- [`docs/architecture.md`](docs/architecture.md) – System overview, component responsibilities, and end-to-end payment/withdrawal flows.
 - [`docs/services`](docs/services) – API specs, data contracts, and per-service environment variables.
 - [`docs/events.md`](docs/events.md) – Kafka topics and event payloads.
 - [`docs/observability.md`](docs/observability.md) – Logging, tracing, and alerting conventions.

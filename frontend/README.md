@@ -6,6 +6,8 @@ This package contains the Launcx web dashboard that serves three primary surface
 
 All UI flows consume the payments backend that runs from the repository root. HTTP calls are funneled through `src/lib/apiClient.ts`, which reads the `NEXT_PUBLIC_API_URL` environment variable to locate the Express API (e.g. `http://localhost:3001/api/v1`). Checkout result pages additionally use `NEXT_PUBLIC_MERCHANT_URL` to redirect customers back to a merchant site after a payment is processed. 【F:frontend/src/lib/apiClient.ts†L1-L110】【F:frontend/src/pages/payment-success.tsx†L1-L11】
 
+For a system-level view of how the dashboard interacts with the backend, review [`../docs/architecture.md`](../docs/architecture.md).
+
 ## Local Development
 
 1. **Install dependencies**
