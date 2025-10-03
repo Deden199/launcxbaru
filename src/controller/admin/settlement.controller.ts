@@ -6,7 +6,10 @@ import { startSettlementJob, getSettlementJob } from '../../worker/settlementJob
 
 export async function manualSettlement(req: AuthRequest, res: Response) {
   resetSettlementState()
-  const result = await runManualSettlement()
+  const actor = req.userId ?? 'admin'
+  const result = await runManualSettlement({
+    context: { actor, trigger: 'manual', jobId: `manual:${Date.now()}` },
+  })
   restartSettlementChecker('')
   if (req.userId) {
     await logAdminAction(req.userId, 'manualSettlement', null, result)
@@ -15,7 +18,7 @@ export async function manualSettlement(req: AuthRequest, res: Response) {
 }
 
 export async function startSettlement(req: AuthRequest, res: Response) {
-  const jobId = startSettlementJob()
+  const jobId = startSettlementJob({ actor: req.userId ?? 'admin' })
   if (req.userId) {
     await logAdminAction(req.userId, 'manualSettlementStart', null, { jobId })
   }
