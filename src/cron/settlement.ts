@@ -3,6 +3,8 @@ import axios from 'axios'
 import https from 'https'
 import os from 'os'
 import pLimit from 'p-limit'
+import { utcToZonedTime } from 'date-fns-tz'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
 import crypto from 'crypto'
@@ -11,15 +13,18 @@ import { sendTelegramMessage } from '../core/telegram.axios'
 import { tryAdvisoryLock, releaseAdvisoryLock } from '../util/dbLock'
 import { computeSettlement } from '../service/feeSettlement'
 import { postBalanceMovement } from '../service/billing'
+import type { ManualSettlementFilters } from '../types/manualSettlement'
 
 // ————————— CONFIG —————————
 const BATCH_SIZE = 1500                          // jumlah order PAID diproses per batch
+export const MANUAL_SETTLEMENT_BATCH_SIZE = BATCH_SIZE
 const HTTP_CONCURRENCY = Math.max(10, os.cpus().length * 2)
 const DB_CONCURRENCY   = Number(process.env.DB_CONCURRENCY ?? os.cpus().length) // parallel DB transactions
 const WORKER_CONCURRENCY = Number(process.env.SETTLEMENT_WORKERS ?? 1)
 const DB_TX_TIMEOUT_MS = Number(process.env.SETTLEMENT_DB_TX_TIMEOUT_MS ?? 15_000)
 const PARTNER_TX_CHUNK_SIZE = 50
 const SETTLEMENT_LOCK_KEY = 1_234_567_890
+const JAKARTA_TZ = 'Asia/Jakarta'
 
 type Cursor = { createdAt: Date; id: string } | null
 
@@ -121,16 +126,68 @@ type BatchResult = {
   lastCursor: Cursor;
 };
 
-// core worker: proses satu batch; return object with stats
-async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Promise<BatchResult> {
-  const manual = !!opts.manual
-  // cursor-based pagination
-  const where: any = {
-    status: 'PAID',
-    partnerClientId: { not: null },
+const ensureSortedCursor = (orders: { createdAt: Date; id: string }[]): Cursor => {
+  if (!orders.length) {
+    return null
+  }
+  const last = orders[orders.length - 1]
+  return { createdAt: last.createdAt, id: last.id }
+}
 
-    // hanya sampai cut‑off
-    ...(cutoffTime && { createdAt: { lte: cutoffTime } }),
+const isWithinDayHour = (date: Date, filters: ManualSettlementFilters) => {
+  const local = utcToZonedTime(date, filters.timezone)
+  const day = local.getDay()
+  if (!filters.daysOfWeek.includes(day)) {
+    return false
+  }
+  const hour = local.getHours()
+  return hour >= filters.hourStart && hour <= filters.hourEnd
+}
+
+const amountInRange = (amount: number, filters: ManualSettlementFilters) => {
+  if (!Number.isFinite(amount)) {
+    return false
+  }
+  if (filters.minAmount != null && Number.isFinite(filters.minAmount) && amount < (filters.minAmount ?? 0)) {
+    return false
+  }
+  if (filters.maxAmount != null && Number.isFinite(filters.maxAmount) && amount > (filters.maxAmount ?? 0)) {
+    return false
+  }
+  if (!filters.includeZeroAmount && amount <= 0) {
+    return false
+  }
+  return true
+}
+
+// core worker: proses satu batch; return object with stats
+async function processBatch(
+  cursor: Cursor,
+  opts: { manual?: boolean; filters?: ManualSettlementFilters; shouldCancel?: () => boolean } = {},
+): Promise<BatchResult> {
+  const manual = !!opts.manual
+  const filters = opts.filters
+  const shouldCancel = opts.shouldCancel
+  // cursor-based pagination
+  const where: Prisma.OrderWhereInput = {
+    status: 'PAID',
+    partnerClientId:
+      filters && filters.clientIds.length
+        ? filters.clientMode === 'exclude'
+          ? { notIn: filters.clientIds, not: null }
+          : { in: filters.clientIds }
+        : { not: null },
+
+    ...(filters
+      ? {
+          createdAt: {
+            gte: filters.startDate,
+            lte: filters.endDate,
+          },
+        }
+      : cutoffTime
+      ? { createdAt: { lte: cutoffTime } }
+      : {}),
 
     ...(cursor
       ? {
@@ -140,7 +197,22 @@ async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Pr
           ]
         }
       : {})
-  };
+  }
+
+  if (filters) {
+    if (filters.subMerchantIds.length) {
+      where.subMerchantId =
+        filters.subMerchantMode === 'exclude'
+          ? { notIn: filters.subMerchantIds }
+          : { in: filters.subMerchantIds }
+    }
+    if (filters.paymentMethods.length) {
+      where.channel =
+        filters.paymentMode === 'exclude'
+          ? { notIn: filters.paymentMethods }
+          : { in: filters.paymentMethods }
+    }
+  }
 
   const fetchedOrders = await prisma.order.findMany({
     where,
@@ -166,15 +238,39 @@ async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Pr
     return { hasMore: false, settledCount: 0, netAmount: 0, lastCursor: cursor };
   }
 
-  const last = fetchedOrders[fetchedOrders.length - 1];
-  const lastCursor: Cursor = { createdAt: last.createdAt, id: last.id };
+  const lastCursor: Cursor = ensureSortedCursor(fetchedOrders);
+
+  if (shouldCancel?.()) {
+    return { hasMore: fetchedOrders.length === BATCH_SIZE, settledCount: 0, netAmount: 0, lastCursor }
+  }
+
+  const derived = new Map<string, SettlementResult>()
+
+  const candidateOrders = fetchedOrders.filter(order => {
+    if (filters) {
+      if (!isWithinDayHour(order.createdAt, filters)) {
+        return false
+      }
+    }
+    if (manual) {
+      const settlement = deriveManualSettlement(order)
+      if (!settlement) {
+        return false
+      }
+      if (filters && !amountInRange(settlement.netAmt, filters)) {
+        return false
+      }
+      derived.set(order.id, settlement)
+    }
+    return true
+  })
 
   // Claim orders by marking them as PROCESSING so other workers skip them
   const claimLimit = pLimit(DB_CONCURRENCY);
   type PendingOrder = (typeof fetchedOrders)[number];
   const claimedOrders: PendingOrder[] = [];
   await Promise.all(
-    fetchedOrders.map(o =>
+    candidateOrders.map(o =>
       claimLimit(async () => {
         const upd = await prisma.order.updateMany({
           where: { id: o.id, status: 'PAID' },
@@ -213,7 +309,10 @@ async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Pr
           const { merchantId, secretKey } = creds;
 
           if (manual) {
-            settlementResult = deriveManualSettlement(o);
+            settlementResult = derived.get(o.id) ?? deriveManualSettlement(o);
+            if (filters && settlementResult && !amountInRange(settlementResult.netAmt, filters)) {
+              settlementResult = null
+            }
           } else if (o.channel === 'hilogate') {
             const path = `/api/v1/transactions/${o.id}`;
             const url = `${config.api.hilogate.baseUrl}${path}`;
@@ -281,8 +380,11 @@ async function processBatch(cursor: Cursor, opts: { manual?: boolean } = {}): Pr
         }
       }) : (async () => {
         try {
-          const settlementResult = deriveManualSettlement(o);
+          const settlementResult = derived.get(o.id) ?? deriveManualSettlement(o);
           if (!settlementResult) {
+            return
+          }
+          if (filters && !amountInRange(settlementResult.netAmt, filters)) {
             return
           }
           const key = o.partnerClientId!;
@@ -542,40 +644,93 @@ export function resetSettlementState() {
   cutoffTime = null;
 }
 
+type ManualSettlementProgress = {
+  settledOrders: number
+  netAmount: number
+  batchSettled: number
+  batchAmount: number
+  batchesProcessed: number
+}
+
+export type ManualSettlementRunOptions = {
+  filters?: ManualSettlementFilters
+  onProgress?: (p: ManualSettlementProgress) => void
+  shouldCancel?: () => boolean
+}
+
+export type ManualSettlementRunResult = {
+  settledOrders: number
+  netAmount: number
+  batches: number
+  cancelled: boolean
+}
+
 export async function runManualSettlement(
-  onProgress?: (p: {
-    settledOrders: number
-    netAmount: number
-    batchSettled: number
-    batchAmount: number
-  }) => void
-) {
+  optionsOrProgress?: ManualSettlementRunOptions | ((p: ManualSettlementProgress) => void),
+  maybeProgress?: (p: ManualSettlementProgress) => void,
+): Promise<ManualSettlementRunResult> {
+  const resolvedOptions: ManualSettlementRunOptions =
+    typeof optionsOrProgress === 'function'
+      ? { onProgress: optionsOrProgress }
+      : optionsOrProgress ?? {}
+  const onProgress = maybeProgress ?? resolvedOptions.onProgress
+  const filters = resolvedOptions.filters
+  const shouldCancel = resolvedOptions.shouldCancel
+
   if (!(await tryAdvisoryLock(SETTLEMENT_LOCK_KEY))) {
     logger.info('[SettlementCron] Manual settlement already running, skipping')
-    return { settledOrders: 0, netAmount: 0 }
+    return { settledOrders: 0, netAmount: 0, batches: 0, cancelled: false }
   }
   try {
-    cutoffTime = new Date()
+    cutoffTime = filters?.endDate ?? new Date()
 
     let settledOrders = 0
     let netAmount = 0
     let cursor: Cursor = null
+    let batches = 0
+    let cancelled = false
 
     while (true) {
-      const { settledCount, netAmount: na, lastCursor } = await processBatch(cursor, { manual: true })
-      if (!settledCount) break
-      settledOrders += settledCount
-      netAmount += na
-      cursor = lastCursor
-      onProgress?.({
-        settledOrders,
-        netAmount,
-        batchSettled: settledCount,
-        batchAmount: na,
+      if (shouldCancel?.()) {
+        cancelled = true
+        break
+      }
+
+      const { settledCount, netAmount: na, lastCursor, hasMore } = await processBatch(cursor, {
+        manual: true,
+        filters,
+        shouldCancel,
       })
+      batches += 1
+
+      if (settledCount > 0) {
+        settledOrders += settledCount
+        netAmount += na
+        onProgress?.({
+          settledOrders,
+          netAmount,
+          batchSettled: settledCount,
+          batchAmount: na,
+          batchesProcessed: batches,
+        })
+      } else {
+        onProgress?.({
+          settledOrders,
+          netAmount,
+          batchSettled: 0,
+          batchAmount: 0,
+          batchesProcessed: batches,
+        })
+      }
+
+      if (!hasMore || !lastCursor) {
+        break
+      }
+
+      cursor = lastCursor
     }
 
-    return { settledOrders, netAmount }
+    return { settledOrders, netAmount, batches, cancelled }
   } finally {
     await releaseAdvisoryLock(SETTLEMENT_LOCK_KEY)
   }
