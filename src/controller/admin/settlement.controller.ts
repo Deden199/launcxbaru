@@ -1,6 +1,6 @@
 import { Response } from 'express'
 import { z } from 'zod'
-import { fromZonedTime, toZonedTime } from 'date-fns-tz'
+import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../core/prisma'
 import {
@@ -313,7 +313,11 @@ const buildSettlementPreview = async (
       totalNetAmount += net
 
       if (sample.length < PREVIEW_SAMPLE_LIMIT) {
-        const local = toZonedTime(order.createdAt, filters.timezone)
+        const createdAtWib = formatInTimeZone(
+          order.createdAt,
+          filters.timezone,
+          'yyyy-MM-dd HH:mm:ssXXX',
+        )
         sample.push({
           id: order.id,
           partnerClientId: order.partnerClientId ?? null,
@@ -322,7 +326,7 @@ const buildSettlementPreview = async (
           amount: order.amount ?? 0,
           pendingAmount: order.pendingAmount ?? null,
           netAmount: net,
-          createdAt: local.toISOString(),
+          createdAt: createdAtWib,
         })
       }
     }

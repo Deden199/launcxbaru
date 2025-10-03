@@ -1,14 +1,23 @@
+process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret'
+
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import request from 'supertest'
+import { prisma } from '../src/core/prisma'
 
 // Patch runManualSettlement before loading controller
 const settlement = require('../src/cron/settlement')
 let called = 0
-settlement.runManualSettlement = async (cb?: any) => {
+settlement.runManualSettlement = async (options?: any) => {
   called++
-  cb?.({ settledOrders: 2, netAmount: 200, batchSettled: 2, batchAmount: 200, batchesProcessed: 1 })
+  options?.onProgress?.({
+    settledOrders: 2,
+    netAmount: 200,
+    batchSettled: 2,
+    batchAmount: 200,
+    batchesProcessed: 1,
+  })
   return { settledOrders: 2, netAmount: 200, batches: 1, cancelled: false }
 }
 settlement.restartSettlementChecker = () => {}
@@ -60,9 +69,36 @@ test('manual settlement runs without batches param', async () => {
 })
 
 test('preview settlement with filters', async () => {
+  const originalOrderModel = (prisma as any).order
+  let callCount = 0
+  ;(prisma as any).order = {
+    findMany: async () => {
+      if (callCount > 0) {
+        return []
+      }
+      callCount += 1
+      return [
+        {
+          id: 'order-1',
+          partnerClientId: 'pc1',
+          subMerchantId: 'sm1',
+          pendingAmount: 100,
+          amount: 150,
+          channel: 'virtual_account',
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          partnerClient: { feePercent: 0, feeFlat: 0 },
+        },
+      ]
+    },
+  }
+
   const res = await request(app).post('/settlement/preview').send({ filters: baseFilters })
   assert.equal(res.status, 200)
   assert.ok(res.body.data.preview)
+  assert.equal(res.body.data.preview.sample.length, 1)
+  assert.equal(res.body.data.preview.sample[0].createdAt, '2024-01-01 07:00:00+07:00')
+
+  ;(prisma as any).order = originalOrderModel
 })
 
 test('start and check settlement job status', async () => {
