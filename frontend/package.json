@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test src/utils/dashboard.test.ts src/utils/piroBankMap.test.ts src/tests/merchants/merchant-index.test.tsx src/tests/loan.test.tsx src/tests/settlement-adjust.test.tsx"
+    "test": "tsx --test src/utils/dashboard.test.ts src/utils/piroBankMap.test.ts src/tests/merchants/merchant-index.test.tsx src/tests/loan.test.tsx src/tests/settlement-adjust.test.tsx src/utils/datetime.test.ts"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",
