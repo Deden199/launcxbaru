@@ -147,6 +147,8 @@ function buildWhereClause(options: CleanupOptions) {
     throw new Error('startDate must be before or equal to endDate')
   }
 
+  const reversalPath = ['reversal'] as const
+
   const nullExclusions: unknown[] = [null]
 
   if (PRISMA_JSON_NULL !== undefined) {
@@ -157,15 +159,35 @@ function buildWhereClause(options: CleanupOptions) {
     nullExclusions.push(PRISMA_DB_NULL)
   }
 
+  const metadataExclusionFilters: Record<string, unknown>[] = [
+    { metadata: null },
+    { metadata: { path: reversalPath, equals: null } },
+  ]
+
+  for (const exclusion of nullExclusions) {
+    if (exclusion === null) {
+      continue
+    }
+
+    metadataExclusionFilters.push({
+      metadata: { path: reversalPath, equals: exclusion },
+    })
+
+    if (exclusion === PRISMA_JSON_NULL) {
+      metadataExclusionFilters.push({ metadata: PRISMA_JSON_NULL })
+    }
+
+    if (exclusion === PRISMA_DB_NULL) {
+      metadataExclusionFilters.push({ metadata: PRISMA_DB_NULL })
+    }
+  }
+
   const where: Record<string, unknown> = {
     loanedAt: {
       gte: start,
       lte: end,
     },
-    metadata: {
-      path: ['reversal'],
-      notIn: nullExclusions as unknown[],
-    },
+    NOT: metadataExclusionFilters,
   }
 
   if (options.subMerchantId) {
