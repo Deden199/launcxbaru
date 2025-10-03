@@ -403,7 +403,6 @@ async function processBatch(
     dbLimit(async () => {
       let settledCount = 0;
       let netAmount = 0;
-      const ledgerMovements: LedgerMovement[] = []
       const chunks = chunk(items, PARTNER_TX_CHUNK_SIZE);
       for (const chunkItems of chunks) {
         try {
@@ -430,49 +429,40 @@ async function processBatch(
                   sc++;
                   na += settlement.netAmt;
                   unsettledIds.delete(order.id);
-                  if (manual) {
-                    txLedger.push({
-                      orderId: order.id,
-                      partnerClientId: pcId,
-                      amount: settlement.netAmt
-                    })
-                  }
+                  txLedger.push({
+                    orderId: order.id,
+                    partnerClientId: pcId,
+                    amount: settlement.netAmt
+                  })
                 }
-              }
-              if (na > 0) {
-                await tx.partnerClient.update({
-                  where: { id: pcId },
-                  data: { balance: { increment: na } }
-                });
               }
               return { settledCount: sc, netAmount: na, ledgerMovements: txLedger };
             }, { timeout: DB_TX_TIMEOUT_MS })
           );
           settledCount += res.settledCount;
           netAmount += res.netAmount;
-          if (manual && res.ledgerMovements?.length) {
-            ledgerMovements.push(...res.ledgerMovements)
+          if (res.ledgerMovements?.length) {
+            await Promise.all(
+              res.ledgerMovements.map(movement =>
+                postBalanceMovement({
+                  partnerClientId: movement.partnerClientId,
+                  amount: movement.amount,
+                  reference: `SETTLE:${movement.orderId}`,
+                  description: manual
+                    ? `Manual settlement for order ${movement.orderId}`
+                    : `Settlement for order ${movement.orderId}`
+                }).catch(err => {
+                  logger.error(
+                    `[SettlementCron] Failed to post ledger movement for order ${movement.orderId}`,
+                    err
+                  )
+                })
+              )
+            )
           }
         } catch (err) {
           logger.error(`[SettlementCron] partnerClient ${pcId} failed:`, err);
         }
-      }
-      if (manual && ledgerMovements.length) {
-        await Promise.all(
-          ledgerMovements.map(movement =>
-            postBalanceMovement({
-              partnerClientId: movement.partnerClientId,
-              amount: movement.amount,
-              reference: `SETTLE:${movement.orderId}`,
-              description: `Manual settlement for order ${movement.orderId}`
-            }).catch(err => {
-              logger.error(
-                `[SettlementCron] Failed to post ledger movement for order ${movement.orderId}`,
-                err
-              )
-            })
-          )
-        )
       }
       return { settledCount, netAmount };
     })
