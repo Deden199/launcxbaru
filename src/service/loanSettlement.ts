@@ -1,5 +1,5 @@
 import { objectEnumValues } from '@prisma/client/runtime/library'
-import type { InputJsonValue } from '@prisma/client/runtime/library'
+import type { Prisma } from '@prisma/client'
 import moment from 'moment-timezone'
 
 import { prisma } from '../core/prisma'
@@ -336,12 +336,27 @@ const ORDER_REVERSAL_METADATA_KEYS = [
 
 const LOAN_ENTRY_REVERSAL_METADATA_KEYS = ['reversal', 'lastAction'] as const
 
-const { JsonNull: PRISMA_JSON_NULL, DbNull: PRISMA_DB_NULL } = objectEnumValues.instances
+const { JsonNull: runtimeJsonNull, DbNull: runtimeDbNull } = objectEnumValues.instances
 
-type PrismaJsonNull = typeof PRISMA_JSON_NULL
-type PrismaDbNull = typeof PRISMA_DB_NULL
+const PRISMA_JSON_NULL = runtimeJsonNull as unknown as typeof Prisma.JsonNull
+const PRISMA_DB_NULL = runtimeDbNull as unknown as typeof Prisma.DbNull
 
-type PrismaSanitizedJsonValue = InputJsonValue | PrismaJsonNull | PrismaDbNull
+type OrderMetadataInput = Prisma.OrderUpdateInput['metadata']
+type LoanEntryMetadataInput = Prisma.LoanEntryUpdateInput['metadata']
+
+type NonNullableOrderMetadata = Exclude<OrderMetadataInput, null | undefined>
+type NonNullableLoanEntryMetadata = Exclude<LoanEntryMetadataInput, null | undefined>
+
+export type PrismaSanitizedJsonValue =
+  | NonNullableOrderMetadata
+  | NonNullableLoanEntryMetadata
+  | typeof Prisma.JsonNull
+  | typeof Prisma.DbNull
+
+export const coercePrismaJsonInput = (
+  value: PrismaSanitizedJsonValue,
+): Prisma.OrderUpdateInput['metadata'] & Prisma.LoanEntryUpdateInput['metadata'] =>
+  value as Prisma.OrderUpdateInput['metadata'] & Prisma.LoanEntryUpdateInput['metadata']
 
 type SanitizedMetadataResult = {
   sanitized: PrismaSanitizedJsonValue
@@ -426,11 +441,11 @@ const buildCleanupReversalWhere = ({
 
   const nullExclusions: unknown[] = [null]
 
-  if (PRISMA_JSON_NULL !== undefined) {
+  if (runtimeJsonNull !== undefined) {
     nullExclusions.push(PRISMA_JSON_NULL)
   }
 
-  if (PRISMA_DB_NULL !== undefined) {
+  if (runtimeDbNull !== undefined) {
     nullExclusions.push(PRISMA_DB_NULL)
   }
 
@@ -486,7 +501,10 @@ export async function cleanupReversalMetadata(
       if (!dryRun) {
         await prisma.order.update({
           where: { id: order.id },
-          data: { metadata: sanitizedOrderMetadata, loanedAt: null },
+          data: {
+            metadata: coercePrismaJsonInput(sanitizedOrderMetadata),
+            loanedAt: null,
+          },
         })
       }
 
@@ -499,7 +517,7 @@ export async function cleanupReversalMetadata(
         if (changed && !dryRun) {
           await prisma.loanEntry.update({
             where: { id: order.loanEntry.id },
-            data: { metadata: sanitizedLoanEntryMetadata },
+            data: { metadata: coercePrismaJsonInput(sanitizedLoanEntryMetadata) },
           })
         }
       }
