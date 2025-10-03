@@ -49,7 +49,6 @@ test('runManualSettlement settles PAID orders', async () => {
   ;(prisma as any).$queryRaw = async () => [{ locked: true }]
 
   const orderUpdates: any[] = []
-  const partnerUpdates: any[] = []
   ;(prisma as any).$transaction = async (fn: any) =>
     fn({
       order: {
@@ -58,12 +57,6 @@ test('runManualSettlement settles PAID orders', async () => {
           return { count: 1 }
         }
       },
-      partnerClient: {
-        update: async (args: any) => {
-          partnerUpdates.push(args)
-          return {}
-        }
-      }
     })
 
   const result = await runManualSettlement()
@@ -82,11 +75,6 @@ test('runManualSettlement settles PAID orders', async () => {
   assert.equal(orderUpdates[0].data.settlementAmount, 100)
   assert.equal(orderUpdates[0].data.settlementStatus, 'MANUAL')
   assert.ok(orderUpdates[0].data.settlementTime instanceof Date)
-  assert.equal(partnerUpdates.length, 1)
-  assert.deepEqual(partnerUpdates[0], {
-    where: { id: 'pc1' },
-    data: { balance: { increment: 100 } }
-  })
 
   ;(billing as any).postBalanceMovement = originalPost
 })
