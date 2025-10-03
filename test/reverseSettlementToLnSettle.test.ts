@@ -2,8 +2,22 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import request from 'supertest'
+import { Prisma } from '@prisma/client'
+import { objectEnumValues } from '@prisma/client/runtime/library'
 
 process.env.JWT_SECRET = 'test'
+
+const PRISMA_NULL_TYPES = (Prisma as unknown as {
+  NullTypes?: { JsonNull?: unknown; DbNull?: unknown }
+}).NullTypes
+
+const PRISMA_JSON_NULL =
+  (Prisma as unknown as { JsonNull?: unknown }).JsonNull ?? PRISMA_NULL_TYPES?.JsonNull
+const PRISMA_DB_NULL =
+  (Prisma as unknown as { DbNull?: unknown }).DbNull ?? PRISMA_NULL_TYPES?.DbNull
+
+const RUNTIME_JSON_NULL = objectEnumValues?.instances?.JsonNull
+const RUNTIME_DB_NULL = objectEnumValues?.instances?.DbNull
 
 const prismaPath = require.resolve('../src/core/prisma')
 const prismaMock: any = {
@@ -83,6 +97,77 @@ function createCleanupApp() {
     cleanupReversalMetadataHandler(req as any, res)
   })
   return app
+}
+
+function assertCleanupWhereFilters(where: any) {
+  assert.ok(where)
+  const jsonNullValue = RUNTIME_JSON_NULL ?? PRISMA_JSON_NULL ?? null
+  assert.deepEqual(where.metadata, {
+    path: ['reversal'],
+    not: jsonNullValue,
+  })
+
+  const metadataClauses = Array.isArray(where?.NOT)
+    ? where.NOT.filter(
+        (clause: any) => clause && Object.prototype.hasOwnProperty.call(clause, 'metadata'),
+      )
+    : []
+
+  assert.ok(metadataClauses.length >= 2)
+
+  for (const clause of metadataClauses) {
+    const metadataFilter = clause.metadata
+    assert.ok(metadataFilter && typeof metadataFilter === 'object')
+    assert.ok(Object.keys(metadataFilter).length > 0)
+  }
+
+  assert.ok(
+    metadataClauses.some(
+      (clause: any) => clause.metadata?.equals === null,
+    ),
+  )
+
+  assert.ok(
+    metadataClauses.some(
+      (clause: any) =>
+        clause.metadata?.path?.[0] === 'reversal' && clause.metadata?.equals === null,
+    ),
+  )
+
+  const jsonNullFilterValue = RUNTIME_JSON_NULL ?? PRISMA_JSON_NULL
+  if (jsonNullFilterValue !== undefined) {
+    assert.ok(
+      metadataClauses.some(
+        (clause: any) => clause.metadata?.equals === jsonNullFilterValue,
+      ),
+    )
+
+    assert.ok(
+      metadataClauses.some(
+        (clause: any) =>
+          clause.metadata?.path?.[0] === 'reversal' &&
+          clause.metadata?.equals === jsonNullFilterValue,
+      ),
+    )
+
+  }
+
+  const dbNullFilterValue = RUNTIME_DB_NULL ?? PRISMA_DB_NULL
+  if (dbNullFilterValue !== undefined) {
+    assert.ok(
+      metadataClauses.some(
+        (clause: any) => clause.metadata?.equals === dbNullFilterValue,
+      ),
+    )
+
+    assert.ok(
+      metadataClauses.some(
+        (clause: any) =>
+          clause.metadata?.path?.[0] === 'reversal' &&
+          clause.metadata?.equals === dbNullFilterValue,
+      ),
+    )
+  }
 }
 
 test('processes hundreds of reversals in limited batches', { concurrency: 1 }, async () => {
@@ -586,21 +671,18 @@ test('preview cleanup reversal metadata returns affected order ids without persi
   assert.deepEqual(res.body.updatedOrderIds, ['order-1', 'order-2'])
   assert.equal(orderUpdateCalls, 0)
   assert.deepEqual(capturedWhere.subMerchantId, 'sub-1')
-  assert.ok(Array.isArray(capturedWhere.NOT))
-  assert.ok(
-    capturedWhere.NOT?.some(
-      (clause: any) =>
-        clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === null,
-    ),
-  )
-  })
+  assertCleanupWhereFilters(capturedWhere)
+})
 
 test('cleanup reversal metadata resets loanedAt and logs admin action', async () => {
   const prisma = require.cache[prismaPath].exports.prisma
   const updates: any[] = []
   const loanEntryUpdates: any[] = []
+  let capturedWhere: any = null
 
-  prisma.order.findMany = async () => [
+  prisma.order.findMany = async (args: any) => {
+    capturedWhere = args?.where
+    return [
     {
       id: 'order-cleanup',
       metadata: {
@@ -615,6 +697,7 @@ test('cleanup reversal metadata resets loanedAt and logs admin action', async ()
       },
     },
   ]
+  }
 
   prisma.order.update = async (args: any) => {
     updates.push(args)
@@ -640,6 +723,7 @@ test('cleanup reversal metadata resets loanedAt and logs admin action', async ()
   assert.equal(res.body.cleaned, 1)
   assert.equal(res.body.dryRun, false)
   assert.deepEqual(res.body.updatedOrderIds, ['order-cleanup'])
+  assertCleanupWhereFilters(capturedWhere)
 
   assert.equal(updates.length, 1)
   assert.deepEqual(updates[0], {
