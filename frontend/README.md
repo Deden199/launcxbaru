@@ -1,40 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+This package contains the Launcx web dashboard that serves three primary surfaces:
 
-## Getting Started
+- **Client dashboard** – customer self-service flows such as balance views and settlement uploads live under `src/pages/client/*`.
+- **Admin dashboard** – internal tooling for operations teams, exposed from `src/pages/admin/*`.
+- **Hosted checkout** – the public-facing payment experience rendered from `src/pages/checkout.tsx` and the related success/failure status pages.
 
-First, run the development server:
+All UI flows consume the payments backend that runs from the repository root. HTTP calls are funneled through `src/lib/apiClient.ts`, which reads the `NEXT_PUBLIC_API_URL` environment variable to locate the Express API (e.g. `http://localhost:3001/api/v1`). Checkout result pages additionally use `NEXT_PUBLIC_MERCHANT_URL` to redirect customers back to a merchant site after a payment is processed. 【F:frontend/src/lib/apiClient.ts†L1-L110】【F:frontend/src/pages/payment-success.tsx†L1-L11】
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Local Development
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. **Install dependencies**
+   ```bash
+   npm install
+   cd frontend && npm install
+   ```
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+2. **Configure environment variables** – create `frontend/.env.local` with the base backend URLs that should be exposed to the browser. A minimal setup looks like:
+   ```bash
+   cp .env.local.example .env.local # if the example file exists
+   # otherwise create the file with the following keys:
+   NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
+   NEXT_PUBLIC_MERCHANT_URL=http://localhost:3000
+   ```
+   The backend development server listens on port **3001** by default (see the root README), while this Next.js app serves the dashboard on port **3000**.
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+3. **Start the frontend**
+   ```bash
+   npm run dev
+   ```
+   The site becomes available at [http://localhost:3000](http://localhost:3000). Log in with demo credentials from the backend seed scripts or use the checkout link directly.
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+## Project Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` – start the Next.js development server with hot module reloading.
+- `npm run build` – build the production bundle. Use this before deploying.
+- `npm run start` – serve the production build locally.
+- `npm run lint` – run the Next.js ESLint configuration.
+- `npm run test` – execute the colocated unit/integration tests under `src/tests` and `src/utils` using `tsx --test`.
 
-## Learn More
+## Application Entry Points
 
-To learn more about Next.js, take a look at the following resources:
+- `src/pages/client/*` – authenticated client dashboard routes (login, overview, disbursements, etc.).
+- `src/pages/admin/*` – staff-facing administration console for merchants, users, and balances.
+- `src/pages/super-admin/*` – elevated tooling for platform operators.
+- `src/pages/checkout.tsx` plus `payment-success.tsx`, `payment-failure.tsx`, and `payment-expired.tsx` – hosted checkout workflow for external customers.
+- `src/pages/api/*` – Next.js API routes (primarily for local mocks and utilities).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+## Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `src/components/` – reusable UI building blocks, tables, forms, and layout primitives shared across dashboards.
+- `src/hooks/` – React hooks that wrap API calls, authentication state, and shared side effects.
+- `src/lib/` – HTTP clients and auxiliary libraries for formatting data or integrating with third-party services.
+- `src/utils/` – general utility functions (e.g., date helpers, dashboard calculations) and their associated tests.
+- `src/styles/` – Tailwind CSS configuration and global style sheets.
+- `src/types/` – TypeScript models mirroring backend payloads.
 
-## Deploy on Vercel
+## Storybook & E2E Testing
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+- Storybook: **TODO** – no Storybook configuration is present yet; add one if component previews become necessary.
+- End-to-end tests: **TODO** – there is currently no Cypress/Playwright setup. Document or implement an E2E suite before relying on automated browser tests.
