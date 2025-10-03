@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useRequireAuth } from '@/hooks/useAuth'
+import { formatDateTimeInWIB } from '@/utils/datetime'
 
 type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -626,7 +627,7 @@ export default function ManualSettlementPage() {
                               <td className="px-3 py-2 text-right text-xs text-neutral-400">
                                 {order.pendingAmount != null ? formatCurrency(order.pendingAmount) : '—'}
                               </td>
-                              <td className="px-3 py-2 text-xs text-neutral-400">{order.createdAt}</td>
+                              <td className="px-3 py-2 text-xs text-neutral-400">{formatDateTimeInWIB(order.createdAt)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -727,11 +728,11 @@ export default function ManualSettlementPage() {
                 <div className="grid gap-2">
                   <div>
                     <span className="font-semibold text-neutral-200">Dibuat:</span>{' '}
-                    {new Date(status.createdAt).toLocaleString('id-ID')}
+                    {formatDateTimeInWIB(status.createdAt)}
                   </div>
                   <div>
                     <span className="font-semibold text-neutral-200">Update Terakhir:</span>{' '}
-                    {new Date(status.updatedAt).toLocaleString('id-ID')}
+                    {formatDateTimeInWIB(status.updatedAt)}
                   </div>
                   {status.error && (
                     <div>

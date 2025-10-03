@@ -377,6 +377,7 @@ test('starts loan settlement job and polls until completion', async () => {
     subMerchantId: 'sub-1',
     startDate: toWibIso(start),
     endDate: toWibIso(end),
+    dryRun: false,
     note: 'Bulk job',
   })
 
