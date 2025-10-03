@@ -48,6 +48,8 @@ import * as adminLog from '../src/util/adminLog'
 const {
   reverseSettlementToLnSettle,
   getEligibleSettlements,
+  previewCleanupReversalMetadata,
+  cleanupReversalMetadataHandler,
 } = require('../src/controller/admin/settlementAdjustment.controller')
 
 function createApp() {
@@ -65,6 +67,20 @@ function createEligibleApp() {
   app.get('/admin/settlement/eligible', (req, res) => {
     ;(req as any).userId = 'admin1'
     getEligibleSettlements(req as any, res)
+  })
+  return app
+}
+
+function createCleanupApp() {
+  const app = express()
+  app.use(express.json())
+  app.get('/admin/settlement/cleanup-reversal/preview', (req, res) => {
+    ;(req as any).userId = 'admin1'
+    previewCleanupReversalMetadata(req as any, res)
+  })
+  app.post('/admin/settlement/cleanup-reversal', (req, res) => {
+    ;(req as any).userId = 'admin1'
+    cleanupReversalMetadataHandler(req as any, res)
   })
   return app
 }
@@ -527,4 +543,117 @@ test('persists loan entry metadata alongside reversal updates', { concurrency: 1
   assert.equal(typeof loanEntryArgs?.update?.metadata?.reversal?.reversedAt, 'string')
 
   assert.equal(balanceAdjustment, expectedAmount)
+})
+
+test('preview cleanup reversal metadata returns affected order ids without persisting', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+
+  let capturedWhere: any = null
+  let orderUpdateCalls = 0
+
+  prisma.order.findMany = async (args: any) => {
+    capturedWhere = args?.where
+    return [
+      {
+        id: 'order-1',
+        metadata: { reversal: { reason: 'loan' }, keep: true },
+        loanedAt: new Date('2024-05-01T02:00:00Z'),
+        loanEntry: null,
+      },
+      {
+        id: 'order-2',
+        metadata: { reversal: true, previousStatus: 'DONE', keep: 'value' },
+        loanedAt: new Date('2024-05-01T04:00:00Z'),
+        loanEntry: { id: 'loan-entry-1', metadata: { reversal: { note: 'x' } } },
+      },
+    ]
+  }
+
+  prisma.order.update = async () => {
+    orderUpdateCalls += 1
+    return {}
+  }
+
+  const app = createCleanupApp()
+  const res = await request(app)
+    .get('/admin/settlement/cleanup-reversal/preview')
+    .query({ startDate: '2024-05-01', endDate: '2024-05-02', subMerchantId: 'sub-1' })
+
+  assert.equal(res.status, 200)
+  assert.equal(res.body.total, 2)
+  assert.equal(res.body.cleaned, 2)
+  assert.equal(res.body.dryRun, true)
+  assert.deepEqual(res.body.updatedOrderIds, ['order-1', 'order-2'])
+  assert.equal(orderUpdateCalls, 0)
+  assert.deepEqual(capturedWhere.subMerchantId, 'sub-1')
+  assert.deepEqual(capturedWhere.metadata?.path, ['reversal'])
+})
+
+test('cleanup reversal metadata resets loanedAt and logs admin action', async () => {
+  const prisma = require.cache[prismaPath].exports.prisma
+  const updates: any[] = []
+  const loanEntryUpdates: any[] = []
+
+  prisma.order.findMany = async () => [
+    {
+      id: 'order-cleanup',
+      metadata: {
+        reversal: { reason: 'loan' },
+        previousSettlementAmount: 200,
+        keep: 'value',
+      },
+      loanedAt: new Date('2024-05-01T01:00:00Z'),
+      loanEntry: {
+        id: 'loan-entry-cleanup',
+        metadata: { reversal: { reason: 'loan' }, lastAction: 'reverseSettlementToLnSettle', keep: true },
+      },
+    },
+  ]
+
+  prisma.order.update = async (args: any) => {
+    updates.push(args)
+    return {}
+  }
+
+  prisma.loanEntry.update = async (args: any) => {
+    loanEntryUpdates.push(args)
+    return {}
+  }
+
+  let logged: any = null
+  ;(adminLog as any).logAdminAction = async (userId: string, action: string, _ctx: any, meta: any) => {
+    logged = { userId, action, meta }
+  }
+
+  const app = createCleanupApp()
+  const res = await request(app)
+    .post('/admin/settlement/cleanup-reversal')
+    .send({ startDate: '2024-05-01', endDate: '2024-05-02' })
+
+  assert.equal(res.status, 200)
+  assert.equal(res.body.cleaned, 1)
+  assert.equal(res.body.dryRun, false)
+  assert.deepEqual(res.body.updatedOrderIds, ['order-cleanup'])
+
+  assert.equal(updates.length, 1)
+  assert.deepEqual(updates[0], {
+    where: { id: 'order-cleanup' },
+    data: {
+      metadata: { keep: 'value' },
+      loanedAt: null,
+    },
+  })
+
+  assert.equal(loanEntryUpdates.length, 1)
+  assert.deepEqual(loanEntryUpdates[0], {
+    where: { id: 'loan-entry-cleanup' },
+    data: { metadata: { keep: true } },
+  })
+
+  assert.ok(logged)
+  assert.equal(logged.userId, 'admin1')
+  assert.equal(logged.action, 'cleanupReversalMetadata')
+  assert.deepEqual(logged.meta.updatedOrderIds, ['order-cleanup'])
+  assert.equal(logged.meta.startDate, '2024-05-01')
+  assert.equal(logged.meta.endDate, '2024-05-02')
 })

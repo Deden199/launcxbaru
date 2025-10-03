@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import moment from 'moment-timezone'
 
 import { prisma } from '../core/prisma'
@@ -320,6 +321,176 @@ export function normalizeMetadata(value: unknown): Record<string, any> {
     return { ...(value as Record<string, any>) }
   }
   return {}
+}
+
+const ORDER_REVERSAL_METADATA_KEYS = [
+  'reversal',
+  'previousStatus',
+  'previousSettlementTime',
+  'previousSettlementAmount',
+  'reason',
+  'reversedAt',
+  'reversedBy',
+] as const
+
+const LOAN_ENTRY_REVERSAL_METADATA_KEYS = ['reversal', 'lastAction'] as const
+
+const PRISMA_JSON_NULL = (Prisma as unknown as { JsonNull?: unknown }).JsonNull
+
+type SanitizedMetadataResult = {
+  sanitized: unknown
+  changed: boolean
+}
+
+const sanitizeObjectMetadata = (
+  metadata: unknown,
+  keysToRemove: readonly string[],
+): SanitizedMetadataResult => {
+  if (metadata === null || metadata === undefined) {
+    return { sanitized: metadata ?? null, changed: false }
+  }
+
+  if (PRISMA_JSON_NULL !== undefined && metadata === PRISMA_JSON_NULL) {
+    return { sanitized: PRISMA_JSON_NULL, changed: false }
+  }
+
+  if (Array.isArray(metadata) || typeof metadata !== 'object') {
+    return { sanitized: metadata, changed: false }
+  }
+
+  const clone = { ...(metadata as Record<string, unknown>) }
+  let changed = false
+
+  for (const key of keysToRemove) {
+    if (key in clone) {
+      delete clone[key]
+      changed = true
+    }
+  }
+
+  return { sanitized: clone, changed }
+}
+
+export type CleanupReversalMetadataOptions = {
+  startDate: string
+  endDate: string
+  subMerchantId?: string
+  dryRun?: boolean
+}
+
+export type CleanupReversalMetadataResult = {
+  total: number
+  cleaned: number
+  failed: { orderId: string; message?: string }[]
+  updatedOrderIds: string[]
+  dryRun: boolean
+}
+
+type OrderWithReversalMetadata = {
+  id: string
+  metadata: unknown
+  loanedAt: Date | null
+  loanEntry: {
+    id: string
+    metadata: unknown
+  } | null
+}
+
+const buildCleanupReversalWhere = ({
+  startDate,
+  endDate,
+  subMerchantId,
+}: CleanupReversalMetadataOptions) => {
+  const start = toStartOfDayWib(startDate)
+  const end = toEndOfDayWib(endDate)
+
+  if (start.getTime() > end.getTime()) {
+    throw new Error('startDate must be before or equal to endDate')
+  }
+
+  const where: Record<string, unknown> = {
+    loanedAt: {
+      gte: start,
+      lte: end,
+    },
+    metadata: {
+      path: ['reversal'],
+      not: (PRISMA_JSON_NULL ?? null) as unknown,
+    },
+  }
+
+  if (subMerchantId) {
+    where.subMerchantId = subMerchantId
+  }
+
+  return { where }
+}
+
+export async function cleanupReversalMetadata(
+  options: CleanupReversalMetadataOptions,
+): Promise<CleanupReversalMetadataResult> {
+  const dryRun = options.dryRun ?? false
+  const { where } = buildCleanupReversalWhere(options)
+
+  const orders = (await prisma.order.findMany({
+    where,
+    select: {
+      id: true,
+      metadata: true,
+      loanedAt: true,
+      loanEntry: {
+        select: {
+          id: true,
+          metadata: true,
+        },
+      },
+    },
+  })) as OrderWithReversalMetadata[]
+
+  const failed: { orderId: string; message?: string }[] = []
+  const updatedOrderIds: string[] = []
+
+  for (const order of orders) {
+    try {
+      const { sanitized: sanitizedOrderMetadata } = sanitizeObjectMetadata(
+        order.metadata,
+        ORDER_REVERSAL_METADATA_KEYS,
+      )
+
+      if (!dryRun) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { metadata: sanitizedOrderMetadata as unknown, loanedAt: null },
+        })
+      }
+
+      if (order.loanEntry && order.loanEntry.id) {
+        const { sanitized: sanitizedLoanEntryMetadata, changed } = sanitizeObjectMetadata(
+          order.loanEntry.metadata,
+          LOAN_ENTRY_REVERSAL_METADATA_KEYS,
+        )
+
+        if (changed && !dryRun) {
+          await prisma.loanEntry.update({
+            where: { id: order.loanEntry.id },
+            data: { metadata: sanitizedLoanEntryMetadata as unknown },
+          })
+        }
+      }
+
+      updatedOrderIds.push(order.id)
+    } catch (err) {
+      failed.push({ orderId: order.id, message: err instanceof Error ? err.message : undefined })
+    }
+  }
+
+  return {
+    total: orders.length,
+    cleaned: updatedOrderIds.length,
+    failed,
+    updatedOrderIds,
+    dryRun,
+  }
 }
 
 export async function applyLoanSettlementUpdates({

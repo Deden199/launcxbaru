@@ -20,6 +20,8 @@ if (typeof window !== 'undefined') {
 const WIB = 'Asia/Jakarta'
 const DEFAULT_PAGE_SIZE = 1500
 const DATEPICKER_PORTAL_ID = 'datepicker-portal'
+const CLEANUP_PREVIEW_PATH = '/admin/settlement/cleanup-reversal/preview'
+const CLEANUP_EXECUTE_PATH = '/admin/settlement/cleanup-reversal'
 
 function parseJwt(token: string) {
   try {
@@ -60,6 +62,14 @@ type ToastState =
   | { type: 'error'; title: string; message: string; detail?: string }
   | { type: 'warning'; title: string; message: string; detail?: string }
   | null
+
+type CleanupSummaryResponse = {
+  total: number
+  cleaned: number
+  failed: { orderId?: string; message?: string }[]
+  updatedOrderIds: string[]
+  dryRun: boolean
+}
 
 // Pakai strategy: 'fixed' agar tidak terpengaruh transform/overflow parent
 function formatCurrency(value: number) {
@@ -403,6 +413,287 @@ export function SettlementAdjustJobControl({
         </div>
       )}
     </div>
+  )
+}
+
+export interface ReversalCleanupPanelProps {
+  subMerchants: SubMerchantOption[]
+  loadingSubMerchants?: boolean
+  subMerchantError?: string
+  defaultRange: [Date | null, Date | null]
+  isAdmin: boolean
+  onToast?: (toast: ToastState) => void
+  apiClient?: typeof api
+}
+
+function formatDateForCleanup(date: Date) {
+  return dayjs(date).tz(WIB, true).format('YYYY-MM-DD')
+}
+
+export function ReversalCleanupPanel({
+  subMerchants,
+  loadingSubMerchants = false,
+  subMerchantError = '',
+  defaultRange,
+  isAdmin,
+  onToast,
+  apiClient = api,
+}: ReversalCleanupPanelProps) {
+  const [selectedSubMerchant, setSelectedSubMerchant] = useState('')
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>(defaultRange)
+  const [pickerRange, setPickerRange] = useState<[Date | null, Date | null]>(defaultRange)
+  const [preview, setPreview] = useState<CleanupSummaryResponse | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setDateRange(defaultRange)
+    setPickerRange(defaultRange)
+  }, [defaultRange])
+
+  const hasRange = Boolean(dateRange[0] && dateRange[1])
+
+  const buildParams = () => {
+    const [start, end] = dateRange
+    if (!start || !end) {
+      throw new Error('Pilih rentang tanggal terlebih dahulu')
+    }
+
+    const params: Record<string, string> = {
+      startDate: formatDateForCleanup(start),
+      endDate: formatDateForCleanup(end),
+    }
+    if (selectedSubMerchant) {
+      params.subMerchantId = selectedSubMerchant
+    }
+    return params
+  }
+
+  const handlePreview = async () => {
+    try {
+      setError('')
+      setLoadingPreview(true)
+      const params = buildParams()
+      const { data } = await apiClient.get<CleanupSummaryResponse>(CLEANUP_PREVIEW_PATH, {
+        params,
+      })
+      const response = data ?? {
+        total: 0,
+        cleaned: 0,
+        failed: [],
+        updatedOrderIds: [],
+        dryRun: true,
+      }
+      setPreview(response)
+      onToast?.({
+        type: 'success',
+        title: 'Preview cleanup berhasil',
+        message: `${response.total} order ditemukan untuk dibersihkan`,
+      })
+    } catch (err: any) {
+      const message = err?.response?.data?.error ?? err?.message ?? 'Gagal melakukan preview cleanup'
+      setError(message)
+      setPreview(null)
+      onToast?.({ type: 'error', title: 'Preview cleanup gagal', message })
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  const handleCleanup = async () => {
+    try {
+      setError('')
+      setSubmitting(true)
+      const params = buildParams()
+      const { data } = await apiClient.post<CleanupSummaryResponse>(
+        CLEANUP_EXECUTE_PATH,
+        params,
+      )
+      const response = data ?? {
+        total: 0,
+        cleaned: 0,
+        failed: [],
+        updatedOrderIds: [],
+        dryRun: false,
+      }
+      setPreview(response)
+      const successMessage = `${response.cleaned} order dibersihkan dari metadata reversal`
+      onToast?.({ type: 'success', title: 'Cleanup reversal selesai', message: successMessage })
+    } catch (err: any) {
+      const message = err?.response?.data?.error ?? err?.message ?? 'Gagal menjalankan cleanup'
+      setError(message)
+      onToast?.({ type: 'error', title: 'Cleanup reversal gagal', message })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const onChangeRange = (dates: [Date | null, Date | null]) => {
+    setPickerRange(dates)
+    const [start, end] = dates
+    if (start && end) {
+      setDateRange(dates)
+    }
+  }
+
+  const onResetRange = () => {
+    setDateRange(defaultRange)
+    setPickerRange(defaultRange)
+  }
+
+  const disabledPreview = !isAdmin || !hasRange || loadingPreview || submitting
+  const disabledCleanup = !isAdmin || !hasRange || submitting
+
+  return (
+    <section className="rounded-2xl border border-emerald-900/40 bg-emerald-950/40 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-emerald-950/30">
+      <div className="mb-4 flex flex-col gap-1">
+        <h2 className="text-lg font-semibold text-emerald-100">Cleanup metadata reversal</h2>
+        <p className="text-sm text-emerald-100/80">
+          Hapus jejak reversal di metadata order dan reset <code>loanedAt</code> untuk rentang tanggal
+          terpilih.
+        </p>
+      </div>
+
+      {!isAdmin && (
+        <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/60 px-3 py-2 text-xs text-emerald-200/80">
+          Hanya admin yang dapat menjalankan cleanup reversal.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,240px)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase tracking-wide text-emerald-300" htmlFor="cleanup-sub-merchant">
+            Sub-merchant (opsional)
+          </label>
+          <select
+            id="cleanup-sub-merchant"
+            value={selectedSubMerchant}
+            onChange={event => setSelectedSubMerchant(event.target.value)}
+            className="h-11 rounded-xl border border-emerald-900/50 bg-emerald-950 px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40"
+            disabled={!isAdmin}
+          >
+            <option value="">Semua sub-merchant</option>
+            {subMerchants.map(sub => (
+              <option key={sub.id} value={sub.id}>
+                {sub.name ?? sub.id}
+              </option>
+            ))}
+          </select>
+          {loadingSubMerchants && (
+            <span className="text-[11px] text-emerald-200/70">Memuat daftar sub-merchant…</span>
+          )}
+          {subMerchantError && (
+            <span className="text-[11px] text-emerald-200/80">{subMerchantError}</span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs uppercase tracking-wide text-emerald-300">LoanedAt Date range</label>
+          <DatePicker
+            selectsRange
+            startDate={pickerRange[0]}
+            endDate={pickerRange[1]}
+            onChange={onChangeRange}
+            shouldCloseOnSelect={false}
+            maxDate={new Date()}
+            dateFormat="dd MMM yyyy"
+            withPortal
+            portalId={DATEPICKER_PORTAL_ID}
+            popperProps={{ strategy: 'fixed' }}
+            popperClassName="datepicker-popper"
+            calendarClassName="dp-dark"
+            className="h-11 w-full rounded-xl border border-emerald-900/50 bg-emerald-950 px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40"
+            disabled={!isAdmin}
+          />
+          <button
+            type="button"
+            onClick={onResetRange}
+            className="self-start text-[11px] text-emerald-200/80 underline hover:text-emerald-100"
+            disabled={!isAdmin}
+          >
+            Reset ke default
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2 md:col-span-1">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={disabledPreview}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                disabledPreview
+                  ? 'cursor-not-allowed border border-emerald-900/40 bg-emerald-950/40 text-emerald-200/60'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-500'
+              }`}
+            >
+              {loadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Preview cleanup
+            </button>
+            <button
+              type="button"
+              onClick={handleCleanup}
+              disabled={disabledCleanup}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                disabledCleanup
+                  ? 'cursor-not-allowed border border-emerald-900/40 bg-emerald-950/40 text-emerald-200/60'
+                  : 'bg-emerald-500 text-white hover:bg-emerald-400'
+              }`}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Jalankan cleanup
+            </button>
+          </div>
+          <span className="text-[11px] text-emerald-200/70">
+            Preview maupun cleanup mempertimbangkan <code>loanedAt</code> dalam zona waktu WIB.
+          </span>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border border-rose-900/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {preview && (
+        <div className="mt-4 space-y-3 rounded-xl border border-emerald-900/60 bg-emerald-950/50 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-emerald-100">
+            <div>
+              Ditemukan {preview.total.toLocaleString('id-ID')} order.{' '}
+              {preview.dryRun
+                ? 'Ini hanya preview, tidak ada perubahan yang disimpan.'
+                : `${preview.cleaned.toLocaleString('id-ID')} order telah dibersihkan.`}
+            </div>
+          </div>
+          {preview.updatedOrderIds.length > 0 && (
+            <div className="space-y-1 text-xs text-emerald-100/80">
+              <div className="uppercase tracking-wide text-emerald-300">Order IDs</div>
+              <ul className="grid grid-cols-1 gap-1 font-mono text-[11px] sm:grid-cols-2 lg:grid-cols-3">
+                {preview.updatedOrderIds.map(id => (
+                  <li key={id}>{id}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {preview.failed.length > 0 && (
+            <div className="space-y-1 text-xs text-amber-200">
+              <div className="uppercase tracking-wide text-amber-300">Order gagal dibersihkan</div>
+              <ul className="space-y-1">
+                {preview.failed.map((item, index) => (
+                  <li key={`${item.orderId ?? 'failed'}-${index}`}>
+                    <span className="font-mono text-amber-100">{item.orderId ?? '—'}</span>:
+                    {' '}
+                    {item.message ?? 'Terjadi kesalahan saat membersihkan order ini'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -853,6 +1144,17 @@ export default function SettlementAdjustPage() {
             onJobFinished={() => fetchRows(1)}
           />
         </section>
+
+        {isAdmin && (
+          <ReversalCleanupPanel
+            subMerchants={subMerchants}
+            loadingSubMerchants={loadingSubs}
+            subMerchantError={subsError}
+            defaultRange={defaultRange}
+            isAdmin={isAdmin}
+            onToast={setToast}
+          />
+        )}
 
         <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/70 p-5 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60">
           <div className="flex flex-wrap items-center gap-3">

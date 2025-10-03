@@ -14,6 +14,8 @@ import {
   reverseSettlementToLnSettle,
   settlementAdjustmentStatus,
   startSettlementAdjustmentJob,
+  previewCleanupReversalMetadata,
+  cleanupReversalMetadataHandler,
 } from '../../controller/admin/settlementAdjustment.controller'
 
 const router = Router()
@@ -31,6 +33,8 @@ router.post('/adjust/job', startSettlementAdjustmentJob)
 router.get('/adjust/job/:jobId', settlementAdjustmentStatus)
 router.get('/eligible', getEligibleSettlements)
 router.post('/reverse-to-ln-settle', reverseSettlementToLnSettle)
+router.get('/cleanup-reversal/preview', previewCleanupReversalMetadata)
+router.post('/cleanup-reversal', cleanupReversalMetadataHandler)
 
 export default router
 
