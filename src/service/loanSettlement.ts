@@ -1,4 +1,5 @@
-import { Prisma } from '@prisma/client'
+import { objectEnumValues } from '@prisma/client/runtime/library'
+import type { InputJsonValue } from '@prisma/client/runtime/library'
 import moment from 'moment-timezone'
 
 import { prisma } from '../core/prisma'
@@ -335,20 +336,15 @@ const ORDER_REVERSAL_METADATA_KEYS = [
 
 const LOAN_ENTRY_REVERSAL_METADATA_KEYS = ['reversal', 'lastAction'] as const
 
-const PRISMA_NULL_TYPES = (Prisma as unknown as {
-  NullTypes?: {
-    JsonNull?: unknown
-    DbNull?: unknown
-  }
-}).NullTypes
+const { JsonNull: PRISMA_JSON_NULL, DbNull: PRISMA_DB_NULL } = objectEnumValues.instances
 
-const PRISMA_JSON_NULL =
-  (Prisma as unknown as { JsonNull?: unknown }).JsonNull ?? PRISMA_NULL_TYPES?.JsonNull
-const PRISMA_DB_NULL =
-  (Prisma as unknown as { DbNull?: unknown }).DbNull ?? PRISMA_NULL_TYPES?.DbNull
+type PrismaJsonNull = typeof PRISMA_JSON_NULL
+type PrismaDbNull = typeof PRISMA_DB_NULL
+
+type PrismaSanitizedJsonValue = InputJsonValue | PrismaJsonNull | PrismaDbNull
 
 type SanitizedMetadataResult = {
-  sanitized: unknown
+  sanitized: PrismaSanitizedJsonValue
   changed: boolean
 }
 
@@ -357,15 +353,25 @@ const sanitizeObjectMetadata = (
   keysToRemove: readonly string[],
 ): SanitizedMetadataResult => {
   if (metadata === null || metadata === undefined) {
-    return { sanitized: metadata ?? null, changed: false }
+    return {
+      sanitized: PRISMA_DB_NULL,
+      changed: false,
+    }
   }
 
-  if (PRISMA_JSON_NULL !== undefined && metadata === PRISMA_JSON_NULL) {
+  if (metadata === PRISMA_JSON_NULL) {
     return { sanitized: PRISMA_JSON_NULL, changed: false }
   }
 
+  if (metadata === PRISMA_DB_NULL) {
+    return { sanitized: PRISMA_DB_NULL, changed: false }
+  }
+
   if (Array.isArray(metadata) || typeof metadata !== 'object') {
-    return { sanitized: metadata, changed: false }
+    return {
+      sanitized: metadata as PrismaSanitizedJsonValue,
+      changed: false,
+    }
   }
 
   const clone = { ...(metadata as Record<string, unknown>) }
@@ -378,7 +384,7 @@ const sanitizeObjectMetadata = (
     }
   }
 
-  return { sanitized: clone, changed }
+  return { sanitized: clone as PrismaSanitizedJsonValue, changed }
 }
 
 export type CleanupReversalMetadataOptions = {
@@ -480,7 +486,7 @@ export async function cleanupReversalMetadata(
       if (!dryRun) {
         await prisma.order.update({
           where: { id: order.id },
-          data: { metadata: sanitizedOrderMetadata as unknown, loanedAt: null },
+          data: { metadata: sanitizedOrderMetadata, loanedAt: null },
         })
       }
 
@@ -493,7 +499,7 @@ export async function cleanupReversalMetadata(
         if (changed && !dryRun) {
           await prisma.loanEntry.update({
             where: { id: order.loanEntry.id },
-            data: { metadata: sanitizedLoanEntryMetadata as unknown },
+            data: { metadata: sanitizedLoanEntryMetadata },
           })
         }
       }
