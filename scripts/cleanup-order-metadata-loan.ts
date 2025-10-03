@@ -1,26 +1,13 @@
-#!/usr/bin/env node
-/* Cleanup Order.metadata & loanedAt (WIB date filter)
- * Usage:
- *   node scripts/cleanup-order-metadata-loan.js --date=2025-09-25 --dryRun
- *   node scripts/cleanup-order-metadata-loan.js --date=2025-09-25 --confirm
- *
- * Opsi:
- *   --date=YYYY-MM-DD  atau  --start=YYYY-MM-DD --end=YYYY-MM-DD (WIB)
- *   --basis=createdAt|paymentReceivedTime|settlementTime   (default: createdAt)
- *   --subMerchantId=...   --partnerClientId=...
- *   --limit=1000          --tz=Asia/Jakarta (default)
- *   --dryRun              --confirm
- */
+#!/usr/bin/env ts-node
 
-require('dotenv/config')
+import 'dotenv/config'
+import { Prisma } from '@prisma/client'
+import { prisma } from '../src/core/prisma'
 
-// Ambil prisma instance dari repo-mu:
-const { prisma } = require('../src/core/prisma')
-// Ambil Prisma namespace dari @prisma/client untuk JsonNull:
-const { Prisma } = require('@prisma/client')
+type Args = Record<string, string | boolean | undefined>
 
-function parseArgs(argv) {
-  const out = {}
+function parseArgs(argv: string[]): Args {
+  const out: Args = {}
   for (const tok of argv) {
     if (!tok.startsWith('--')) continue
     const eq = tok.indexOf('=')
@@ -30,29 +17,35 @@ function parseArgs(argv) {
   return out
 }
 
-const args = parseArgs(process.argv.slice(2))
-const TZ = args.tz || 'Asia/Jakarta'
-const BASIS = args.basis || 'createdAt'
-const DRY_RUN = Boolean(args.dryRun)
-const CONFIRM = Boolean(args.confirm)
-const LIMIT = Number(args.limit ?? 1000) || 1000
+const args = parseArgs(process.argv.slice(2)) as any
 
-const dateOnly = args.date
-const startDateOnly = args.start
-const endDateOnly = args.end
-const subMerchantId = args.subMerchantId
-const partnerClientId = args.partnerClientId
+const TZ: string = args.tz || 'Asia/Jakarta'
+const BASIS: 'createdAt' | 'paymentReceivedTime' | 'settlementTime' =
+  (args.basis as any) || 'createdAt'
+const DRY_RUN: boolean = Boolean(args.dryRun)
+const CONFIRM: boolean = Boolean(args.confirm)
+const LIMIT: number = Number(args.limit ?? 1000) || 1000
 
-function dayRangeUtc(dateStr, tz) {
-  // Asumsi WIB (UTC+7). Jika bukan Asia/Jakarta, tetap pakai offset +7 untuk simpel.
+const dateOnly: string | undefined = args.date
+const startDateOnly: string | undefined = args.start
+const endDateOnly: string | undefined = args.end
+const subMerchantId: string | undefined = args.subMerchantId
+const partnerClientId: string | undefined = args.partnerClientId
+
+function dayRangeUtc(dateStr: string, tz: string): { start: Date; end: Date } {
   const offsetHours = tz === 'Asia/Jakarta' ? 7 : 7
-  const [y, m, d] = String(dateStr).split('-').map(Number)
+  const [y, m, d] = dateStr.split('-').map(Number)
   if (!y || !m || !d) throw new Error(`Tanggal tidak valid: ${dateStr}`)
   const startUtc = new Date(Date.UTC(y, m - 1, d, 0 - offsetHours, 0, 0, 0))
   const endUtc = new Date(Date.UTC(y, m - 1, d, 23 - offsetHours, 59, 59, 999))
   return { start: startUtc, end: endUtc }
 }
-function rangeUtcFromDates(startStr, endStr, tz) {
+
+function rangeUtcFromDates(
+  startStr: string,
+  endStr: string,
+  tz: string
+): { start: Date; end: Date } {
   const s = dayRangeUtc(startStr, tz).start
   const e = dayRangeUtc(endStr, tz).end
   if (s > e) throw new Error(`Range tanggal terbalik: ${startStr} > ${endStr}`)
@@ -66,7 +59,7 @@ if (!dateOnly && !(startDateOnly && endDateOnly)) {
 
 const { start, end } = dateOnly
   ? dayRangeUtc(dateOnly, TZ)
-  : rangeUtcFromDates(startDateOnly, endDateOnly, TZ)
+  : rangeUtcFromDates(startDateOnly!, endDateOnly!, TZ)
 
 const BASIS_FIELDS = new Set(['createdAt', 'paymentReceivedTime', 'settlementTime'])
 if (!BASIS_FIELDS.has(BASIS)) {
@@ -74,14 +67,26 @@ if (!BASIS_FIELDS.has(BASIS)) {
   process.exit(1)
 }
 
-const PRISMA_JSON_NULL = (Prisma && Prisma.JsonNull) ? Prisma.JsonNull : null
+const PRISMA_JSON_NULL =
+  (Prisma as unknown as { JsonNull?: unknown }).JsonNull ?? (null as any)
+
+type OrderLite = {
+  id: string
+  createdAt: Date
+  paymentReceivedTime: Date | null
+  settlementTime: Date | null
+  loanedAt: Date | null
+  subMerchantId: string | null
+  partnerClientId: string | null
+  metadata: any
+}
 
 async function main() {
   console.log('=== Cleanup Order.metadata & loanedAt ===')
   console.log(`WIB: ${dateOnly ? dateOnly : `${startDateOnly} s/d ${endDateOnly}`} | Basis: ${BASIS} | TZ: ${TZ}`)
   console.log(`UTC range: ${start.toISOString()} → ${end.toISOString()}`)
 
-  const whereBase = {
+  const whereBase: any = {
     AND: [
       { [BASIS]: { gte: start } },
       { [BASIS]: { lte: end } },
@@ -91,7 +96,7 @@ async function main() {
   if (subMerchantId) whereBase.AND.push({ subMerchantId })
   if (partnerClientId) whereBase.AND.push({ partnerClientId })
 
-  const candidates = await prisma.order.findMany({
+  const candidates: OrderLite[] = await prisma.order.findMany({
     where: whereBase,
     take: LIMIT,
     orderBy: { [BASIS]: 'asc' },
@@ -114,9 +119,8 @@ async function main() {
 
   console.log(`Kandidat ditemukan: ${candidates.length}`)
   for (const o of candidates.slice(0, 10)) {
-    console.log(
-      `- ${o.id} | createdAt=${o.createdAt.toISOString()} | loanedAt=${o.loanedAt ? new Date(o.loanedAt).toISOString() : '-'} | meta=${o.metadata ? 'yes' : 'null'}`
-    )
+    const la = o.loanedAt ? new Date(o.loanedAt).toISOString() : '-'
+    console.log(`- ${o.id} | createdAt=${o.createdAt.toISOString()} | loanedAt=${la} | meta=${o.metadata ? 'yes' : 'null'}`)
   }
   if (candidates.length > 10) console.log(`... dan ${candidates.length - 10} lainnya.`)
 
@@ -135,19 +139,19 @@ async function main() {
 
   for (let i = 0; i < candidates.length; i += BATCH) {
     const batch = candidates.slice(i, i + BATCH)
-    const tx = batch.map((o) =>
+    const ops = batch.map((o) =>
       prisma.order.update({
         where: { id: o.id },
         data: {
-          metadata: PRISMA_JSON_NULL, // kosongkan metadata
-          loanedAt: null,             // kosongkan loanedAt
+          metadata: PRISMA_JSON_NULL,
+          loanedAt: null,
         },
         select: { id: true },
       })
     )
+
     try {
-      // Hapus opsi kedua argumen untuk kompatibilitas typing versi kamu
-      await prisma.$transaction(tx)
+      await prisma.$transaction(ops)
       success += batch.length
       console.log(`Batch ${Math.floor(i / BATCH) + 1}: OK (${batch.length} baris) — last id: ${batch[batch.length - 1].id}`)
     } catch (err) {
