@@ -1,5 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { Prisma } from '@prisma/client'
+
+const PRISMA_NULL_TYPES = (Prisma as unknown as {
+  NullTypes?: { JsonNull?: unknown; DbNull?: unknown }
+}).NullTypes
+
+const PRISMA_JSON_NULL =
+  (Prisma as unknown as { JsonNull?: unknown }).JsonNull ?? PRISMA_NULL_TYPES?.JsonNull
+const PRISMA_DB_NULL =
+  (Prisma as unknown as { DbNull?: unknown }).DbNull ?? PRISMA_NULL_TYPES?.DbNull
 
 const prismaPath = require.resolve('../src/core/prisma')
 
@@ -85,9 +95,34 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
   assert.equal(summary.dryRun, false)
 
   assert.ok(capturedWhere)
-  assert.deepEqual(capturedWhere?.metadata?.path, ['reversal'])
-  assert.ok(Array.isArray(capturedWhere?.metadata?.notIn))
-  assert.ok(capturedWhere?.metadata?.notIn?.includes(null))
+  assert.ok(Array.isArray(capturedWhere?.NOT))
+  assert.ok(
+    capturedWhere?.NOT?.some(
+      (clause: any) => clause?.metadata === null,
+    ),
+  )
+  assert.ok(
+    capturedWhere?.NOT?.some(
+      (clause: any) =>
+        clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === null,
+    ),
+  )
+
+  if (PRISMA_JSON_NULL !== undefined) {
+    assert.ok(
+      capturedWhere?.NOT?.some(
+        (clause: any) => clause?.metadata === PRISMA_JSON_NULL,
+      ),
+    )
+  }
+
+  if (PRISMA_DB_NULL !== undefined) {
+    assert.ok(
+      capturedWhere?.NOT?.some(
+        (clause: any) => clause?.metadata === PRISMA_DB_NULL,
+      ),
+    )
+  }
 
   assert.ok(capturedOrderUpdate)
   assert.equal(capturedOrderUpdate.where.id, 'order-123')
@@ -145,9 +180,20 @@ test('cleanupReversalMetadata sanitizes primitive reversal metadata values', asy
   assert.deepEqual(summary.failed, [])
   assert.equal(summary.dryRun, false)
 
-  assert.ok(Array.isArray(capturedWhere?.metadata?.notIn))
-  assert.ok(capturedWhere?.metadata?.notIn?.includes(null))
-  assert.equal(capturedWhere?.metadata?.notIn?.includes(true), false)
+  assert.ok(Array.isArray(capturedWhere?.NOT))
+  assert.ok(
+    capturedWhere?.NOT?.some(
+      (clause: any) =>
+        clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === null,
+    ),
+  )
+  assert.equal(
+    capturedWhere?.NOT?.some(
+      (clause: any) =>
+        clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === true,
+    ),
+    false,
+  )
 
   assert.ok(capturedOrderUpdate)
   assert.equal(capturedOrderUpdate.where.id, 'order-primitive')

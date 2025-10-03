@@ -586,9 +586,13 @@ test('preview cleanup reversal metadata returns affected order ids without persi
   assert.deepEqual(res.body.updatedOrderIds, ['order-1', 'order-2'])
   assert.equal(orderUpdateCalls, 0)
   assert.deepEqual(capturedWhere.subMerchantId, 'sub-1')
-  assert.deepEqual(capturedWhere.metadata?.path, ['reversal'])
-  assert.ok(Array.isArray(capturedWhere.metadata?.notIn))
-  assert.ok(capturedWhere.metadata?.notIn?.includes(null))
+  assert.ok(Array.isArray(capturedWhere.NOT))
+  assert.ok(
+    capturedWhere.NOT?.some(
+      (clause: any) =>
+        clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === null,
+    ),
+  )
   })
 
 test('cleanup reversal metadata resets loanedAt and logs admin action', async () => {
