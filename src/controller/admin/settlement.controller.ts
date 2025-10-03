@@ -1,6 +1,6 @@
 import { Response } from 'express'
 import { z } from 'zod'
-import { fromZonedTime, utcToZonedTime } from 'date-fns-tz'
+import { fromZonedTime, toZonedTime } from 'date-fns-tz'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../core/prisma'
 import {
@@ -205,7 +205,7 @@ const buildOrderWhere = (filters: ManualSettlementFilters): Prisma.OrderWhereInp
 }
 
 const isWithinDayHour = (date: Date, filters: ManualSettlementFilters) => {
-  const local = utcToZonedTime(date, filters.timezone)
+  const local = toZonedTime(date, filters.timezone)
   const day = local.getDay()
   if (!filters.daysOfWeek.includes(day)) {
     return false
@@ -313,7 +313,7 @@ const buildSettlementPreview = async (
       totalNetAmount += net
 
       if (sample.length < PREVIEW_SAMPLE_LIMIT) {
-        const local = utcToZonedTime(order.createdAt, filters.timezone)
+        const local = toZonedTime(order.createdAt, filters.timezone)
         sample.push({
           id: order.id,
           partnerClientId: order.partnerClientId ?? null,

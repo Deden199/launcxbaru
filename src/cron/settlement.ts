@@ -3,7 +3,7 @@ import axios from 'axios'
 import https from 'https'
 import os from 'os'
 import pLimit from 'p-limit'
-import { utcToZonedTime } from 'date-fns-tz'
+import { toZonedTime } from 'date-fns-tz'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../core/prisma'
 import { config } from '../config'
@@ -135,7 +135,7 @@ const ensureSortedCursor = (orders: { createdAt: Date; id: string }[]): Cursor =
 }
 
 const isWithinDayHour = (date: Date, filters: ManualSettlementFilters) => {
-  const local = utcToZonedTime(date, filters.timezone)
+  const local = toZonedTime(date, filters.timezone)
   const day = local.getDay()
   if (!filters.daysOfWeek.includes(day)) {
     return false
