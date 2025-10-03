@@ -35,6 +35,25 @@ require.cache[prismaPath] = {
 
 const { cleanupReversalMetadata } = require('../scripts/cleanupReversalMetadata')
 
+function assertMetadataFiltersAreStructured(where: any) {
+  const filters = Array.isArray(where?.NOT)
+    ? where.NOT.filter(
+        (clause: any) => clause && Object.prototype.hasOwnProperty.call(clause, 'metadata'),
+      )
+    : []
+
+  for (const clause of filters) {
+    const metadataFilter = clause.metadata
+    assert.ok(metadataFilter && typeof metadataFilter === 'object')
+    assert.ok(Object.keys(metadataFilter).length > 0)
+    assert.ok(
+      'equals' in metadataFilter ||
+        'path' in metadataFilter ||
+        'not' in metadataFilter,
+    )
+  }
+}
+
 test('cleanupReversalMetadata removes reversal metadata without touching other fields', async () => {
   let capturedWhere: any = null
   let capturedOrderUpdate: any = null
@@ -96,9 +115,10 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
 
   assert.ok(capturedWhere)
   assert.ok(Array.isArray(capturedWhere?.NOT))
+  assertMetadataFiltersAreStructured(capturedWhere)
   assert.ok(
     capturedWhere?.NOT?.some(
-      (clause: any) => clause?.metadata === null,
+      (clause: any) => clause?.metadata?.equals === null,
     ),
   )
   assert.ok(
@@ -111,7 +131,14 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
   if (PRISMA_JSON_NULL !== undefined) {
     assert.ok(
       capturedWhere?.NOT?.some(
-        (clause: any) => clause?.metadata === PRISMA_JSON_NULL,
+        (clause: any) => clause?.metadata?.equals === PRISMA_JSON_NULL,
+      ),
+    )
+    assert.ok(
+      capturedWhere?.NOT?.some(
+        (clause: any) =>
+          clause?.metadata?.path?.[0] === 'reversal' &&
+          clause?.metadata?.equals === PRISMA_JSON_NULL,
       ),
     )
   }
@@ -119,10 +146,23 @@ test('cleanupReversalMetadata removes reversal metadata without touching other f
   if (PRISMA_DB_NULL !== undefined) {
     assert.ok(
       capturedWhere?.NOT?.some(
-        (clause: any) => clause?.metadata === PRISMA_DB_NULL,
+        (clause: any) => clause?.metadata?.equals === PRISMA_DB_NULL,
+      ),
+    )
+    assert.ok(
+      capturedWhere?.NOT?.some(
+        (clause: any) =>
+          clause?.metadata?.path?.[0] === 'reversal' &&
+          clause?.metadata?.equals === PRISMA_DB_NULL,
       ),
     )
   }
+
+  const jsonNullValue = PRISMA_JSON_NULL ?? null
+  assert.deepEqual(capturedWhere?.metadata, {
+    path: ['reversal'],
+    not: jsonNullValue,
+  })
 
   assert.ok(capturedOrderUpdate)
   assert.equal(capturedOrderUpdate.where.id, 'order-123')
@@ -181,12 +221,18 @@ test('cleanupReversalMetadata sanitizes primitive reversal metadata values', asy
   assert.equal(summary.dryRun, false)
 
   assert.ok(Array.isArray(capturedWhere?.NOT))
+  assertMetadataFiltersAreStructured(capturedWhere)
   assert.ok(
     capturedWhere?.NOT?.some(
       (clause: any) =>
         clause?.metadata?.path?.[0] === 'reversal' && clause?.metadata?.equals === null,
     ),
   )
+  const primitiveJsonNullValue = PRISMA_JSON_NULL ?? null
+  assert.deepEqual(capturedWhere?.metadata, {
+    path: ['reversal'],
+    not: primitiveJsonNullValue,
+  })
   assert.equal(
     capturedWhere?.NOT?.some(
       (clause: any) =>
