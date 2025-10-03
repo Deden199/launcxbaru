@@ -3,16 +3,12 @@ import assert from 'node:assert/strict'
 import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { JSDOM } from 'jsdom'
+import Module from 'node:module'
+import path from 'node:path'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 
-import {
-  SettlementAdjustJobControl,
-  type SettlementAdjustJobControlProps,
-  toWibExclusiveEnd,
-  toWibStart,
-} from '../pages/admin/settlement-adjust'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -87,8 +83,37 @@ function createApiMock() {
 
 const apiMock = createApiMock()
 
+const moduleAliasRoot = path.resolve(__dirname, '..')
+const moduleConstructor = Module as any
+if (!moduleConstructor.__cleanupAliasPatched) {
+  const originalResolve = moduleConstructor._resolveFilename.bind(moduleConstructor)
+  moduleConstructor._resolveFilename = function (request: string, parent, isMain, options) {
+    if (request.startsWith('@/')) {
+      const mapped = path.resolve(moduleAliasRoot, request.slice(2))
+      return originalResolve(mapped, parent, isMain, options)
+    }
+    if (request.endsWith('.css')) {
+      const mapped = path.resolve(__dirname, 'styleMock.ts')
+      return originalResolve(mapped, parent, isMain, options)
+    }
+    return originalResolve(request, parent, isMain, options)
+  }
+  moduleConstructor.__cleanupAliasPatched = true
+}
+
+const settlementAdjustModule = require('../pages/admin/settlement-adjust') as typeof import('../pages/admin/settlement-adjust')
+const {
+  SettlementAdjustJobControl,
+  ReversalCleanupPanel,
+  toWibExclusiveEnd,
+  toWibStart,
+} = settlementAdjustModule
+type SettlementAdjustJobControlProps = import('../pages/admin/settlement-adjust').SettlementAdjustJobControlProps
+
 const ADJUST_JOB_PATH = '/admin/settlement/adjust/job'
 const ADJUST_STATUS_PREFIX = '/admin/settlement/adjust/status/'
+const CLEANUP_PREVIEW_PATH = '/admin/settlement/cleanup-reversal/preview'
+const CLEANUP_EXECUTE_PATH = '/admin/settlement/cleanup-reversal'
 
 const defaultProps: Pick<SettlementAdjustJobControlProps, 'apiClient'> = {
   apiClient: apiMock as unknown as SettlementAdjustJobControlProps['apiClient'],
@@ -163,4 +188,87 @@ test('starts settlement adjust job and displays completion summary', async () =>
   assert.equal(apiMock.postCalls.length, 1)
   assert.equal(apiMock.getCalls.length > 0, true)
   assert.equal(apiMock.getCalls[0][0], `${ADJUST_STATUS_PREFIX}job-123`)
+})
+
+test('reversal cleanup panel previews and executes cleanup workflow', async () => {
+  const defaultRange: [Date, Date] = [
+    new Date('2024-05-01T00:00:00Z'),
+    new Date('2024-05-03T00:00:00Z'),
+  ]
+  const toasts: any[] = []
+  let capturedPreviewParams: any = null
+  let capturedCleanupPayload: any = null
+
+  apiMock.setGetImplementation(async (url: string, config: any) => {
+    if (url === CLEANUP_PREVIEW_PATH) {
+      capturedPreviewParams = config?.params
+      return {
+        data: {
+          total: 2,
+          cleaned: 2,
+          failed: [],
+          updatedOrderIds: ['order-preview-1', 'order-preview-2'],
+          dryRun: true,
+        },
+      }
+    }
+    throw new Error(`Unhandled GET ${url}`)
+  })
+
+  apiMock.setPostImplementation(async (url: string, payload: any) => {
+    if (url === CLEANUP_EXECUTE_PATH) {
+      capturedCleanupPayload = payload
+      return {
+        data: {
+          total: 2,
+          cleaned: 1,
+          failed: [{ orderId: 'order-failed', message: 'cannot update' }],
+          updatedOrderIds: ['order-final-1'],
+          dryRun: false,
+        },
+      }
+    }
+    throw new Error(`Unhandled POST ${url}`)
+  })
+
+  const { getByLabelText, getByRole, findByText, queryByText } = render(
+    <ReversalCleanupPanel
+      subMerchants={[{ id: 'sub-1', name: 'Sub One' }]}
+      loadingSubMerchants={false}
+      subMerchantError=""
+      defaultRange={defaultRange}
+      isAdmin={true}
+      onToast={toast => toasts.push(toast)}
+      apiClient={apiMock as unknown as SettlementAdjustJobControlProps['apiClient']}
+    />,
+  )
+
+  fireEvent.change(getByLabelText('Sub-merchant (opsional)'), { target: { value: 'sub-1' } })
+
+  fireEvent.click(getByRole('button', { name: 'Preview cleanup' }))
+
+  await findByText('order-preview-1')
+  assert.equal(apiMock.getCalls.length, 1)
+  assert.equal(apiMock.getCalls[0][0], CLEANUP_PREVIEW_PATH)
+  assert.ok(capturedPreviewParams)
+  assert.equal(capturedPreviewParams.startDate, '2024-05-01')
+  assert.equal(capturedPreviewParams.endDate, '2024-05-03')
+  assert.equal(capturedPreviewParams.subMerchantId, 'sub-1')
+
+  fireEvent.click(getByRole('button', { name: 'Jalankan cleanup' }))
+
+  await findByText('order-final-1')
+  await findByText('order-failed')
+  assert.equal(apiMock.postCalls.length, 1)
+  assert.equal(apiMock.postCalls[0][0], CLEANUP_EXECUTE_PATH)
+  assert.deepEqual(capturedCleanupPayload, {
+    startDate: '2024-05-01',
+    endDate: '2024-05-03',
+    subMerchantId: 'sub-1',
+  })
+
+  assert.equal(queryByText('Ini hanya preview, tidak ada perubahan yang disimpan.'), null)
+  assert.equal(toasts.length >= 2, true)
+  assert.equal(toasts[0]?.type, 'success')
+  assert.equal(toasts[1]?.type, 'success')
 })

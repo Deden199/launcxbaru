@@ -6,6 +6,7 @@ import {
   applySettlementAdjustments,
   runSettlementAdjustmentJob,
 } from '../../service/settlementAdjustmentJob'
+import { cleanupReversalMetadata } from '../../service/loanSettlement'
 import {
   getSettlementAdjustmentJob,
   startSettlementAdjustmentWorker,
@@ -331,6 +332,80 @@ export async function adjustSettlements(req: AuthRequest, res: Response) {
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'internal error' })
+  }
+}
+
+const extractCleanupParams = (source: Record<string, unknown>) => {
+  const startRaw = typeof source.startDate === 'string' ? source.startDate.trim() : ''
+  const endRaw = typeof source.endDate === 'string' ? source.endDate.trim() : ''
+  const subMerchantRaw =
+    typeof source.subMerchantId === 'string' ? source.subMerchantId.trim() : undefined
+
+  if (!startRaw || !endRaw) {
+    return { error: 'startDate and endDate are required' }
+  }
+
+  return {
+    startDate: startRaw,
+    endDate: endRaw,
+    subMerchantId: subMerchantRaw || undefined,
+  }
+}
+
+const handleCleanupError = (label: string, error: unknown, res: Response) => {
+  if (error instanceof Error) {
+    if (error.message.includes('Invalid startDate') || error.message.includes('Invalid endDate')) {
+      return res.status(400).json({ error: error.message })
+    }
+    if (error.message.includes('startDate must be before or equal to endDate')) {
+      return res.status(400).json({ error: error.message })
+    }
+  }
+  console.error(`[${label}]`, error)
+  return res.status(500).json({ error: 'internal error' })
+}
+
+export async function previewCleanupReversalMetadata(req: AuthRequest, res: Response) {
+  const params = extractCleanupParams(req.query as Record<string, unknown>)
+  if ('error' in params) {
+    return res.status(400).json({ error: params.error })
+  }
+
+  try {
+    const result = await cleanupReversalMetadata({
+      ...params,
+      dryRun: true,
+    })
+    return res.json(result)
+  } catch (err) {
+    return handleCleanupError('previewCleanupReversalMetadata', err, res)
+  }
+}
+
+export async function cleanupReversalMetadataHandler(req: AuthRequest, res: Response) {
+  const params = extractCleanupParams(req.body ?? {})
+  if ('error' in params) {
+    return res.status(400).json({ error: params.error })
+  }
+
+  try {
+    const result = await cleanupReversalMetadata({
+      ...params,
+      dryRun: false,
+    })
+
+    if (req.userId) {
+      await logAdminAction(req.userId, 'cleanupReversalMetadata', undefined, {
+        ...result,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        subMerchantId: params.subMerchantId,
+      })
+    }
+
+    return res.json(result)
+  } catch (err) {
+    return handleCleanupError('cleanupReversalMetadataHandler', err, res)
   }
 }
 
